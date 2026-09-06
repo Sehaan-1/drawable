@@ -1,8 +1,18 @@
 # linescout-ml
 
-Dataset manifest schema, taxonomy, and validation for LineScout. Ingestion,
-filtering, training, index construction, and evaluation are added in later
-milestones; Milestone 1 ships only the shared contract.
+Dataset manifest schema, taxonomy, and validation for LineScout, plus the
+Milestone 2 ingestion pipeline that fills a gallery from raw source artwork.
+Training, index construction, and evaluation arrive in later milestones.
+
+Two halves live here:
+
+* **`linescout_ml/`** — the manifest contract (`manifest.py`, `taxonomy.py`), the
+  deterministic fixture generator, the `linescout-manifest` CLI, and
+  **`linescout_ml/colab/`**: the ingestion pipeline (line-art extraction,
+  measurement, pHash de-duplication, zero-shot labelling, feature embedding,
+  manifest assembly, export).
+* **`colab/`** — the Google Colab notebook that drives that pipeline on a free
+  GPU runtime. See [`colab/README.md`](colab/README.md).
 
 ```bash
 cd ml
@@ -18,9 +28,17 @@ uv pip install -e ".[dev]"
 # Regenerate the committed synthetic fixture (deterministic; safe to commit)
 .venv/bin/linescout-manifest synth --out fixtures/synthetic --count 24 --seed 7
 
-# Checks
-.venv/bin/ruff check . && .venv/bin/mypy linescout_ml && .venv/bin/pytest
+# Checks (what CI runs)
+.venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy linescout_ml && .venv/bin/pytest -q
+
+# Run the pipeline headless instead of in Colab (pulls in torch + the model stack)
+uv pip install -e ".[gpu]"
 ```
 
+The `dev` extra is enough for everything CI does: the pipeline's CPU stages need
+only `numpy` and `pillow`, and the GPU stages keep their imports lazy so a fresh
+clone never has to install torch to validate a manifest.
+
 `fixtures/synthetic/` is the only dataset committed to Git. Real datasets live
-under `data/` (ignored) and are never redistributed.
+under `data/` (ignored) and are never redistributed — the Colab notebook writes
+its output to Drive, and section 13 of it explains how to land a gallery locally.

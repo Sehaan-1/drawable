@@ -62,7 +62,8 @@ that boots the API against the committed fixture gallery.
 ```
 apps/web/            React 19 + Vite canvas, reference panel, curation & benchmark shells
 services/api/        FastAPI worker: health, search, events, preferences, assets, curation (gated)
-ml/                  Taxonomy, manifest schema + validator, synthetic fixture generator
+ml/                  Taxonomy, manifest schema + validator, fixture generator, ingestion pipeline
+ml/colab/            Google Colab notebook that runs that pipeline on a free GPU runtime
 packages/contracts/  TypeScript types generated from the API's OpenAPI document
 scripts/             setup, checks, contract export, smoke test, dev runner
 data/                Local datasets, indexes, models, SQLite — never committed
@@ -88,6 +89,15 @@ Real sources (Quick, Draw!, Amateur Drawings, Human-Art, Manga109, eBDtheque,
 Safebooru, Smithsonian/Met Open Access) are downloaded into `data/` in
 Milestone 2 under their own terms — several require an access application,
 so start those early.
+
+Ingestion runs in Google Colab on a free T4/A100 runtime, so no GPU is needed at
+home: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sehaan-1/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
+It reads a Drive folder of raw artwork and writes a validated gallery
+(`originals/`, `line_art/`, `thumbnails/`, `manifest.json`) plus MobileCLIP2 and
+DINOv2 feature shards, which you unzip into `data/` and point the API at. Every
+stage is resumable, labels are written as provisional for the curation UI to
+correct, and the notebook refuses to run with a placeholder dataset licence.
+Details in [`ml/colab/README.md`](ml/colab/README.md).
 
 ## Roadmap
 
