@@ -12,10 +12,31 @@ dependencies = [
 linescout-manifest = "linescout_ml.cli:main"
 
 [project.optional-dependencies]
+# The Colab GPU pipeline (linescout_ml.colab) needs image and array libraries,
+# but the manifest schema and taxonomy stay pydantic-only so a fresh clone can
+# validate a manifest without pulling in half of PyPI.
+pipeline = [
+    "numpy>=1.26",
+    "pillow>=10.4",
+]
+# Everything the Colab notebook installs on a GPU runtime. torch/torchvision are
+# listed for completeness — Colab already ships a CUDA build, and the notebook
+# deliberately does not reinstall them.
+gpu = [
+    "linescout-ml[pipeline]",
+    "torch>=2.4",
+    "torchvision>=0.19",
+    "controlnet-aux>=0.0.9",
+    "open-clip-torch>=3.1",
+    "timm>=1.0",
+    "opennsfw2>=0.16",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.6",
     "mypy>=1.11",
+    "numpy>=1.26",
+    "pillow>=10.4",
 ]
 
 [build-system]
@@ -36,6 +57,19 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N", "W"]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+
+# The GPU stack is optional and is imported lazily, so CI type-checks without it.
+[[tool.mypy.overrides]]
+module = [
+    "PIL.*",
+    "numpy.*",
+    "torch.*",
+    "open_clip.*",
+    "controlnet_aux.*",
+    "opennsfw2.*",
+    "google.colab.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
