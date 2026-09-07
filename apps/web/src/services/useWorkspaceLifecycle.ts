@@ -164,7 +164,13 @@ export function useWorkspaceLifecycle() {
         if (!current.drawing && current.generation === response.generation && currentDocument.revision === response.revision) setResponse(response)
       }).catch((error: unknown) => {
         if (error instanceof DOMException && error.name === 'AbortError') return
+        const current = useSearchStore.getState()
+        const currentDocument = useDocumentStore.getState().document
+        if (current.generation !== requestGeneration || currentDocument.revision !== requestRevision) return
         setError(error instanceof Error ? error.message : 'Reference search failed.')
+      }).finally(() => {
+        const current = useSearchStore.getState()
+        if (current.generation === requestGeneration) setLoading(false)
       })
     }, 350)
     return () => {

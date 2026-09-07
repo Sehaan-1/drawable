@@ -52,9 +52,9 @@ class SplitFractions(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     train: Annotated[float, Field(ge=0.0, le=1.0)] = 0.70
-    validation: Annotated[float, Field(ge=0.0, le=1.0)] = 0.10
-    test: Annotated[float, Field(ge=0.0, le=1.0)] = 0.10
-    gallery_only: Annotated[float, Field(ge=0.0, le=1.0)] = 0.10
+    validation: Annotated[float, Field(ge=0.0, le=1.0)] = 0.15
+    test: Annotated[float, Field(ge=0.0, le=1.0)] = 0.15
+    gallery_only: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
 
     @model_validator(mode="after")
     def _sums_to_one(self) -> Self:

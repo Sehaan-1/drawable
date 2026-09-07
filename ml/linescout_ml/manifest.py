@@ -105,7 +105,9 @@ class ManifestRecord(BaseModel):
     # Labels
     primary_style: PrimaryStyle
     scopes: list[ScopeLabel] = Field(min_length=1)
-    person_count: int = Field(ge=0, le=50)
+    #: ``None`` for non-human sketches (still-life doodles, objects) where a
+    #: person count is not meaningful. ``multi_character`` still requires >= 2.
+    person_count: int | None = Field(default=None, ge=0, le=50)
     sfw: SfwDecision
 
     # Geometry
@@ -126,7 +128,9 @@ class ManifestRecord(BaseModel):
 
     # Pipeline
     pipeline_version: Annotated[str, StringConstraints(min_length=1, max_length=32)]
-    checksum: Sha256
+    source_checksum: Sha256
+    line_art_checksum: Sha256
+    thumbnail_checksum: Sha256
 
     @field_validator("original_path", "line_art_path", "thumbnail_path")
     @classmethod
@@ -163,11 +167,13 @@ class ManifestRecord(BaseModel):
             if not self.sfw.safe:
                 msg = "enabled assets must have an SFW decision of safe=true"
                 raise ValueError(msg)
-            if self.review.state in (ReviewState.REJECTED, ReviewState.QUARANTINED):
+            if self.review.state is not ReviewState.ACCEPTED:
                 msg = f"enabled assets cannot be {self.review.state.value}"
                 raise ValueError(msg)
 
-        if ScopeLabel.MULTI_CHARACTER in self.scopes and self.person_count < 2:
+        if ScopeLabel.MULTI_CHARACTER in self.scopes and (
+            self.person_count is None or self.person_count < 2
+        ):
             msg = "multi_character assets must have person_count >= 2"
             raise ValueError(msg)
 

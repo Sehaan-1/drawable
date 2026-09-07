@@ -13,6 +13,10 @@ describe('fixture reference search', () => {
     expect(provisional.mode).toBe('provisional')
     expect(confident.mode).toBe('confident')
     expect(confident.groups[0]?.title).toBe('Best match')
+    const assets = confident.groups.flatMap((group) => group.results)
+    expect(assets.some((asset) => asset.traceAllowed)).toBe(true)
+    expect(assets.some((asset) => !asset.traceAllowed)).toBe(true)
+    expect(assets.every((asset) => asset.traceAllowed === asset.native)).toBe(true)
   })
 
   it('honors request cancellation', async () => {

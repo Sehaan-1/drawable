@@ -29,9 +29,8 @@ function makeWrapper(): ({ children }: { children: ReactNode }) => JSX.Element {
 }
 
 beforeEach(() => {
-  // Pretend the service registry has already probed the API and the API is
-  // live with curation enabled. This is the only configuration the page
-  // actually renders against.
+  // Default to a live API with curation enabled. Individual tests override
+  // this (fixture mode, curation off).
   useServiceStore.setState({
     mode: 'live',
     health: {
@@ -172,6 +171,18 @@ describe('CuratePage', () => {
     await waitFor(() => expect(screen.getByText(/queue empty/i)).toBeInTheDocument())
   })
 
+  it('renders a fixture candidate when the API is offline', async () => {
+    useServiceStore.setState({
+      mode: 'fixture',
+      health: { mode: 'fixture', ready: true, message: 'Procedural references · no backend required' },
+    })
+    const CuratePage = (await import('./CuratePage')).default
+    render(<CuratePage />, { wrapper: makeWrapper() })
+    expect(await screen.findByText('Candidate metadata')).toBeInTheDocument()
+    expect(screen.queryByText(/Start the local API to curate/i)).toBeNull()
+    expect(screen.getByTestId('inspector-asset-id').textContent).toBe('fixture-curate-01')
+  })
+
   it('disables the page when curation is off and the API is live', async () => {
     useServiceStore.setState({
       mode: 'live',
@@ -257,7 +268,12 @@ describe('CuratePage', () => {
     fireEvent.keyDown(window, { key: '3' })
     fireEvent.keyDown(window, { key: 'k' })
     await waitFor(() => expect(labelPayload).toBeTruthy())
-    expect(labelPayload).toMatchObject({ asset_id: 'ls_shortcut', decision: 'keep', quality: 3 })
+    expect(labelPayload).toMatchObject({
+      asset_id: 'ls_shortcut',
+      expected_review_state: 'unreviewed',
+      decision: 'keep',
+      quality: 3,
+    })
   })
 
   it('submits a label on the R keyboard shortcut', async () => {
@@ -459,6 +475,54 @@ describe('CuratePage', () => {
     // Press a quality key and the pulse appears.
     fireEvent.keyDown(window, { key: '2' })
     expect(await screen.findByTestId('kbd-hud-last')).toHaveTextContent('2')
+  })
+
+  it('restores the previous candidate from history', async () => {
+    let nextCount = 0
+    const candidate = (assetId: string) => ({
+      asset_id: assetId,
+      primary_style: 'manga_anime',
+      scopes: ['eye'],
+      width: 256,
+      height: 256,
+      thumbnail_url: `/api/v1/curation/assets/${assetId}/thumbnail`,
+      line_art_url: `/api/v1/curation/assets/${assetId}/line-art`,
+      origin: 'native_line_art',
+      crop: null,
+      review_state: 'unreviewed',
+      quality_score: 0.85,
+      sfw_safe: true,
+      sfw_confidence: 0.99,
+      source_work_id: 'synthetic-work-000',
+    })
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/curation/next')) {
+        const id = nextCount === 0 ? 'ls_first' : 'ls_second'
+        nextCount += 1
+        return Promise.resolve(mockJsonResponse(candidate(id)))
+      }
+      if (url.includes('/curation/progress')) {
+        return Promise.resolve(
+          mockJsonResponse({
+            reviewed: 0,
+            accepted: 0,
+            rejected: 0,
+            remaining: 2000,
+            target: 2000,
+            by_style: {},
+            by_scope: {},
+          }),
+        )
+      }
+      return Promise.reject(new Error('unexpected URL ' + url))
+    }) as unknown as typeof fetch
+    const CuratePage = (await import('./CuratePage')).default
+    render(<CuratePage />, { wrapper: makeWrapper() })
+    await waitFor(() => expect(screen.getByTestId('inspector-asset-id').textContent).toBe('ls_first'))
+    fireEvent.click(screen.getByTestId('next-candidate'))
+    await waitFor(() => expect(screen.getByTestId('inspector-asset-id').textContent).toBe('ls_second'))
+    fireEvent.click(screen.getByTestId('prev-candidate'))
+    await waitFor(() => expect(screen.getByTestId('inspector-asset-id').textContent).toBe('ls_first'))
   })
 
   it('shows a toast when K is pressed without a quality', async () => {

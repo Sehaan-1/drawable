@@ -41,6 +41,8 @@ def test_curation_routes_present_with_curation_mode(tmp_path: Path) -> None:
         }
         assert set(body["by_scope"]) == {
             "eye",
+            "eyebrow",
+            "mouth",
             "face_head",
             "hair",
             "hand",

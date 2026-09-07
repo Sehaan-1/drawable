@@ -39,7 +39,7 @@ export const fixtureAssets: ReferenceAsset[] = Array.from({ length: 30 }, (_, in
     source: 'drawable procedural fixture',
     native: index % 3 !== 0,
     match: index % 4 === 0 ? 'Strong' : index % 3 === 0 ? 'Related' : 'Close',
-    traceAllowed: true,
+    traceAllowed: index % 3 !== 0,
   }
 })
 

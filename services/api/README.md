@@ -5,8 +5,7 @@ is serialised behind a single-request semaphore.
 
 ```bash
 cd services/api
-uv venv --python 3.11 .venv
-uv pip install -e ".[dev]"           # light deps only; add ",gpu" for torch later
+uv sync --frozen --extra dev --python 3.11   # lockfile-pinned; add --extra gpu for torch later
 
 # Run against the synthetic gallery (no models, deterministic fixture results)
 .venv/bin/python -m linescout_api.main      # synthetic gallery by default
@@ -26,7 +25,7 @@ or a `.env` file here. Relative paths resolve from the repository root.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `LINESCOUT_HOST` / `LINESCOUT_PORT` | `0.0.0.0` / `8000` | |
+| `LINESCOUT_HOST` / `LINESCOUT_PORT` | `127.0.0.1` / `8000` | Loopback only; never `0.0.0.0` |
 | `LINESCOUT_DEVICE` | `auto` | `auto`, `cuda` (fail if missing), `cpu` |
 | `LINESCOUT_FIXTURE_MODE` | `true` | Deterministic ranker until models exist |
 | `LINESCOUT_GALLERY_MANIFEST` | unset | Path to a validated `manifest.json` |

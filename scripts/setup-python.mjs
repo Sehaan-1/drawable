@@ -85,24 +85,14 @@ async function ensureUv() {
 async function setupWorkspace(uv, workspace) {
   console.log(`\n==> ${workspace.name}`)
   const packageAbs = resolve(root, workspace.packageDir)
-  const venvDir = join(packageAbs, '.venv')
-  if (!venvPython(workspace.packageDir)) {
-    await run(uv, ['venv', '--python', '3.11', venvDir, '--quiet'], { cwd: packageAbs })
-  } else {
-    console.log('    .venv already exists; skipping venv creation')
-  }
-  // ``uv pip install`` needs the Python interpreter's venv directory, not
-  // the path to the ``python3`` symlink — passing the symlink confuses
-  // recent uv releases. Point ``--python`` at the resolved binary instead
-  // and run from the package directory so the editable install finds the
-  // ``pyproject.toml``.
-  const py = venvPython(workspace.packageDir)
-  if (!py) {
-    throw new Error(`failed to locate python in ${workspace.packageDir}/.venv`)
-  }
-  await run(uv, ['pip', 'install', '--python', py, '--quiet', '-e', '.[dev]'], {
+  // Pin to the committed lockfile so CI and local setups resolve the same
+  // versions. ``uv sync --frozen`` fails if pyproject.toml drifted from uv.lock.
+  await run(uv, ['sync', '--frozen', '--extra', 'dev', '--python', '3.11'], {
     cwd: packageAbs,
   })
+  if (!venvPython(workspace.packageDir)) {
+    throw new Error(`failed to locate python in ${workspace.packageDir}/.venv`)
+  }
 }
 
 async function main() {

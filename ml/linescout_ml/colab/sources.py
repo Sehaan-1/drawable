@@ -21,7 +21,7 @@ import os
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -58,7 +58,7 @@ class AssetLabels(BaseModel):
 
     primary_style: PrimaryStyle
     scopes: list[ScopeLabel] = Field(min_length=1)
-    person_count: int = Field(ge=0, le=50)
+    person_count: int | None = Field(default=None, ge=0, le=50)
     sfw: SfwDecision
     #: ``zero_shot`` when a CLIP text encoder ranked the labels, otherwise the
     #: source defaults were used and curation must confirm them.
@@ -72,7 +72,9 @@ class AssetLabels(BaseModel):
         if bad:
             msg = f"assets cannot carry query-only scopes: {bad}"
             raise ValueError(msg)
-        if ScopeLabel.MULTI_CHARACTER in self.scopes and self.person_count < 2:
+        if ScopeLabel.MULTI_CHARACTER in self.scopes and (
+            self.person_count is None or self.person_count < 2
+        ):
             msg = "multi_character assets must have person_count >= 2"
             raise ValueError(msg)
         return self
@@ -97,10 +99,22 @@ class Candidate(BaseModel):
     width: int | None = None
     height: int | None = None
     crop: CropBox | None = None
+    original_path: str | None = None
     line_art_path: str | None = None
     extraction_model: str | None = None
     extraction_version: str | None = None
-    checksum: str | None = None
+    source_checksum: str | None = None
+    line_art_checksum: str | None = None
+    thumbnail_checksum: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_checksum(cls, data: Any) -> Any:
+        """Accept older candidate rows that stored a single ``checksum``."""
+        if isinstance(data, dict) and "checksum" in data and "line_art_checksum" not in data:
+            data = dict(data)
+            data["line_art_checksum"] = data.pop("checksum")
+        return data
 
     # Filled by the measure / label stages
     measurements: Measurements | None = None
@@ -276,10 +290,13 @@ class CandidateStore:
                         "width": existing.width,
                         "height": existing.height,
                         "crop": existing.crop,
+                        "original_path": existing.original_path,
                         "line_art_path": existing.line_art_path,
                         "extraction_model": existing.extraction_model,
                         "extraction_version": existing.extraction_version,
-                        "checksum": existing.checksum,
+                        "source_checksum": existing.source_checksum,
+                        "line_art_checksum": existing.line_art_checksum,
+                        "thumbnail_checksum": existing.thumbnail_checksum,
                         "measurements": existing.measurements,
                         "labels": existing.labels,
                         "duplicate_of": existing.duplicate_of,

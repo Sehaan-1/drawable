@@ -7,12 +7,13 @@ verbatim so the generated TypeScript matches the document the team reviews.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
 from linescout_ml.taxonomy import LineArtOrigin, PrimaryStyle, ScopeLabel
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Re-exported so the OpenAPI schema names them once and the TS contracts pick
 # them up as string-literal unions.
@@ -64,6 +65,11 @@ class ErrorDetail(ApiModel):
 
 
 class ErrorResponse(ApiModel):
+    """Structured error envelope required on every failure path."""
+
+    schema_version: Literal[1] = 1
+    request_id: UUID
+    retryable: bool
     error: ErrorDetail
 
 
@@ -75,6 +81,10 @@ class ModelVersion(ApiModel):
     version: str
     loaded: bool
     device: str | None = None
+
+
+class ReadyResponse(ApiModel):
+    ready: Literal[True] = True
 
 
 class HealthResponse(ApiModel):
@@ -113,6 +123,10 @@ class SearchResult(ApiModel):
     style: PrimaryStyle
     scopes: list[ScopeLabel]
     origin: LineArtOrigin
+    trace_allowed: bool = Field(
+        description="Whether this asset may be placed on the trace layer. "
+        "Native line art is allowed; extracted line art is not."
+    )
     relevance: float = Field(ge=0.0, le=1.0, description="Calibrated relevance probability.")
     quality: float = Field(ge=0.0, le=1.0)
     asset_url: str = Field(description="Trace-compatible full asset URL.")
@@ -152,6 +166,13 @@ class StrokePoint(ApiModel):
     p: float = Field(ge=0.0, le=1.0, description="Normalized pressure.")
     t: float = Field(description="Milliseconds since the stroke sequence started.")
 
+    @field_validator("x", "y", "p", "t")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("Coordinates must be finite numbers")
+        return value
+
 
 class Stroke(ApiModel):
     tool: Literal["pressure", "monoline", "eraser"]
@@ -173,7 +194,9 @@ class EventRequest(ApiModel):
     session_id: UUID
     asset_id: str = Field(min_length=1, max_length=64)
     event: InteractionEvent
-    style: PrimaryStyle
+    style: PrimaryStyle = Field(
+        description="Client-reported style. Ignored; the gallery asset's primary style is stored."
+    )
     query_revision: int = Field(ge=0)
 
 

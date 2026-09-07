@@ -73,8 +73,9 @@ def curation_client(tmp_path: Path):
         state = client.app.state.linescout
         if state.gallery is not None:
             state.connection.execute(
-                "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL"
+                "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 0"
             )
+            state.assets = enabled_assets(state.connection)
         yield client
 
 
@@ -127,8 +128,8 @@ def test_next_returns_stratified_candidate(curation_client: TestClient) -> None:
     assert body["primary_style"] in {s.value for s in PrimaryStyle}
     assert body["review_state"] == "unreviewed"
     # The wire response must always expose the asset URLs the UI needs.
-    assert body["thumbnail_url"].startswith("/api/v1/assets/")
-    assert body["line_art_url"].startswith("/api/v1/assets/")
+    assert body["thumbnail_url"].startswith("/api/v1/curation/assets/")
+    assert body["line_art_url"].startswith("/api/v1/curation/assets/")
     assert body["line_art_url"].endswith("/line-art")
 
 
@@ -222,11 +223,38 @@ def test_next_404_without_gallery(tmp_path: Path) -> None:
 def _label(asset_id: str, **overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "asset_id": asset_id,
+        "expected_review_state": "unreviewed",
         "decision": "keep",
         "quality": 3,
     }
     payload.update(overrides)
     return payload
+
+
+def test_label_keep_quality_one_stays_disabled(curation_client: TestClient) -> None:
+    first = curation_client.get("/api/v1/curation/next").json()
+    response = curation_client.post(
+        "/api/v1/curation/labels", json=_label(first["asset_id"], quality=1)
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["review_state"] == "accepted"
+    assert body["review_quality"] == 1
+    assert body["enabled"] is False
+    state = curation_client.app.state.linescout
+    enabled = {asset.asset_id for asset in enabled_assets(state.connection)}
+    assert first["asset_id"] not in enabled
+
+
+def test_curation_preview_serves_unreviewed_assets(curation_client: TestClient) -> None:
+    first = curation_client.get("/api/v1/curation/next").json()
+    public = curation_client.get(f"/api/v1/assets/{first['asset_id']}/thumbnail")
+    assert public.status_code == 404
+    preview = curation_client.get(first["thumbnail_url"])
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("image/png")
+    line = curation_client.get(first["line_art_url"])
+    assert line.status_code == 200
 
 
 def test_label_keep_dual_writes_and_enables_asset(curation_client: TestClient) -> None:
@@ -269,7 +297,12 @@ def test_label_reject_disables_asset_and_records(curation_client: TestClient) ->
 def test_label_quality_required_on_keep(curation_client: TestClient) -> None:
     first = curation_client.get("/api/v1/curation/next").json()
     response = curation_client.post(
-        "/api/v1/curation/labels", json={"asset_id": first["asset_id"], "decision": "keep"}
+        "/api/v1/curation/labels",
+        json={
+            "asset_id": first["asset_id"],
+            "expected_review_state": "unreviewed",
+            "decision": "keep",
+        },
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
@@ -291,6 +324,33 @@ def test_label_validates_duplicate_scopes(curation_client: TestClient) -> None:
         json=_label(first["asset_id"], scopes=["eye", "eye"]),
     )
     assert response.status_code == 422
+
+
+def test_label_conflict_when_review_state_changed(curation_client: TestClient) -> None:
+    first = curation_client.get("/api/v1/curation/next").json()
+    ok = curation_client.post("/api/v1/curation/labels", json=_label(first["asset_id"]))
+    assert ok.status_code == 201
+    response = curation_client.post("/api/v1/curation/labels", json=_label(first["asset_id"]))
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error"]["code"] == "review_conflict"
+    assert body["error"]["field"] == "expected_review_state"
+    assert body["retryable"] is False
+
+
+def test_label_crop_out_of_bounds_is_422(curation_client: TestClient) -> None:
+    first = curation_client.get("/api/v1/curation/next").json()
+    response = curation_client.post(
+        "/api/v1/curation/labels",
+        json=_label(
+            first["asset_id"],
+            crop={"x": 0, "y": 0, "width": first["width"] + 1, "height": 8},
+        ),
+    )
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == "crop_out_of_bounds"
+    assert body["error"]["field"] == "crop"
 
 
 def test_label_unknown_asset_404(curation_client: TestClient) -> None:
@@ -336,6 +396,11 @@ def test_label_updates_assets_metadata(curation_client: TestClient) -> None:
         "width": 8,
         "height": 8,
     }
+    scope_rows = state.connection.execute(
+        "SELECT scope FROM asset_scopes WHERE asset_id = ? ORDER BY scope",
+        (first["asset_id"],),
+    ).fetchall()
+    assert [row["scope"] for row in scope_rows] == ["full_body"]
 
     label_row = state.connection.execute(
         "SELECT malformed_anatomy, poor_extraction, note"
@@ -374,7 +439,10 @@ def test_snapshot_writes_json_file_and_marks_labels(
     body = response.json()
     assert body["snapshot_id"].startswith("curation_")
     assert body["label_count"] == 1
-    target = Path(body["path"])
+    assert not Path(body["path"]).is_absolute()
+    assert body["path"].startswith("snapshots/")
+    data_dir = Path(curation_client.app.state.linescout.settings.data_dir)
+    target = data_dir / body["path"]
     assert target.is_file()
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["snapshot_id"] == body["snapshot_id"]
@@ -389,7 +457,7 @@ def test_snapshot_writes_json_file_and_marks_labels(
     assert row["snapshot_id"] == body["snapshot_id"]
 
 
-def test_snapshot_includes_only_kept_labels(curation_client: TestClient) -> None:
+def test_snapshot_includes_keep_and_reject_labels(curation_client: TestClient) -> None:
     keep_id = curation_client.get("/api/v1/curation/next").json()["asset_id"]
     curation_client.post("/api/v1/curation/labels", json=_label(keep_id))
 
@@ -399,10 +467,26 @@ def test_snapshot_includes_only_kept_labels(curation_client: TestClient) -> None
     )
 
     body = curation_client.post("/api/v1/curation/snapshots").json()
-    assert body["label_count"] == 1
-    target = Path(body["path"])
-    payload = json.loads(target.read_text(encoding="utf-8"))
-    assert {label["asset_id"] for label in payload["labels"]} == {keep_id}
+    assert body["label_count"] == 2
+    data_dir = Path(curation_client.app.state.linescout.settings.data_dir)
+    payload = json.loads((data_dir / body["path"]).read_text(encoding="utf-8"))
+    by_id = {label["asset_id"]: label["decision"] for label in payload["labels"]}
+    assert by_id == {keep_id: "keep", reject_id: "reject"}
+
+
+def test_snapshot_id_has_subsecond_precision(curation_client: TestClient) -> None:
+    first = curation_client.get("/api/v1/curation/next").json()
+    curation_client.post("/api/v1/curation/labels", json=_label(first["asset_id"]))
+    body = curation_client.post("/api/v1/curation/snapshots").json()
+    # curation_YYYYMMDD_HHMMSS_ffffff — microseconds so two exports in the
+    # same second cannot share a filename.
+    stamp = body["snapshot_id"].removeprefix("curation_")
+    date, time_of_day, micros, *rest = stamp.split("_")
+    assert len(date) == 8 and date.isdigit()
+    assert len(time_of_day) == 6 and time_of_day.isdigit()
+    assert len(micros) == 6 and micros.isdigit()
+    assert body["path"] == f"snapshots/{body['snapshot_id']}.json"
+    assert not Path(body["path"]).is_absolute()
 
 
 def test_snapshot_404_without_gallery(tmp_path: Path) -> None:

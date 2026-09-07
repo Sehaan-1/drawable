@@ -18,7 +18,7 @@ CREATE TABLE assets (
     primary_style       TEXT NOT NULL CHECK (primary_style IN
                             ('manga_anime', 'western_ink', 'realistic_academic', 'cartoon', 'gesture_sketch')),
     scopes_json         TEXT NOT NULL,            -- JSON array of scope labels
-    person_count        INTEGER NOT NULL CHECK (person_count >= 0),
+    person_count        INTEGER CHECK (person_count IS NULL OR person_count >= 0),
     sfw_safe            INTEGER NOT NULL CHECK (sfw_safe IN (0, 1)),
     sfw_confidence      REAL NOT NULL,
     sfw_method          TEXT NOT NULL,
@@ -35,11 +35,13 @@ CREATE TABLE assets (
     split               TEXT NOT NULL CHECK (split IN ('train', 'validation', 'test', 'gallery_only')),
     enabled             INTEGER NOT NULL CHECK (enabled IN (0, 1)),
     pipeline_version    TEXT NOT NULL,
-    checksum            TEXT NOT NULL,
+    source_checksum     TEXT NOT NULL,
+    line_art_checksum   TEXT NOT NULL,
+    thumbnail_checksum  TEXT NOT NULL,
     faiss_row           INTEGER UNIQUE,           -- assigned when an index is built; 1:1 with asset_id
     -- Enabled assets must be SFW-approved. Enforced in the manifest too; defence in depth here.
     CHECK (enabled = 0 OR sfw_safe = 1),
-    CHECK (enabled = 0 OR review_state IN ('unreviewed', 'accepted'))
+    CHECK (enabled = 0 OR review_state IN ('accepted'))
 );
 
 CREATE INDEX assets_enabled_style_idx ON assets (enabled, primary_style);
@@ -50,7 +52,7 @@ CREATE INDEX assets_split_idx ON assets (split);
 CREATE TABLE asset_scopes (
     asset_id    TEXT NOT NULL REFERENCES assets(asset_id) ON DELETE CASCADE,
     scope       TEXT NOT NULL CHECK (scope IN
-                    ('eye', 'face_head', 'hair', 'hand', 'foot',
+                    ('eye', 'eyebrow', 'mouth', 'face_head', 'hair', 'hand', 'foot',
                      'upper_body_clothing', 'full_body', 'multi_character')),
     PRIMARY KEY (asset_id, scope)
 );

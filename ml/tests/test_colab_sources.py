@@ -12,6 +12,7 @@ from colab_images import line_art, source_tree, write_png
 from linescout_ml.colab.config import PipelineConfig, SourceSpec, SplitFractions
 from linescout_ml.colab.sources import (
     AssetLabels,
+    Candidate,
     CandidateStore,
     Measurements,
     discover,
@@ -159,6 +160,15 @@ def test_split_assignment_depends_on_the_seed() -> None:
 
 
 def test_split_assignment_roughly_follows_the_fractions() -> None:
+    fractions = SplitFractions()
+    counts = Counter(split_for_work(f"work-{index}", 7, fractions) for index in range(4000))
+    assert counts[DatasetSplit.TRAIN] / 4000 == pytest.approx(0.70, abs=0.05)
+    assert counts[DatasetSplit.VALIDATION] / 4000 == pytest.approx(0.15, abs=0.05)
+    assert counts[DatasetSplit.TEST] / 4000 == pytest.approx(0.15, abs=0.05)
+    assert counts.get(DatasetSplit.GALLERY_ONLY, 0) == 0
+
+
+def test_custom_split_fractions_are_honoured() -> None:
     fractions = SplitFractions(train=0.7, validation=0.1, test=0.1, gallery_only=0.1)
     counts = Counter(split_for_work(f"work-{index}", 7, fractions) for index in range(4000))
     assert counts[DatasetSplit.TRAIN] / 4000 == pytest.approx(0.70, abs=0.05)
@@ -241,6 +251,24 @@ def test_active_excludes_skipped_and_duplicate_candidates(tmp_path: Path) -> Non
     candidates[1].duplicate_of = "ls_sketches_0000000000000000"
     assert [candidate.key for candidate in store.active] == [candidates[2].key]
     assert candidates[2].is_active
+
+
+def test_candidate_maps_legacy_checksum_field() -> None:
+    candidate = Candidate.model_validate(
+        {
+            "key": "sketches/a",
+            "source_name": "sketches",
+            "item_id": "a",
+            "work_id": "sketches/a",
+            "relative_path": "a.png",
+            "source_path": "/tmp/a.png",
+            "split": "train",
+            "checksum": "a" * 64,
+        }
+    )
+    assert candidate.line_art_checksum == "a" * 64
+    assert candidate.source_checksum is None
+    assert candidate.thumbnail_checksum is None
 
 
 def test_a_missing_state_file_is_not_an_error(tmp_path: Path) -> None:

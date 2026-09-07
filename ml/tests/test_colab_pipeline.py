@@ -25,7 +25,7 @@ from colab_images import solid, source_tree, write_png
 from PIL import Image
 
 from linescout_ml.cli import main as cli_main
-from linescout_ml.colab.assets import missing_files, read_manifest
+from linescout_ml.colab.assets import missing_files, original_suffix_for, read_manifest
 from linescout_ml.colab.config import PipelineConfig, SourceSpec
 from linescout_ml.colab.embed import EmbeddingStore, EmbeddingStoreError
 from linescout_ml.colab.export import zip_gallery
@@ -99,15 +99,15 @@ def test_dry_run_writes_a_complete_gallery(dry_run: tuple[PipelineConfig, Pipeli
             assert tile.size == (config.thumbnail_size, config.thumbnail_size)
 
 
-def test_dry_run_records_are_uncurated_but_served(
+def test_dry_run_records_are_uncurated_and_disabled(
     dry_run: tuple[PipelineConfig, PipelineRunner],
 ) -> None:
-    """Assets start ``enabled`` so the curation UI can render them."""
+    """Assets start disabled; production search only serves accepted records."""
     config, _ = dry_run
     manifest = read_manifest(config.manifest_path)
     assert manifest is not None
     for record in manifest.records:
-        assert record.enabled is True
+        assert record.enabled is False
         assert record.review.state is ReviewState.UNREVIEWED
         assert record.review.quality is None
         assert record.sfw.safe is True
@@ -159,7 +159,36 @@ def test_measurements_land_on_every_record(
         assert record.text_coverage == 0.0  # generated drawings have no glyph runs
         assert 0.0 <= record.quality_score <= 1.0
         assert record.width == record.height == 384
-        assert len(record.checksum) == 64
+        assert len(record.source_checksum) == 64
+        assert len(record.line_art_checksum) == 64
+        assert len(record.thumbnail_checksum) == 64
+
+
+def test_original_suffix_preserves_source_extension() -> None:
+    assert original_suffix_for("scan.JPEG") == ".jpg"
+    assert original_suffix_for("art.png") == ".png"
+    assert original_suffix_for("photo.webp") == ".webp"
+    assert original_suffix_for("noext") == ".png"
+
+
+def test_jpeg_original_is_copied_byte_for_byte(tmp_path: Path) -> None:
+    """Source bytes stay intact; JPEG is not re-encoded as PNG."""
+    root = tmp_path / "sources"
+    root.mkdir()
+    jpeg_path = root / "scan.jpeg"
+    Image.new("RGB", (320, 320), (240, 240, 240)).save(jpeg_path, format="JPEG", quality=85)
+    original_bytes = jpeg_path.read_bytes()
+
+    runner = PipelineRunner(_config(tmp_path))
+    runner.run_all()
+    manifest = read_manifest(runner.config.manifest_path)
+    assert manifest is not None
+    assert len(manifest.records) == 1
+    record = manifest.records[0]
+    assert record.original_path.endswith(".jpg")
+    copied = (runner.config.output_root / record.original_path).read_bytes()
+    assert copied == original_bytes
+    assert record.source_checksum != record.line_art_checksum
 
 
 def test_native_line_art_is_normalised_not_redrawn(
@@ -455,6 +484,8 @@ def test_zero_shot_labels_reach_the_manifest(
             ScopeLabel.FACE_HEAD: 0.6,
             ScopeLabel.HAIR: 0.25,
             ScopeLabel.EYE: 0.05,
+            ScopeLabel.EYEBROW: 0.04,
+            ScopeLabel.MOUTH: 0.03,
             ScopeLabel.HAND: 0.03,
             ScopeLabel.FOOT: 0.02,
             ScopeLabel.UPPER_BODY_CLOTHING: 0.02,

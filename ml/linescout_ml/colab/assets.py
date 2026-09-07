@@ -7,16 +7,17 @@ actually load. Two rules from ``services/api`` shape the output:
   ``line_art`` and ``thumbnail`` files exist relative to the manifest, so the
   tree is written first and the manifest last.
 * ``GET /assets/{id}/thumbnail`` and ``/line-art`` always answer
-  ``image/png``, so every file in the gallery — including a JPEG original — is
-  re-encoded as PNG. Keeping the source bytes would be smaller but would put a
-  lie in the response header.
+  ``image/png``, so *derivatives* are stored as PNG. The original is copied
+  byte-for-byte (JPEG stays JPEG) so source hashes remain independent of
+  derivative hashes.
 
-Freshly ingested assets are written ``enabled=true`` with
+Freshly ingested assets are written ``enabled=false`` with
 ``review.state="unreviewed"`` (unsafe assets instead get
-``quarantined`` + ``enabled=false``). That is deliberate: the curation UI can
-only render assets the API will serve, and rejection is what flips
-``enabled`` off. The manifest's own invariants keep this honest — an enabled
-asset must be SFW and must not be rejected or quarantined.
+``quarantined`` + ``enabled=false``). Unreviewed assets stay out of
+production search until a human accepts them; the curation UI renders them
+through dedicated preview routes, not the public asset endpoints. ``enabled``
+is true only when the asset is SFW-safe *and* the review state is
+``accepted``.
 """
 
 from __future__ import annotations
@@ -58,12 +59,34 @@ class AssetPaths:
     thumbnail: str
 
 
-def asset_paths(asset_id: str) -> AssetPaths:
+_ORIGINAL_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+
+
+def original_suffix_for(path: Path | str) -> str:
+    """Preserve the source file's suffix; ``.jpeg`` is normalised to ``.jpg``."""
+    suffix = Path(path).suffix.lower()
+    if suffix == ".jpeg":
+        return ".jpg"
+    if suffix in _ORIGINAL_SUFFIXES:
+        return suffix
+    return ".png"
+
+
+def asset_paths(asset_id: str, *, original_suffix: str = ".png") -> AssetPaths:
+    if not original_suffix.startswith("."):
+        original_suffix = f".{original_suffix}"
     return AssetPaths(
-        original=f"{ORIGINALS_DIR}/{asset_id}.png",
+        original=f"{ORIGINALS_DIR}/{asset_id}{original_suffix}",
         line_art=f"{LINE_ART_DIR}/{asset_id}.png",
         thumbnail=f"{THUMBNAILS_DIR}/{asset_id}.png",
     )
+
+
+def copy_original(source: Path, dest: Path) -> Path:
+    """Copy source bytes unchanged. Never re-encode."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(source.read_bytes())
+    return dest
 
 
 def asset_id_for(source: SourceSpec, item_id: str) -> str:
@@ -98,7 +121,16 @@ def build_record(
     half-processed candidate is a bug in the run, not a reason to write a
     half-valid record.
     """
-    for field in ("asset_id", "width", "height", "line_art_path", "checksum"):
+    for field in (
+        "asset_id",
+        "width",
+        "height",
+        "original_path",
+        "line_art_path",
+        "source_checksum",
+        "line_art_checksum",
+        "thumbnail_checksum",
+    ):
         if getattr(candidate, field) is None:
             msg = f"candidate {candidate.key} is missing {field}; run the extract stage"
             raise GalleryBuildError(msg)
@@ -111,7 +143,10 @@ def build_record(
 
     measurements: Measurements = candidate.measurements
     labels: AssetLabels = candidate.labels
-    paths = asset_paths(str(candidate.asset_id))
+    paths = asset_paths(
+        str(candidate.asset_id),
+        original_suffix=Path(str(candidate.original_path)).suffix or ".png",
+    )
     state = review_state or (ReviewState.UNREVIEWED if labels.sfw.safe else ReviewState.QUARANTINED)
     extracted = source.origin is LineArtOrigin.EXTRACTED
 
@@ -142,9 +177,11 @@ def build_record(
             quality_score=measurements.quality_score,
             review=review_for(state),
             split=candidate.split,
-            enabled=labels.sfw.safe and state is not ReviewState.REJECTED,
+            enabled=labels.sfw.safe and state is ReviewState.ACCEPTED,
             pipeline_version=config.pipeline_version,
-            checksum=str(candidate.checksum),
+            source_checksum=str(candidate.source_checksum),
+            line_art_checksum=str(candidate.line_art_checksum),
+            thumbnail_checksum=str(candidate.thumbnail_checksum),
         )
     except ValueError as error:  # pydantic ValidationError and friends
         msg = f"candidate {candidate.key} produced an invalid record: {error}"
@@ -210,9 +247,9 @@ def write_manifest(manifest: Manifest, path: Path) -> Path:
 
 
 def missing_files(manifest: Manifest, root: Path) -> list[str]:
-    """Enabled assets whose served files are absent — what ``sync_gallery`` rejects."""
+    """Assets whose served files are absent — required for search *and* curation preview."""
     problems: list[str] = []
-    for record in manifest.enabled_records:
+    for record in manifest.records:
         for label, relative in (
             ("line_art", record.line_art_path),
             ("thumbnail", record.thumbnail_path),

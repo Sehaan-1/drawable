@@ -21,6 +21,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/curation/assets/{asset_id}/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Asset
+         * @description Serve unreviewed (and other) gallery files to the curation UI only.
+         *
+         *     Public ``/api/v1/assets/{id}/...`` routes stay gated on
+         *     ``enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1``.
+         */
+        get: operations["preview_asset_api_v1_curation_assets__asset_id___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/curation/labels": {
         parameters: {
             query?: never;
@@ -100,7 +123,7 @@ export interface paths {
         put?: never;
         /**
          * Record Event
-         * @description Record an interaction. The timestamp is generated server-side.
+         * @description Record an interaction. Timestamp and style are generated server-side.
          */
         post: operations["record_event_api_v1_events_post"];
         delete?: never;
@@ -137,6 +160,23 @@ export interface paths {
         get: operations["get_preferences_api_v1_preferences_get"];
         /** Update Preferences */
         put: operations["update_preferences_api_v1_preferences_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ready */
+        get: operations["ready_api_v1_ready_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -269,6 +309,38 @@ export interface components {
              */
             target: number;
         };
+        /** ErrorDetail */
+        ErrorDetail: {
+            /**
+             * Code
+             * @description Stable machine-readable error code, e.g. image_too_large.
+             */
+            code: string;
+            /** Field */
+            field?: string | null;
+            /** Message */
+            message: string;
+        };
+        /**
+         * ErrorResponse
+         * @description Structured error envelope required on every failure path.
+         */
+        ErrorResponse: {
+            error: components["schemas"]["ErrorDetail"];
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Retryable */
+            retryable: boolean;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+        };
         /** EventRequest */
         EventRequest: {
             /** Asset Id */
@@ -281,6 +353,7 @@ export interface components {
              * Format: uuid
              */
             session_id: string;
+            /** @description Client-reported style. Ignored; the gallery asset's primary style is stored. */
             style: components["schemas"]["PrimaryStyle"];
         };
         /** EventResponse */
@@ -359,6 +432,7 @@ export interface components {
              * @enum {string}
              */
             decision: "keep" | "reject";
+            expected_review_state: components["schemas"]["ReviewState"];
             /**
              * Malformed Anatomy
              * @default false
@@ -459,6 +533,21 @@ export interface components {
          * @enum {string}
          */
         PrimaryStyle: "manga_anime" | "western_ink" | "realistic_academic" | "cartoon" | "gesture_sketch";
+        /** ReadyResponse */
+        ReadyResponse: {
+            /**
+             * Ready
+             * @default true
+             * @constant
+             */
+            ready: true;
+        };
+        /**
+         * ReviewState
+         * @description Human curation state for an asset.
+         * @enum {string}
+         */
+        ReviewState: "unreviewed" | "accepted" | "rejected" | "quarantined";
         /**
          * ScopeBreakdown
          * @description Reviewed/accepted/rejected counts for a single scope bucket.
@@ -481,7 +570,7 @@ export interface components {
          *     label plus ``unknown``.
          * @enum {string}
          */
-        ScopeLabel: "eye" | "face_head" | "hair" | "hand" | "foot" | "upper_body_clothing" | "full_body" | "multi_character" | "unknown";
+        ScopeLabel: "eye" | "eyebrow" | "mouth" | "face_head" | "hair" | "hand" | "foot" | "upper_body_clothing" | "full_body" | "multi_character" | "unknown";
         /** ScopePrediction */
         ScopePrediction: {
             /** Confidence */
@@ -547,6 +636,11 @@ export interface components {
             style: components["schemas"]["PrimaryStyle"];
             /** Thumbnail Url */
             thumbnail_url: string;
+            /**
+             * Trace Allowed
+             * @description Whether this asset may be placed on the trace layer. Native line art is allowed; extracted line art is not.
+             */
+            trace_allowed: boolean;
         };
         /** SearchTiming */
         SearchTiming: {
@@ -681,6 +775,36 @@ export interface components {
 export type $defs = Record<string, never>;
 export interface operations {
     get_asset_file_api_v1_assets__asset_id___kind__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_asset_api_v1_curation_assets__asset_id___kind__get: {
         parameters: {
             query?: never;
             header?: never;
@@ -923,6 +1047,35 @@ export interface operations {
             };
         };
     };
+    ready_api_v1_ready_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+            /** @description Model or gallery is not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     search_api_v1_search_post: {
         parameters: {
             query?: never;
@@ -950,21 +1103,36 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Body too large */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Invalid field */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Model or gallery is not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
         };
     };
@@ -987,7 +1155,8 @@ export const labelResponseDecisionValues: ReadonlyArray<FlattenedDeepRequired<co
 export const labelResponseReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LabelResponse"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const lineArtOriginValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LineArtOrigin"]> = ["native_line_art", "extracted_line_art"];
 export const primaryStyleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PrimaryStyle"]> = ["manga_anime", "western_ink", "realistic_academic", "cartoon", "gesture_sketch"];
-export const scopeLabelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ScopeLabel"]> = ["eye", "face_head", "hair", "hand", "foot", "upper_body_clothing", "full_body", "multi_character", "unknown"];
+export const reviewStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewState"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
+export const scopeLabelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ScopeLabel"]> = ["eye", "eyebrow", "mouth", "face_head", "hair", "hand", "foot", "upper_body_clothing", "full_body", "multi_character", "unknown"];
 export const searchGroupKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SearchGroup"]["kind"]> = ["best_match", "style", "provisional_scope"];
 export const searchModeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SearchMode"]> = ["insufficient", "provisional", "confident"];
 export const strokePointerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["pointer"]> = ["pen", "mouse", "touch"];

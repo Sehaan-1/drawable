@@ -1,8 +1,11 @@
 """Local, account-free style preference learning.
 
-Event weights: open 1, pin 3, trace 4. Affinity per style is the Laplace-smoothed
-share of exponentially decayed weight (30-day half-life). Preferences only
-control style-row order; they never touch relevance or Best Match.
+Event weights: open 1, pin 3, trace 4. Repeated open/trace clicks on the same
+asset (same session and query revision) coalesce to one contribution. Pin/unpin
+is a per-asset toggle: an unpin cancels a matching pin and never applies a
+negative penalty. Affinity per style is the Laplace-smoothed share of
+exponentially decayed weight (30-day half-life). Preferences only control
+style-row order; they never touch relevance or Best Match.
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from linescout_api.schemas import InteractionEvent, StyleAffinity
 EVENT_WEIGHTS: dict[InteractionEvent, float] = {
     InteractionEvent.OPEN: 1.0,
     InteractionEvent.PIN: 3.0,
-    InteractionEvent.UNPIN: -3.0,  # undo a pin's contribution
     InteractionEvent.TRACE: 4.0,
 }
 LAPLACE_ALPHA = 1.0
@@ -37,22 +39,66 @@ def compute_affinities(
     prefs = connection.execute("SELECT affinity_reset_at FROM preferences WHERE id = 1").fetchone()
     reset_at = prefs["affinity_reset_at"] if prefs else None
 
-    query = "SELECT style, event, created_at FROM events"
+    query = "SELECT session_id, asset_id, query_revision, style, event, created_at FROM events"
     params: tuple[object, ...] = ()
     if reset_at:
         query += " WHERE created_at > ?"
         params = (reset_at,)
 
     decay = math.log(2) / max(half_life_days, 1e-6)
-    weights: dict[PrimaryStyle, float] = dict.fromkeys(PrimaryStyle, 0.0)
+    # Open/trace: one contribution per (session, asset, revision). Pin: net toggle
+    # per (session, asset). Unpins never contribute a negative weight of their own.
+    opens: dict[tuple[str, str, int], tuple[PrimaryStyle, datetime]] = {}
+    traces: dict[tuple[str, str, int], tuple[PrimaryStyle, datetime]] = {}
+    pin_events: dict[tuple[str, str], list[tuple[datetime, InteractionEvent, PrimaryStyle]]] = {}
+
     for row in connection.execute(query, params):
         try:
             style = PrimaryStyle(row["style"])
             event = InteractionEvent(row["event"])
         except ValueError:
             continue
-        age_days = max(0.0, (now - _parse_ts(row["created_at"])).total_seconds() / 86400)
-        weights[style] += EVENT_WEIGHTS[event] * math.exp(-decay * age_days)
+        ts = _parse_ts(row["created_at"])
+        session_id = str(row["session_id"])
+        asset_id = str(row["asset_id"])
+        revision = int(row["query_revision"])
+        if event is InteractionEvent.OPEN:
+            key = (session_id, asset_id, revision)
+            previous = opens.get(key)
+            if previous is None or ts >= previous[1]:
+                opens[key] = (style, ts)
+        elif event is InteractionEvent.TRACE:
+            key = (session_id, asset_id, revision)
+            previous = traces.get(key)
+            if previous is None or ts >= previous[1]:
+                traces[key] = (style, ts)
+        elif event in (InteractionEvent.PIN, InteractionEvent.UNPIN):
+            pin_events.setdefault((session_id, asset_id), []).append((ts, event, style))
+
+    weights: dict[PrimaryStyle, float] = dict.fromkeys(PrimaryStyle, 0.0)
+
+    def accumulate(style: PrimaryStyle, ts: datetime, weight: float) -> None:
+        age_days = max(0.0, (now - ts).total_seconds() / 86400)
+        weights[style] += weight * math.exp(-decay * age_days)
+
+    for style, ts in opens.values():
+        accumulate(style, ts, EVENT_WEIGHTS[InteractionEvent.OPEN])
+    for style, ts in traces.values():
+        accumulate(style, ts, EVENT_WEIGHTS[InteractionEvent.TRACE])
+    for sequence in pin_events.values():
+        sequence.sort(key=lambda item: item[0])
+        pinned = False
+        pin_style: PrimaryStyle | None = None
+        pin_at: datetime | None = None
+        for ts, event, style in sequence:
+            if event is InteractionEvent.PIN:
+                pinned = True
+                pin_style = style
+                pin_at = ts
+            else:
+                pinned = False
+        if pinned and pin_style is not None and pin_at is not None:
+            accumulate(pin_style, pin_at, EVENT_WEIGHTS[InteractionEvent.PIN])
 
     clipped = {style: max(0.0, weight) for style, weight in weights.items()}
     total = sum(clipped.values()) + LAPLACE_ALPHA * len(PrimaryStyle)

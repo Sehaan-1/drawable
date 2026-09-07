@@ -13,7 +13,7 @@ fi
 
 for pkg in ml services/api; do
   echo "==> $pkg"
-  (cd "$pkg" && uv venv --python 3.11 .venv --quiet && uv pip install --quiet -e ".[dev]")
+  (cd "$pkg" && uv sync --frozen --extra dev --python 3.11)
 done
 
 echo
