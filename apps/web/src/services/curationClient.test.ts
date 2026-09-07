@@ -83,6 +83,7 @@ describe('writeLabel', () => {
     globalThis.fetch = fetchMock
     await writeLabel({
       asset_id: 'a',
+      expected_review_state: 'unreviewed',
       decision: 'keep',
       quality: 3,
       malformed_anatomy: false,
@@ -98,7 +99,7 @@ describe('writeLabel', () => {
 describe('exportSnapshot', () => {
   it('POSTs to /curation/snapshots', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      mockJsonResponse({ snapshot_id: 'curation_x', path: '/tmp/x.json', label_count: 0, style_breakdown: {}, created_at: 'x' }),
+      mockJsonResponse({ snapshot_id: 'curation_x', path: 'snapshots/curation_x.json', label_count: 0, style_breakdown: {}, created_at: 'x' }),
     ) as unknown as typeof fetch
     globalThis.fetch = fetchMock
     const result = await exportSnapshot()

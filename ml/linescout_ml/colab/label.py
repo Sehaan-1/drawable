@@ -2,7 +2,7 @@
 
 Ingestion cannot leave ``primary_style`` and ``scopes`` empty — the manifest
 requires exactly one style and at least one *gallery* scope, and the curation
-queue stratifies over the 5×8 grid those produce. Rather than inventing a
+queue stratifies over the 5×10 style×scope grid those produce. Rather than inventing a
 placeholder, the pipeline asks the MobileCLIP2 text encoder it already loaded
 for embeddings: a handful of prompts per label, softmax over the averaged prompt
 embeddings, and the winner is written down as *provisional*.
@@ -77,6 +77,14 @@ SCOPE_PROMPTS: dict[ScopeLabel, tuple[str, ...]] = {
     ScopeLabel.EYE: (
         "a close-up drawing of a single eye",
         "an eye study with eyelashes and iris",
+    ),
+    ScopeLabel.EYEBROW: (
+        "a drawing of an eyebrow",
+        "an eyebrow study with individual hairs",
+    ),
+    ScopeLabel.MOUTH: (
+        "a drawing of a mouth",
+        "a close-up study of lips",
     ),
     ScopeLabel.FACE_HEAD: (
         "a drawing of a face",
@@ -161,7 +169,7 @@ def _label_matrix(encoder: OpenClipEncoder, prompts: dict[Any, tuple[str, ...]])
 
 
 class ZeroShotLabeler:
-    """Ranks the five styles and eight scopes for one image at a time."""
+    """Ranks the five styles and gallery scopes for one image at a time."""
 
     def __init__(self, encoder: OpenClipEncoder, logit_scale: float = 100.0) -> None:
         self.encoder = encoder
@@ -258,9 +266,28 @@ def select_scopes(
     return chosen
 
 
-def person_count_for(scopes: Sequence[ScopeLabel]) -> int:
-    """Provisional person count. The manifest ties ``multi_character`` to >= 2."""
-    return 2 if ScopeLabel.MULTI_CHARACTER in scopes else 1
+def person_count_for(scopes: Sequence[ScopeLabel]) -> int | None:
+    """Provisional person count. ``None`` when the sketch is not of a person.
+
+    The manifest ties ``multi_character`` to ``>= 2``. Human anatomy scopes
+    imply one person; anything else (still-life doodles, objects) stays unset.
+    """
+    if ScopeLabel.MULTI_CHARACTER in scopes:
+        return 2
+    human = {
+        ScopeLabel.EYE,
+        ScopeLabel.EYEBROW,
+        ScopeLabel.MOUTH,
+        ScopeLabel.FACE_HEAD,
+        ScopeLabel.HAIR,
+        ScopeLabel.HAND,
+        ScopeLabel.FOOT,
+        ScopeLabel.UPPER_BODY_CLOTHING,
+        ScopeLabel.FULL_BODY,
+    }
+    if any(scope in human for scope in scopes):
+        return 1
+    return None
 
 
 def source_rating_sfw(confidence: float = 1.0) -> SfwDecision:

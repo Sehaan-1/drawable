@@ -94,6 +94,12 @@ def test_default_split_fractions_are_valid() -> None:
     fractions = SplitFractions()
     total = fractions.train + fractions.validation + fractions.test + fractions.gallery_only
     assert total == pytest.approx(1.0)
+    assert (fractions.train, fractions.validation, fractions.test, fractions.gallery_only) == (
+        0.70,
+        0.15,
+        0.15,
+        0.0,
+    )
 
 
 # --------------------------------------------------------------------- config

@@ -42,6 +42,8 @@ export const PRIMARY_STYLES = [
 
 export const SCOPE_LABELS = [
   'eye',
+  'eyebrow',
+  'mouth',
   'face_head',
   'hair',
   'hand',
@@ -62,6 +64,8 @@ export const STYLE_TITLES: Record<PrimaryStyle, string> = {
 
 export const SCOPE_TITLES: Record<ScopeLabel, string> = {
   eye: 'Eye',
+  eyebrow: 'Eyebrow',
+  mouth: 'Mouth',
   face_head: 'Face / head',
   hair: 'Hair',
   hand: 'Hand',
@@ -86,6 +90,7 @@ export function isPrimaryStyle(value: unknown): value is PrimaryStyle {
 // ------------------------------------------------------------------ models
 
 export type HealthResponse = Schemas['HealthResponse']
+export type ReadyResponse = Schemas['ReadyResponse']
 export type ModelVersion = Schemas['ModelVersion']
 
 export type SearchResponse = Schemas['SearchResponse']
@@ -110,11 +115,12 @@ export type StyleAffinity = Schemas['StyleAffinity']
 export type CropBox = Schemas['CropBox']
 export type CurationCandidate = Schemas['CurationCandidate']
 export type CurationProgress = Schemas['CurationProgress']
+export type StyleBreakdown = Schemas['StyleBreakdown']
 export type LabelRequest = Schemas['LabelRequest']
 export type LabelResponse = Schemas['LabelResponse']
 export type SnapshotResponse = Schemas['SnapshotResponse']
 
-export type ErrorResponse = { error: { code: string; message: string; field?: string | null } }
+export type ErrorResponse = Schemas['ErrorResponse']
 
 /** Multipart fields for `POST /api/v1/search`; `image` and `strokes` are Blobs. */
 export type SearchFormFields = Schemas['Body_search_api_v1_search_post']

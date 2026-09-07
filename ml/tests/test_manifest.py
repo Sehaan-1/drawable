@@ -47,10 +47,13 @@ def _base_record(**overrides: object) -> dict[str, object]:
         "ink_coverage": 0.05,
         "phash": "0123456789abcdef",
         "quality_score": 0.9,
+        "review": {"state": "accepted", "quality": 3},
         "split": "train",
         "enabled": True,
         "pipeline_version": "test-1",
-        "checksum": "a" * 64,
+        "source_checksum": "a" * 64,
+        "line_art_checksum": "b" * 64,
+        "thumbnail_checksum": "c" * 64,
     }
     record.update(overrides)
     return record
@@ -59,6 +62,8 @@ def _base_record(**overrides: object) -> dict[str, object]:
 def test_taxonomy_matches_spec() -> None:
     assert [s.value for s in ScopeLabel] == [
         "eye",
+        "eyebrow",
+        "mouth",
         "face_head",
         "hair",
         "hand",
@@ -101,6 +106,13 @@ def test_valid_record_round_trips() -> None:
     assert ManifestRecord.model_validate_json(record.model_dump_json()) == record
 
 
+def test_person_count_may_be_null_for_non_human_sketches() -> None:
+    record = ManifestRecord.model_validate(
+        _base_record(person_count=None, scopes=["full_body"], primary_style="gesture_sketch")
+    )
+    assert record.person_count is None
+
+
 @pytest.mark.parametrize(
     ("overrides", "fragment"),
     [
@@ -108,7 +120,9 @@ def test_valid_record_round_trips() -> None:
         ({"extraction_model": "anime2sketch", "extraction_version": "1"}, "native assets must not"),
         ({"sfw": {"safe": False, "confidence": 0.9, "method": "opennsfw2"}}, "safe=true"),
         ({"review": {"state": "rejected", "quality": 1}}, "cannot be rejected"),
+        ({"review": {"state": "unreviewed"}}, "cannot be unreviewed"),
         ({"scopes": ["multi_character"], "person_count": 1}, "person_count >= 2"),
+        ({"scopes": ["multi_character"], "person_count": None}, "person_count >= 2"),
         ({"scopes": ["eye", "eye"]}, "unique"),
         ({"scopes": ["unknown"]}, "query-only"),
         ({"width": 200}, "256"),

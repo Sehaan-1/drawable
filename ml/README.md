@@ -16,8 +16,7 @@ Two halves live here:
 
 ```bash
 cd ml
-uv venv --python 3.11 .venv
-uv pip install -e ".[dev]"
+uv sync --frozen --extra dev --python 3.11
 
 # Validate a manifest (and check that enabled assets' files exist)
 .venv/bin/linescout-manifest validate ../data/gallery/manifest.json --require-files

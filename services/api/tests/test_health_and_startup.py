@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -9,7 +10,58 @@ from linescout_api.config import DevicePolicy
 from linescout_api.db import connect, list_migrations, migrate, schema_version, split_statements
 from linescout_api.device import detect_device
 from linescout_api.main import create_app
-from tests.conftest import SYNTHETIC_MANIFEST, make_settings
+from tests.conftest import SYNTHETIC_MANIFEST, make_settings, png_bytes, post_search
+
+
+def test_invalid_host_header_is_rejected(client: TestClient) -> None:
+    response = client.get("http://evil.example/api/v1/health")
+    assert response.status_code == 403
+    body = response.json()
+    assert body["error"]["code"] == "invalid_host"
+    assert body["schema_version"] == 1
+    assert body["retryable"] is False
+    UUID(body["request_id"])
+    assert response.headers["x-request-id"] == body["request_id"]
+
+
+def test_cross_origin_mutation_is_forbidden(client: TestClient, session_id: str) -> None:
+    response = client.post(
+        "/api/v1/events",
+        json={
+            "session_id": session_id,
+            "asset_id": "ls_synthetic_0000000000000000",
+            "event": "open",
+            "style": "cartoon",
+            "query_revision": 1,
+        },
+        headers={"origin": "http://evil.example"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "cross_origin_mutation_forbidden"
+    # Same-origin (or no Origin, as in TestClient) mutations still work.
+    status, _ = post_search(client, session_id, png_bytes(None), stroke_count=0, point_count=0)
+    assert status == 200
+
+
+def test_ready_probe_is_200_when_healthy(client: TestClient) -> None:
+    response = client.get("/api/v1/ready")
+    assert response.status_code == 200
+    assert response.json() == {"ready": True}
+    UUID(response.headers["x-request-id"])
+
+
+def test_ready_probe_is_503_when_not_ready(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, gallery_manifest=tmp_path / "missing.json")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/api/v1/ready")
+        assert response.status_code == 503
+        body = response.json()
+        assert body["error"]["code"] == "not_ready"
+        assert body["retryable"] is True
+        assert body["schema_version"] == 1
+        UUID(body["request_id"])
+        assert response.headers["retry-after"] == "5"
+        assert response.headers["x-request-id"] == body["request_id"]
 
 
 def test_health_reports_every_spec_field(client: TestClient) -> None:
@@ -172,7 +224,7 @@ def test_sqlite_refuses_enabled_unsafe_assets(tmp_path: Path) -> None:
             " original_path, line_art_path, thumbnail_path, origin, primary_style, scopes_json,"
             " person_count, sfw_safe, sfw_confidence, sfw_method, width, height, text_coverage,"
             " ink_coverage, phash, quality_score, review_state, split, enabled, pipeline_version,"
-            " checksum"
+            " source_checksum, line_art_checksum, thumbnail_checksum"
         )
         values = (
             "ls_x_0000000000000000",
@@ -201,6 +253,58 @@ def test_sqlite_refuses_enabled_unsafe_assets(tmp_path: Path) -> None:
             1,
             "p",
             "a" * 64,
+            "b" * 64,
+            "c" * 64,
+        )
+        placeholders = ",".join("?" * len(values))
+        connection.execute(f"INSERT INTO assets ({columns}) VALUES ({placeholders})", values)  # noqa: S608
+    connection.close()
+
+
+def test_sqlite_refuses_enabled_unreviewed_assets(tmp_path: Path) -> None:
+    import sqlite3
+
+    import pytest
+
+    connection = connect(tmp_path / "c.sqlite3")
+    migrate(connection)
+    with pytest.raises(sqlite3.IntegrityError):
+        columns = (
+            "asset_id, source_dataset, source_item_id, source_work_id, license_id,"
+            " original_path, line_art_path, thumbnail_path, origin, primary_style, scopes_json,"
+            " person_count, sfw_safe, sfw_confidence, sfw_method, width, height, text_coverage,"
+            " ink_coverage, phash, quality_score, review_state, split, enabled, pipeline_version,"
+            " source_checksum, line_art_checksum, thumbnail_checksum"
+        )
+        values = (
+            "ls_x_0000000000000000",
+            "s",
+            "i",
+            "w",
+            "l",
+            "o",
+            "l",
+            "t",
+            "native_line_art",
+            "cartoon",
+            '["eye"]',
+            1,
+            1,
+            0.9,
+            "manual",
+            300,
+            300,
+            0,
+            0.1,
+            "0000000000000000",
+            0.5,
+            "unreviewed",
+            "train",
+            1,
+            "p",
+            "a" * 64,
+            "b" * 64,
+            "c" * 64,
         )
         placeholders = ",".join("?" * len(values))
         connection.execute(f"INSERT INTO assets ({columns}) VALUES ({placeholders})", values)  # noqa: S608

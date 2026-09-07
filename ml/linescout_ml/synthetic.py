@@ -39,7 +39,10 @@ THUMB_SIZE = 64
 
 _SCOPE_CYCLE: tuple[tuple[ScopeLabel, ...], ...] = (
     (ScopeLabel.EYE,),
-    (ScopeLabel.FACE_HEAD, ScopeLabel.HAIR),
+    (ScopeLabel.EYEBROW,),
+    (ScopeLabel.MOUTH,),
+    (ScopeLabel.FACE_HEAD,),
+    (ScopeLabel.HAIR,),
     (ScopeLabel.HAND,),
     (ScopeLabel.FOOT,),
     (ScopeLabel.UPPER_BODY_CLOTHING,),
@@ -102,6 +105,10 @@ def _line_art_pixels(
     if ScopeLabel.EYE in scopes:
         ellipse(mid, mid, size * 0.32, size * 0.16, thickness)
         ellipse(mid, mid, size * 0.09, size * 0.09, thickness)
+    elif ScopeLabel.EYEBROW in scopes:
+        line(mid - size * 0.22, mid - size * 0.08, mid + size * 0.22, mid - size * 0.12, thickness)
+    elif ScopeLabel.MOUTH in scopes:
+        ellipse(mid, mid + size * 0.08, size * 0.18, size * 0.08, thickness)
     elif ScopeLabel.FACE_HEAD in scopes:
         ellipse(mid, mid, size * 0.26, size * 0.34, thickness)
         line(mid - size * 0.1, mid - size * 0.05, mid - size * 0.02, mid - size * 0.05, thickness)
@@ -214,7 +221,11 @@ def build_synthetic_records(out_dir: Path, count: int = 24, seed: int = 7) -> li
                 extraction_version="1" if extracted else None,
                 primary_style=style,
                 scopes=list(scopes),
-                person_count=2 if ScopeLabel.MULTI_CHARACTER in scopes else 1,
+                person_count=(
+                    2
+                    if ScopeLabel.MULTI_CHARACTER in scopes
+                    else (None if style is PrimaryStyle.GESTURE_SKETCH else 1)
+                ),
                 sfw=SfwDecision(safe=True, confidence=0.99, method="manual"),
                 width=IMAGE_SIZE,
                 height=IMAGE_SIZE,
@@ -229,7 +240,9 @@ def build_synthetic_records(out_dir: Path, count: int = 24, seed: int = 7) -> li
                 split=split,
                 enabled=not rejected,
                 pipeline_version=SYNTHETIC_PIPELINE_VERSION,
-                checksum=hashlib.sha256(png).hexdigest(),
+                source_checksum=hashlib.sha256(png).hexdigest(),
+                line_art_checksum=hashlib.sha256(png).hexdigest(),
+                thumbnail_checksum=hashlib.sha256(thumb).hexdigest(),
             )
         )
     return records

@@ -125,6 +125,17 @@ def test_badge_points_at_this_notebook_in_this_repo() -> None:
     assert url.endswith(f"Sehaan-1/drawable/blob/main/{relative}"), url
 
 
+def test_notebook_clones_main_not_a_developer_branch() -> None:
+    """The Colab clone must track main, never a personal fork feature branch."""
+    config = cell_titled("1 ·")
+    env = cell_titled("2 ·")
+    assert 'REPO_REF = "main"' in config
+    assert '"--branch", REPO_REF' in env
+    joined = "\n".join(code_sources())
+    for forbidden in ("origin/", "checkout", "-b "):
+        assert forbidden not in joined, f"notebook still references {forbidden!r}"
+
+
 # ------------------------------------------------------------------- cell hygiene
 
 
@@ -280,7 +291,7 @@ def test_the_dry_run_cell_executes_end_to_end(tmp_path: Path) -> None:
         for relative in (record.original_path, record.line_art_path, record.thumbnail_path):
             assert relative in names, f"{relative} is missing from the export zip"
         assert record.review.state.value == "unreviewed"
-        assert record.enabled is True
+        assert record.enabled is False
 
 
 def test_dry_run_cell_output_matches_the_documented_claims(tmp_path: Path) -> None:
@@ -305,7 +316,7 @@ def test_dry_run_cell_output_matches_the_documented_claims(tmp_path: Path) -> No
 
     prose = "\n".join(markdown_sources())
     for documented in (
-        "originals/<asset_id>.png",
+        "originals/<asset_id>.<ext>",
         "line_art/<asset_id>.png",
         "thumbnails/<asset_id>.png",
         "_pipeline/candidates.jsonl",

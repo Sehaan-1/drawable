@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Annotated
+from typing import Annotated, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, File, Form, UploadFile
@@ -11,7 +11,7 @@ from linescout_ml.taxonomy import PrimaryStyle
 
 from linescout_api import fixture_ranker
 from linescout_api.deps import State
-from linescout_api.errors import bad_request, too_large, unprocessable
+from linescout_api.errors import bad_request, service_unavailable, too_large, unprocessable
 from linescout_api.preferences import compute_affinities, read_preferences
 from linescout_api.preprocessing import (
     SnapshotError,
@@ -21,6 +21,7 @@ from linescout_api.preprocessing import (
     is_insufficient,
 )
 from linescout_api.schemas import (
+    ErrorResponse,
     ScopePrediction,
     SearchMode,
     SearchResponse,
@@ -31,11 +32,8 @@ from linescout_api.state import AppState
 
 router = APIRouter(tags=["search"])
 
-SUPPORTED_CANVAS_MIN = 256
-SUPPORTED_CANVAS_MAX = 8192
 
-
-def _raise_snapshot_error(error: SnapshotError, field: str) -> None:
+def _raise_snapshot_error(error: SnapshotError, field: str) -> NoReturn:
     if error.code.endswith("too_large"):
         raise too_large(error.code, error.message, field)
     if error.code in ("image_dimensions", "image_format"):
@@ -47,17 +45,18 @@ def _raise_snapshot_error(error: SnapshotError, field: str) -> None:
     "/search",
     response_model=SearchResponse,
     responses={
-        400: {"description": "Malformed image or strokes"},
-        413: {"description": "Body too large"},
-        422: {"description": "Invalid field"},
+        400: {"model": ErrorResponse, "description": "Malformed image or strokes"},
+        413: {"model": ErrorResponse, "description": "Body too large"},
+        422: {"model": ErrorResponse, "description": "Invalid field"},
+        503: {"model": ErrorResponse, "description": "Model or gallery is not ready"},
     },
 )
 async def search(
     state: State,
     session_id: Annotated[UUID, Form()],
     revision: Annotated[int, Form(ge=1)],
-    canvas_width: Annotated[int, Form(ge=SUPPORTED_CANVAS_MIN, le=SUPPORTED_CANVAS_MAX)],
-    canvas_height: Annotated[int, Form(ge=SUPPORTED_CANVAS_MIN, le=SUPPORTED_CANVAS_MAX)],
+    canvas_width: Annotated[int, Form(gt=0)],
+    canvas_height: Annotated[int, Form(gt=0)],
     stroke_count: Annotated[int, Form(ge=0)],
     point_count: Annotated[int, Form(ge=0)],
     image: Annotated[UploadFile, File()],
@@ -67,6 +66,20 @@ async def search(
 ) -> SearchResponse:
     settings = state.settings
     started = time.perf_counter()
+
+    expected_canvas = settings.canvas_logical_size
+    if canvas_width != expected_canvas:
+        raise unprocessable(
+            "canvas_dimensions",
+            f"canvas_width must be {expected_canvas}",
+            "canvas_width",
+        )
+    if canvas_height != expected_canvas:
+        raise unprocessable(
+            "canvas_dimensions",
+            f"canvas_height must be {expected_canvas}",
+            "canvas_height",
+        )
 
     if text_hint is not None and len(text_hint) > settings.max_text_hint_chars:
         raise unprocessable(
@@ -93,10 +106,27 @@ async def search(
         gray = decode_snapshot(image_bytes, settings.max_image_bytes)
     except SnapshotError as error:
         _raise_snapshot_error(error, "image")
+    expected_snapshot = settings.snapshot_size
+    if gray.size != (expected_snapshot, expected_snapshot):
+        raise unprocessable(
+            "image_dimensions",
+            f"snapshot must be {expected_snapshot}x{expected_snapshot}",
+            "image",
+        )
     try:
         stroke_sequence = decode_strokes(strokes_bytes, settings.max_strokes_bytes)
     except SnapshotError as error:
         _raise_snapshot_error(error, "strokes")
+
+    if stroke_sequence is not None and (
+        stroke_sequence.canvas_width != expected_canvas
+        or stroke_sequence.canvas_height != expected_canvas
+    ):
+        raise unprocessable(
+            "canvas_dimensions",
+            f"strokes canvas must be {expected_canvas}x{expected_canvas}",
+            "strokes",
+        )
 
     if stroke_sequence is not None and len(stroke_sequence.strokes) != stroke_count:
         raise unprocessable(
@@ -133,7 +163,7 @@ async def search(
         return response
 
     if not state.ready:
-        raise unprocessable("not_ready", state.setup_error or "the API is not ready", None)
+        raise service_unavailable("not_ready", state.setup_error or "the API is not ready")
 
     # Row order: explicit style from the request overrides the stored preference for this response.
     stored_selected, learning_enabled = read_preferences(state.connection)

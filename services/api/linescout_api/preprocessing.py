@@ -7,10 +7,10 @@ the ink bounding box, and decide whether there is enough to search on.
 
 from __future__ import annotations
 
-import gzip
 import io
 import json
 import math
+import zlib
 from dataclasses import dataclass
 
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -20,6 +20,8 @@ from linescout_api.schemas import StrokeSequence
 
 INK_THRESHOLD = 200  # grayscale values below this count as ink
 MAX_SNAPSHOT_EDGE = 4096
+MAX_COMPRESSED_BYTES = 256 * 1024  # 256 KiB
+MAX_DECOMPRESSED_BYTES = 1024 * 1024  # 1 MiB
 
 
 class SnapshotError(ValueError):
@@ -88,7 +90,14 @@ def ink_stats(gray: Image.Image) -> InkStats:
 def is_insufficient(
     stats: InkStats, point_count: int, min_points: int, min_diagonal_ratio: float
 ) -> bool:
-    """Spec: fewer than 20 sampled points, or ink bbox diagonal under 2% of the canvas diagonal."""
+    """Return True when the query has too little ink (or too few vector points).
+
+    Imported raster drawings may have ``point_count == 0``; those are judged by
+    ink coverage and bounding-box diagonal instead of vector sampling.
+    """
+    too_little_ink = stats.coverage <= 0.0 or stats.bbox_diagonal_ratio < min_diagonal_ratio
+    if point_count == 0:
+        return too_little_ink
     return point_count < min_points or stats.bbox_diagonal_ratio < min_diagonal_ratio
 
 
@@ -111,6 +120,33 @@ def tight_crop(gray: Image.Image, stats: InkStats, padding: float = 0.10) -> Ima
     return square
 
 
+def safe_decompress_gzip(data: bytes) -> bytes:
+    """Stream gzip decompression with hard caps (zip-bomb proof)."""
+    if len(data) > MAX_COMPRESSED_BYTES:
+        raise ValueError("compressed_payload_too_large")
+
+    # 16 + zlib.MAX_WBITS tells zlib to decode standard gzip headers.
+    decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    uncompressed = bytearray()
+    chunk_size = 16 * 1024
+
+    for offset in range(0, len(data), chunk_size):
+        chunk = data[offset : offset + chunk_size]
+        decompressed_chunk = decompressor.decompress(chunk)
+        uncompressed.extend(decompressed_chunk)
+        if len(uncompressed) > MAX_DECOMPRESSED_BYTES:
+            raise ValueError("decompressed_payload_too_large")
+
+    uncompressed.extend(decompressor.flush())
+    if len(uncompressed) > MAX_DECOMPRESSED_BYTES:
+        raise ValueError("decompressed_payload_too_large")
+
+    if decompressor.unused_data:
+        raise ValueError("trailing_garbage_rejected")
+
+    return bytes(uncompressed)
+
+
 def decode_strokes(data: bytes | None, max_bytes: int) -> StrokeSequence | None:
     """Decode the optional gzip-compressed JSON stroke sequence."""
     if data is None or len(data) == 0:
@@ -118,11 +154,16 @@ def decode_strokes(data: bytes | None, max_bytes: int) -> StrokeSequence | None:
     if len(data) > max_bytes:
         raise SnapshotError("strokes_too_large", f"strokes exceed {max_bytes} bytes compressed")
     try:
-        raw = gzip.decompress(data)
-    except (OSError, EOFError) as error:
+        raw = safe_decompress_gzip(data)
+    except ValueError as error:
+        reason = str(error)
+        if "too_large" in reason:
+            raise SnapshotError(
+                "strokes_too_large", "decompressed strokes exceed the size limit"
+            ) from error
         raise SnapshotError("strokes_malformed", f"strokes are not valid gzip: {error}") from error
-    if len(raw) > max_bytes * 8:
-        raise SnapshotError("strokes_too_large", "decompressed strokes exceed the size limit")
+    except zlib.error as error:
+        raise SnapshotError("strokes_malformed", f"strokes are not valid gzip: {error}") from error
     try:
         return StrokeSequence.model_validate(json.loads(raw))
     except (json.JSONDecodeError, UnicodeDecodeError, ValidationError) as error:

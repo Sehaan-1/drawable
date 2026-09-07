@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
-from linescout_ml.taxonomy import DEFAULT_STYLE_ORDER, PrimaryStyle, ScopeLabel
+from linescout_ml.taxonomy import DEFAULT_STYLE_ORDER, LineArtOrigin, PrimaryStyle, ScopeLabel
 
 from linescout_api.gallery import GalleryAsset
 from linescout_api.preprocessing import InkStats
@@ -46,6 +46,8 @@ STYLE_TITLES: dict[PrimaryStyle, str] = {
 
 SCOPE_TITLES: dict[ScopeLabel, str] = {
     ScopeLabel.EYE: "Possibly an eye",
+    ScopeLabel.EYEBROW: "Possibly an eyebrow",
+    ScopeLabel.MOUTH: "Possibly a mouth",
     ScopeLabel.FACE_HEAD: "Possibly a face or head",
     ScopeLabel.HAIR: "Possibly hair",
     ScopeLabel.HAND: "Possibly a hand",
@@ -74,6 +76,8 @@ def predict_scopes(stats: InkStats, stroke_count: int) -> list[ScopePrediction]:
 
     raw: dict[ScopeLabel, float] = {
         ScopeLabel.EYE: max(0.0, 0.9 - extent * 2.2),
+        ScopeLabel.EYEBROW: max(0.0, 0.85 - extent * 2.3),
+        ScopeLabel.MOUTH: max(0.0, 0.8 - extent * 2.1),
         ScopeLabel.FACE_HEAD: max(0.0, 0.8 - abs(extent - 0.35) * 2.0),
         ScopeLabel.HAIR: max(0.0, 0.5 - abs(extent - 0.3) * 1.5) * (0.5 + density * 20),
         ScopeLabel.HAND: max(0.0, 0.7 - extent * 1.8),
@@ -118,6 +122,7 @@ def to_result(asset: GalleryAsset, relevance: float) -> SearchResult:
         style=asset.primary_style,
         scopes=[ScopeLabel(scope) for scope in asset.scopes],
         origin=asset.origin,
+        trace_allowed=asset.origin is LineArtOrigin.NATIVE,
         relevance=relevance,
         quality=asset.quality_score,
         asset_url=f"/api/v1/assets/{asset.asset_id}/line-art",

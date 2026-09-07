@@ -42,7 +42,7 @@ of section 12. Use it after you have watched the stages once.
 
 ```
 <DRIVE_ROOT>/gallery/<DATASET_VERSION>/
-    originals/<asset_id>.png        source image, re-encoded as PNG
+    originals/<asset_id>.<ext>      source image, copied byte-for-byte
     line_art/<asset_id>.png         extracted (or native) line art
     thumbnails/<asset_id>.png       reference-panel tile
     manifest.json                   validated against linescout_ml/manifest.py
@@ -105,9 +105,10 @@ Colab disconnects idle and heavy sessions, so nothing is a long transaction:
 Zero-shot CLIP labels are a starting point, not a verdict. Every record keeps
 `labels.labelled_by` (`zero_shot` or `source_default`) and the raw probabilities,
 and every freshly ingested asset arrives `review.state="unreviewed"` with
-`enabled=true` so the curation UI can render and correct it. Assets that fail the
-SFW gate are written `quarantined` + `enabled=false`, which the manifest enforces
-as an invariant.
+`enabled=false` so production search cannot serve it until a human accepts it.
+The curation UI renders candidates through dedicated preview routes. Assets that
+fail the SFW gate are written `quarantined` + `enabled=false`, which the
+manifest enforces as an invariant.
 
 The SFW screen runs on the **original**, not the line art, because extraction
 removes exactly the content a classifier needs to see. Sources whose terms
@@ -139,8 +140,7 @@ what CI does:
 
 ```bash
 cd ml
-uv venv --python 3.11 .venv
-uv pip install -e ".[dev]"
+uv sync --frozen --extra dev --python 3.11
 
 .venv/bin/pytest tests/test_colab_pipeline.py -q   # end-to-end on generated images
 .venv/bin/pytest tests/test_colab_notebook.py -q   # notebook structure + dry-run cell

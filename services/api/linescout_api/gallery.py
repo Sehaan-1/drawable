@@ -83,7 +83,9 @@ def _record_row(record: ManifestRecord) -> tuple[object, ...]:
         record.split.value,
         int(record.enabled),
         record.pipeline_version,
-        record.checksum,
+        record.source_checksum,
+        record.line_art_checksum,
+        record.thumbnail_checksum,
     )
 
 
@@ -93,8 +95,9 @@ INSERT INTO assets (
     original_path, line_art_path, thumbnail_path, origin, extraction_model, extraction_version,
     primary_style, scopes_json, person_count, sfw_safe, sfw_confidence, sfw_method,
     width, height, crop_json, text_coverage, ink_coverage, phash, quality_score,
-    review_state, review_quality, split, enabled, pipeline_version, checksum
-) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    review_state, review_quality, split, enabled, pipeline_version,
+    source_checksum, line_art_checksum, thumbnail_checksum
+) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 
@@ -177,7 +180,8 @@ def enabled_assets(connection: sqlite3.Connection) -> list[GalleryAsset]:
     rows = connection.execute(
         "SELECT asset_id, primary_style, scopes_json, origin, quality_score,"
         " line_art_path, thumbnail_path"
-        " FROM assets WHERE enabled = 1 AND sfw_safe = 1 ORDER BY asset_id"
+        " FROM assets WHERE enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1"
+        " ORDER BY asset_id"
     ).fetchall()
     return [
         GalleryAsset(
@@ -197,7 +201,8 @@ def asset_file(connection: sqlite3.Connection, asset_id: str, kind: str) -> str 
     """Relative path for an enabled asset's ``thumbnail`` or ``line_art`` file, else ``None``."""
     column = {"thumbnail": "thumbnail_path", "line_art": "line_art_path"}[kind]
     row = connection.execute(
-        f"SELECT {column} AS path FROM assets WHERE asset_id = ? AND enabled = 1 AND sfw_safe = 1",  # noqa: S608
+        f"SELECT {column} AS path FROM assets"  # noqa: S608
+        f" WHERE asset_id = ? AND enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1",
         (asset_id,),
     ).fetchone()
     return str(row["path"]) if row else None

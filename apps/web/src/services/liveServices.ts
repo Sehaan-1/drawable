@@ -57,7 +57,7 @@ export function toReferenceAsset(result: SearchResult): ReferenceAsset {
     native: result.origin === 'native_line_art',
     match: matchLabel(result.relevance),
     relevance: result.relevance,
-    traceAllowed: true,
+    traceAllowed: result.trace_allowed,
   }
 }
 

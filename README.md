@@ -54,8 +54,9 @@ npm run test:e2e     # Playwright (needs `npx playwright install chromium`)
 npm run contracts    # regenerate packages/contracts from the API (CI fails if stale)
 ```
 
-CI runs all of the above except Playwright, plus a synthetic-data smoke test
-that boots the API against the committed fixture gallery.
+CI runs all of the above, including Playwright, plus a synthetic-data smoke test
+that boots the API against the committed fixture gallery. Python installs are
+pinned by the committed ``uv.lock`` files under ``ml/`` and ``services/api/``.
 
 ## Repository layout
 
@@ -74,7 +75,7 @@ data/                Local datasets, indexes, models, SQLite — never committed
 | Endpoint | Milestone 1 |
 |---|---|
 | `GET /health` | readiness, CUDA/GPU, model + dataset/index versions, gallery size, warnings |
-| `POST /search` | full multipart contract with structured `400/413/422`; blank input → `200 mode=insufficient` |
+| `POST /search` | full multipart contract with structured `400/413/422`; unready → `503`; blank input → `200 mode=insufficient` |
 | `POST /events` · `GET/PUT /preferences` | interaction logging, Laplace-smoothed 30-day-half-life style affinity |
 | `GET /assets/{id}/thumbnail` · `/line-art` | enabled + SFW assets only; missing files auto-disable the asset |
 | `/curation/*` | mounted only with `LINESCOUT_CURATION_MODE=1`; progress works, the rest is 501 until Milestone 2 |

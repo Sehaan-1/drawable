@@ -19,6 +19,8 @@ class ScopeLabel(StrEnum):
     """
 
     EYE = "eye"
+    EYEBROW = "eyebrow"
+    MOUTH = "mouth"
     FACE_HEAD = "face_head"
     HAIR = "hair"
     HAND = "hand"

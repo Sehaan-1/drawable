@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, FlaskConical, Inbox, Keyboard, RotateCw, X } from 'lucide-react'
 import { ResearchShell } from '../components/AppChrome'
-import { Button, StatusDot } from '../components/primitives'
+import { Button } from '../components/primitives'
 import { useServiceStore } from '../services/serviceRegistry'
 import {
   useCurationNext,
@@ -16,11 +16,11 @@ import {
   type ReviewFormState,
 } from '../components/CuratePage/CurateInspector'
 import {
-  CropOverlay,
   defaultCrop,
   type PixelRect,
 } from '../components/CuratePage/CropOverlay'
 import type { CurationCandidate, LabelRequest } from '@drawable/contracts'
+import { fixtureCurationCandidate, fixtureCurationProgress } from '../services/curationFixtures'
 
 /**
  * Curation workspace.
@@ -61,6 +61,7 @@ export default function CuratePage() {
 
   const curationEnabled = health?.health?.curation_enabled === true
   const live = mode === 'live'
+  const offline = mode === 'fixture'
 
   // ---- filters ----------------------------------------------------------
   const [styleFilter, setStyleFilter] = useState<StyleFilter>(null)
@@ -77,11 +78,11 @@ export default function CuratePage() {
   // in flight, no edit in progress); otherwise the UI would jump under the
   // reviewer's hands while they are mid-decision.
   const [current, setCurrent] = useState<CurationCandidate | null>(null)
-  const [history, setHistory] = useState<string[]>([])
+  const [history, setHistory] = useState<CurationCandidate[]>([])
 
   // When the query result changes and we're not busy, advance the displayed
-  // candidate. We also push the new asset_id onto the history stack so the
-  // user can step back with the left-arrow key.
+  // candidate. We also push the previous *full* candidate onto the history
+  // stack so Previous can restore it immediately without a refetch.
   useEffect(() => {
     if (nextQuery.data === undefined) return // still loading or errored
     if (nextQuery.isFetching) return
@@ -89,8 +90,8 @@ export default function CuratePage() {
       if (previous && previous.asset_id === nextQuery.data?.asset_id) return previous
       if (nextQuery.data) {
         setHistory((stack) => {
-          if (previous && stack[stack.length - 1] !== previous.asset_id) {
-            return [...stack.slice(-(HISTORY_LIMIT - 1)), previous.asset_id]
+          if (previous && stack[stack.length - 1]?.asset_id !== previous.asset_id) {
+            return [...stack.slice(-(HISTORY_LIMIT - 1)), previous]
           }
           return stack
         })
@@ -99,12 +100,14 @@ export default function CuratePage() {
     })
   }, [nextQuery.data, nextQuery.isFetching])
 
+  const displayed = offline ? fixtureCurationCandidate : current
+
   // ---- form state -------------------------------------------------------
   const [form, setForm] = useState<ReviewFormState | null>(null)
   // Reset the form whenever the candidate changes.
   useEffect(() => {
     setForm(null)
-  }, [current?.asset_id])
+  }, [displayed?.asset_id])
 
   // ---- crop editing -----------------------------------------------------
   const [editingCrop, setEditingCrop] = useState(false)
@@ -114,21 +117,22 @@ export default function CuratePage() {
     // seed a fresh default once the new image's dimensions are known.
     setCrop(null)
     setEditingCrop(false)
-  }, [current?.asset_id])
+  }, [displayed?.asset_id])
 
   // ---- label submission -------------------------------------------------
   const writeLabel = useWriteLabel()
   const exportSnapshot = useExportSnapshot()
-  const busy = writeLabel.isPending || exportSnapshot.isPending
+  const busy = !offline && (writeLabel.isPending || exportSnapshot.isPending)
 
   const submit = useCallback(
     (decision: 'keep' | 'reject') => {
-      if (!current || !form) return
+      if (offline || !current || !form) return
       // Quality is required by the API on keep. We block here instead of
       // letting the server bounce with 422 to keep the UX snappy.
       if (decision === 'keep' && form.quality === null) return
       const payload: LabelRequest = {
         asset_id: current.asset_id,
+        expected_review_state: current.review_state,
         decision,
         primary_style: form.primaryStyle === current.primary_style ? null : form.primaryStyle,
         scopes: sameScopes(form.scopes, current.scopes) ? null : form.scopes,
@@ -145,33 +149,37 @@ export default function CuratePage() {
         },
       })
     },
-    [current, form, crop, writeLabel],
+    [offline, current, form, crop, writeLabel],
   )
 
   // ---- navigation -------------------------------------------------------
   const onPrev = useCallback(() => {
+    if (offline) return
     setHistory((stack) => {
       if (stack.length === 0) return stack
-      const previousId = stack[stack.length - 1]!
-      const trimmed = stack.slice(0, -1)
-      // We don't have the full candidate in the stack — only the id. For
-      // "previous" we just refetch the next-from-the-top by issuing a
-      // navigation: bump the candidate cache key is awkward, so we
-      // synthesise a thin record from the id. The actual data will be
-      // re-fetched by the next /next response.
-      // We push a synthetic placeholder and let the next query return the
-      // full payload; the stage will show the new image as soon as it lands.
-      void previousId
-      return trimmed
+      const previous = stack[stack.length - 1]!
+      setCurrent(previous)
+      return stack.slice(0, -1)
     })
-    // Refetch so the stage moves off the current candidate and the next
-    // /next lands a different one.
-    void nextQuery.refetch()
-  }, [nextQuery])
+  }, [offline])
 
   const onNext = useCallback(() => {
+    if (offline) return
+    setCurrent((shown) => {
+      const liveCandidate = nextQuery.data
+      if (shown && liveCandidate && shown.asset_id !== liveCandidate.asset_id) {
+        setHistory((stack) => {
+          if (stack[stack.length - 1]?.asset_id !== shown.asset_id) {
+            return [...stack.slice(-(HISTORY_LIMIT - 1)), shown]
+          }
+          return stack
+        })
+        return liveCandidate
+      }
+      return shown
+    })
     void nextQuery.refetch()
-  }, [nextQuery])
+  }, [offline, nextQuery])
 
   // ---- keyboard shortcuts ----------------------------------------------
   // We keep the latest ``submit`` and ``form`` in refs so the keydown
@@ -237,12 +245,12 @@ export default function CuratePage() {
         case '1':
         case '2':
         case '3': {
-          if (!current) return
+          if (!displayed) return
           fire(event.key, () => {
             const quality = Number(event.key) as 1 | 2 | 3
             setForm((previous) => ({
-              primaryStyle: current.primary_style,
-              scopes: [...current.scopes],
+              primaryStyle: displayed.primary_style,
+              scopes: [...displayed.scopes],
               quality,
               note: previous?.note ?? '',
               malformedAnatomy: previous?.malformedAnatomy ?? false,
@@ -268,7 +276,7 @@ export default function CuratePage() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [current, onPrev, onNext])
+  }, [displayed, onPrev, onNext])
 
   // Auto-dismiss the key indicator after 1.2s and the missing-quality
   // warning after 2s.
@@ -288,9 +296,10 @@ export default function CuratePage() {
 
   // ---- layout pieces ---------------------------------------------------
   const totalSeen = useMemo(() => {
-    if (!current) return null
+    if (!displayed) return null
+    if (offline) return { current: 1, total: 1 }
     return { current: history.length + 1, total: history.length + 1 }
-  }, [current, history.length])
+  }, [displayed, history.length, offline])
 
   // The crop controls use the parent's state via callbacks, so we
   // synthesise ``onCropCommit`` = ``onCropChange`` for now (commits are
@@ -312,29 +321,7 @@ export default function CuratePage() {
     )
   }
 
-  if (!live) {
-    return (
-      <ResearchShell eyebrow="Dataset workspace" title="Curation">
-        <div className="curation-layout curation-layout--empty">
-          <div className="curation-placeholder">
-            <AlertCircle size={22} />
-            <h2>Start the local API to curate</h2>
-            <p>
-              The curation workspace talks to <code>/api/v1/curation/*</code>, which
-              is only mounted when the API is started with{' '}
-              <code>LINESCOUT_CURATION_MODE=1</code>. See the API README for setup
-              instructions.
-            </p>
-            <Button onClick={() => void probe()}>
-              <RotateCw size={15} /> Try again
-            </Button>
-          </div>
-        </div>
-      </ResearchShell>
-    )
-  }
-
-  if (!curationEnabled) {
+  if (live && !curationEnabled) {
     return (
       <ResearchShell eyebrow="Dataset workspace" title="Curation">
         <div className="curation-layout curation-layout--empty">
@@ -352,7 +339,7 @@ export default function CuratePage() {
     )
   }
 
-  if (nextQuery.isError) {
+  if (!offline && nextQuery.isError) {
     return (
       <ResearchShell eyebrow="Dataset workspace" title="Curation">
         <div className="curation-layout curation-layout--empty">
@@ -369,13 +356,13 @@ export default function CuratePage() {
     )
   }
 
-  const queueEmpty = current === null && !nextQuery.isLoading
+  const queueEmpty = !offline && current === null && !nextQuery.isLoading
 
   return (
     <ResearchShell eyebrow="Dataset workspace" title="Curation">
       <div className="curation-layout">
         <CurateSidebar
-          progress={progressQuery.data ?? null}
+          progress={offline ? fixtureCurationProgress : progressQuery.data ?? null}
           style={styleFilter}
           scope={scopeFilter}
           onStyle={setStyleFilter}
@@ -409,7 +396,7 @@ export default function CuratePage() {
           </section>
         ) : (
           <CurateStage
-            candidate={current}
+            candidate={displayed}
             editingCrop={editingCrop}
             onToggleCrop={() => setEditingCrop((value) => !value)}
             crop={crop}
@@ -418,28 +405,30 @@ export default function CuratePage() {
             onPrev={onPrev}
             onNext={onNext}
             onReset={() => {
-              if (current) {
-                const next = defaultCrop(current.width, current.height)
+              if (displayed) {
+                const next = defaultCrop(displayed.width, displayed.height)
                 setCrop(next)
               }
             }}
-            hasPrev={history.length > 0}
-            hasNext
+            hasPrev={!offline && history.length > 0}
+            hasNext={!offline}
             position={totalSeen}
             busy={busy}
           />
         )}
 
         <CurateInspector
-          candidate={current}
+          candidate={displayed}
           pendingForm={form}
           onFormChange={setForm}
           onKeep={() => submit('keep')}
           onReject={() => submit('reject')}
-          onSnapshot={() => exportSnapshot.mutate()}
+          onSnapshot={() => {
+            if (!offline) exportSnapshot.mutate()
+          }}
           busy={busy}
-          snapshotPending={exportSnapshot.isPending}
-          disabled={!curationEnabled}
+          snapshotPending={!offline && exportSnapshot.isPending}
+          disabled={offline || !curationEnabled}
         />
 
         {/* Keyboard shortcut HUD. Floats over the layout so the user can

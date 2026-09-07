@@ -13,7 +13,7 @@ test('draws strokes and advances fixture references', async ({ page }) => {
     await page.mouse.up()
   }
   await expect(page.getByText('Best match')).toBeVisible({ timeout: 5000 })
-  await page.getByRole('button', { name: /View Eye study/i }).first().click()
+  await page.getByRole('button', { name: /View Face construction/i }).first().click()
   await expect(page.getByText('Selected reference')).toBeVisible()
   await page.getByRole('button', { name: 'Trace', exact: true }).click()
   await page.getByRole('button', { name: 'Layers', exact: true }).click()
@@ -103,7 +103,7 @@ test('uses the live API when health responds and sends the multipart contract', 
         scope_predictions: [{ label: 'eye', confidence: 0.9 }],
         groups: [{ id: 'best_match', title: 'Best Match', kind: 'best_match', style: null, scope: null, results: [{
           asset_id: 'ls_e2e_0000000000000001', thumbnail_url: '/api/v1/assets/x/thumbnail', style: 'manga_anime', scopes: ['eye'],
-          origin: 'native_line_art', relevance: 0.93, quality: 0.8, asset_url: '/api/v1/assets/x/line-art',
+          origin: 'native_line_art', trace_allowed: true, relevance: 0.93, quality: 0.8, asset_url: '/api/v1/assets/x/line-art',
         }] }],
         timing: { preprocessing_ms: 1, embedding_ms: 0, retrieval_ms: 1, reranking_ms: 0, total_ms: 2 }, warning: null,
       },
@@ -135,7 +135,7 @@ test('exports and reopens an editable drawable project in a new tab', async ({ p
   await page.mouse.move(box.x + box.width * 0.62, box.y + box.height * 0.58, { steps: 10 })
   await page.mouse.up()
   await expect(page.getByText('Possibly an eye')).toBeVisible({ timeout: 5000 })
-  await page.getByRole('button', { name: /View Eye study/i }).first().click()
+  await page.getByRole('button', { name: /View Face construction/i }).first().click()
   await page.getByRole('button', { name: 'Trace', exact: true }).click()
 
   const projectDownload = page.waitForEvent('download')

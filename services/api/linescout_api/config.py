@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     )
 
     # Server
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
     log_level: Literal["debug", "info", "warning", "error"] = "info"
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]

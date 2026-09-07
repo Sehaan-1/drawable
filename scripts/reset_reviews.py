@@ -30,7 +30,7 @@ def main() -> int:
         ).fetchall()
         conn.execute("DELETE FROM curation_labels")
         conn.execute(
-            "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 1"
+            "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 0"
         )
         conn.commit()
         after = conn.execute(

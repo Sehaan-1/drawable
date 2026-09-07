@@ -4,14 +4,12 @@
       "Body_search_api_v1_search_post": {
         "properties": {
           "canvas_height": {
-            "maximum": 8192.0,
-            "minimum": 256.0,
+            "exclusiveMinimum": 0.0,
             "title": "Canvas Height",
             "type": "integer"
           },
           "canvas_width": {
-            "maximum": 8192.0,
-            "minimum": 256.0,
+            "exclusiveMinimum": 0.0,
             "title": "Canvas Width",
             "type": "integer"
           },
@@ -285,6 +283,68 @@
         "title": "CurationProgress",
         "type": "object"
       },
+      "ErrorDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "Stable machine-readable error code, e.g. image_too_large.",
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "description": "Structured error envelope required on every failure path.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id",
+          "retryable",
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
       "EventRequest": {
         "additionalProperties": false,
         "properties": {
@@ -308,7 +368,8 @@
             "type": "string"
           },
           "style": {
-            "$ref": "#/components/schemas/PrimaryStyle"
+            "$ref": "#/components/schemas/PrimaryStyle",
+            "description": "Client-reported style. Ignored; the gallery asset's primary style is stored."
           }
         },
         "required": [
@@ -539,6 +600,9 @@
             "title": "Decision",
             "type": "string"
           },
+          "expected_review_state": {
+            "$ref": "#/components/schemas/ReviewState"
+          },
           "malformed_anatomy": {
             "default": false,
             "title": "Malformed Anatomy",
@@ -613,6 +677,7 @@
         },
         "required": [
           "asset_id",
+          "expected_review_state",
           "decision"
         ],
         "title": "LabelRequest",
@@ -818,6 +883,30 @@
         "title": "PrimaryStyle",
         "type": "string"
       },
+      "ReadyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ready": {
+            "const": true,
+            "default": true,
+            "title": "Ready",
+            "type": "boolean"
+          }
+        },
+        "title": "ReadyResponse",
+        "type": "object"
+      },
+      "ReviewState": {
+        "description": "Human curation state for an asset.",
+        "enum": [
+          "unreviewed",
+          "accepted",
+          "rejected",
+          "quarantined"
+        ],
+        "title": "ReviewState",
+        "type": "string"
+      },
       "ScopeBreakdown": {
         "additionalProperties": false,
         "description": "Reviewed/accepted/rejected counts for a single scope bucket.",
@@ -856,6 +945,8 @@
         "description": "What part of a character (or how many characters) an image depicts.\n\nAn asset may carry several scope labels; queries return one probability per\nlabel plus ``unknown``.",
         "enum": [
           "eye",
+          "eyebrow",
+          "mouth",
           "face_head",
           "hair",
           "hand",
@@ -1046,6 +1137,11 @@
           "thumbnail_url": {
             "title": "Thumbnail Url",
             "type": "string"
+          },
+          "trace_allowed": {
+            "description": "Whether this asset may be placed on the trace layer. Native line art is allowed; extracted line art is not.",
+            "title": "Trace Allowed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -1054,6 +1150,7 @@
           "style",
           "scopes",
           "origin",
+          "trace_allowed",
           "relevance",
           "quality",
           "asset_url"
@@ -1403,6 +1500,51 @@
         ]
       }
     },
+    "/api/v1/curation/assets/{asset_id}/{kind}": {
+      "get": {
+        "description": "Serve unreviewed (and other) gallery files to the curation UI only.\n\nPublic ``/api/v1/assets/{id}/...`` routes stay gated on\n``enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1``.",
+        "operationId": "preview_asset_api_v1_curation_assets__asset_id___kind__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Asset",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
     "/api/v1/curation/labels": {
       "post": {
         "operationId": "write_label_api_v1_curation_labels_post",
@@ -1557,7 +1699,7 @@
     },
     "/api/v1/events": {
       "post": {
-        "description": "Record an interaction. The timestamp is generated server-side.",
+        "description": "Record an interaction. Timestamp and style are generated server-side.",
         "operationId": "record_event_api_v1_events_post",
         "requestBody": {
           "content": {
@@ -1678,6 +1820,37 @@
         ]
       }
     },
+    "/api/v1/ready": {
+      "get": {
+        "operationId": "ready_api_v1_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Model or gallery is not ready"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "health"
+        ]
+      }
+    },
     "/api/v1/search": {
       "post": {
         "operationId": "search_api_v1_search_post",
@@ -1703,13 +1876,44 @@
             "description": "Successful Response"
           },
           "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
             "description": "Malformed image or strokes"
           },
           "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
             "description": "Body too large"
           },
           "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
             "description": "Invalid field"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Model or gallery is not ready"
           }
         },
         "summary": "Search",

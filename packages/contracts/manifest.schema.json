@@ -114,11 +114,6 @@
           "title": "Asset Id",
           "type": "string"
         },
-        "checksum": {
-          "pattern": "^[a-f0-9]{64}$",
-          "title": "Checksum",
-          "type": "string"
-        },
         "crop": {
           "anyOf": [
             {
@@ -177,6 +172,11 @@
           "title": "License Id",
           "type": "string"
         },
+        "line_art_checksum": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Line Art Checksum",
+          "type": "string"
+        },
         "line_art_path": {
           "maxLength": 512,
           "minLength": 1,
@@ -193,10 +193,18 @@
           "type": "string"
         },
         "person_count": {
-          "maximum": 50,
-          "minimum": 0,
-          "title": "Person Count",
-          "type": "integer"
+          "anyOf": [
+            {
+              "maximum": 50,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Person Count"
         },
         "phash": {
           "pattern": "^[a-f0-9]{16}$",
@@ -231,6 +239,11 @@
         },
         "sfw": {
           "$ref": "#/$defs/SfwDecision"
+        },
+        "source_checksum": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Source Checksum",
+          "type": "string"
         },
         "source_dataset": {
           "maxLength": 64,
@@ -272,6 +285,11 @@
           "title": "Text Coverage",
           "type": "number"
         },
+        "thumbnail_checksum": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Thumbnail Checksum",
+          "type": "string"
+        },
         "thumbnail_path": {
           "maxLength": 512,
           "minLength": 1,
@@ -296,7 +314,6 @@
         "origin",
         "primary_style",
         "scopes",
-        "person_count",
         "sfw",
         "width",
         "height",
@@ -307,7 +324,9 @@
         "split",
         "enabled",
         "pipeline_version",
-        "checksum"
+        "source_checksum",
+        "line_art_checksum",
+        "thumbnail_checksum"
       ],
       "title": "ManifestRecord",
       "type": "object"
@@ -339,6 +358,8 @@
       "description": "What part of a character (or how many characters) an image depicts.\n\nAn asset may carry several scope labels; queries return one probability per\nlabel plus ``unknown``.",
       "enum": [
         "eye",
+        "eyebrow",
+        "mouth",
         "face_head",
         "hair",
         "hand",

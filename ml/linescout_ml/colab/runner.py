@@ -35,8 +35,10 @@ from linescout_ml.colab.assets import (
     asset_paths,
     build_manifest,
     build_record,
+    copy_original,
     merge_records,
     missing_files,
+    original_suffix_for,
     read_manifest,
     summarise,
     write_manifest,
@@ -235,8 +237,8 @@ class PipelineRunner:
     ) -> None:
         """Produce the three gallery files for one candidate."""
         asset_id = self._require_asset_id(candidate)
-        paths = asset_paths(asset_id)
         source_file = candidate.resolve_source_file(source)
+        paths = asset_paths(asset_id, original_suffix=original_suffix_for(source_file))
         if not source_file.is_file():
             candidate.skip_reason = "source_missing"
             return
@@ -264,25 +266,38 @@ class PipelineRunner:
                 return
             model, version = extractor.spec.model, extractor.version
 
+        copy_original(source_file, self.gallery_path(paths.original))
         write_png(line, self.gallery_path(paths.line_art))
-        write_png(rgb, self.gallery_path(paths.original))
         write_png(
-            make_thumbnail(gray, self.config.thumbnail_size), self.gallery_path(paths.thumbnail)
+            make_thumbnail(line, self.config.thumbnail_size), self.gallery_path(paths.thumbnail)
         )
 
         candidate.width, candidate.height = rgb.size
+        candidate.original_path = paths.original
         candidate.line_art_path = paths.line_art
         candidate.extraction_model = model
         candidate.extraction_version = version
-        candidate.checksum = sha256_file(self.gallery_path(paths.line_art))
+        candidate.source_checksum = sha256_file(self.gallery_path(paths.original))
+        candidate.line_art_checksum = sha256_file(self.gallery_path(paths.line_art))
+        candidate.thumbnail_checksum = sha256_file(self.gallery_path(paths.thumbnail))
         for image in (rgb, gray, line):
             image.close()
 
     def _extract_done(self, candidate: Candidate) -> bool:
         """Whether this candidate's three files already exist from a prior run."""
-        if not candidate.asset_id or not candidate.line_art_path or not candidate.checksum:
+        if not (
+            candidate.asset_id
+            and candidate.original_path
+            and candidate.line_art_path
+            and candidate.source_checksum
+            and candidate.line_art_checksum
+            and candidate.thumbnail_checksum
+        ):
             return False
-        paths = asset_paths(candidate.asset_id)
+        paths = asset_paths(
+            candidate.asset_id,
+            original_suffix=Path(candidate.original_path).suffix or ".png",
+        )
         return all(
             self.gallery_path(relative).is_file()
             for relative in (paths.original, paths.line_art, paths.thumbnail)
@@ -434,7 +449,10 @@ class PipelineRunner:
         if method == "source_rating" or classifier is None:
             return source_rating_sfw(1.0)
 
-        original = self.gallery_path(asset_paths(self._require_asset_id(candidate)).original)
+        relative = (
+            candidate.original_path or asset_paths(self._require_asset_id(candidate)).original
+        )
+        original = self.gallery_path(relative)
         try:
             rgb = load_rgb(original)
         except ImageReadError:

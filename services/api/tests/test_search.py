@@ -3,7 +3,9 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import math
 from pathlib import Path
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -78,6 +80,9 @@ def test_malformed_image_is_400(client: TestClient, session_id: str) -> None:
     assert status == 400
     assert body["error"]["code"] == "image_malformed"
     assert body["error"]["field"] == "image"
+    assert body["schema_version"] == 1
+    assert body["retryable"] is False
+    UUID(str(body["request_id"]))
 
 
 def test_non_png_image_is_422(client: TestClient, session_id: str) -> None:
@@ -103,6 +108,21 @@ def test_invalid_style_enum_is_422(client: TestClient, session_id: str) -> None:
 def test_unsupported_canvas_dimensions_are_422(client: TestClient, session_id: str) -> None:
     status, body = post_search(client, session_id, png_bytes(draw_figure), canvas_width=10)
     assert status == 422 and body["error"]["field"] == "canvas_width"
+    status, body = post_search(client, session_id, png_bytes(draw_figure), canvas_width=512)
+    assert status == 422
+    assert body["error"]["code"] == "canvas_dimensions"
+    assert body["error"]["field"] == "canvas_width"
+    status, body = post_search(client, session_id, png_bytes(draw_figure), canvas_height=1024)
+    assert status == 422
+    assert body["error"]["code"] == "canvas_dimensions"
+    assert body["error"]["field"] == "canvas_height"
+
+
+def test_wrong_snapshot_size_is_422(client: TestClient, session_id: str) -> None:
+    status, body = post_search(client, session_id, png_bytes(draw_figure, size=64))
+    assert status == 422
+    assert body["error"]["code"] == "image_dimensions"
+    assert body["error"]["field"] == "image"
 
 
 def test_long_text_hint_is_422(client: TestClient, session_id: str) -> None:
@@ -159,6 +179,27 @@ def test_malformed_strokes_are_400(client: TestClient, session_id: str) -> None:
     bad_json = gzip.compress(b'{"version": 1, "strokes": "nope"}')
     status, body = post_search(client, session_id, png_bytes(draw_figure), strokes=bad_json)
     assert status == 400 and body["error"]["code"] == "strokes_malformed"
+
+
+def test_non_finite_stroke_points_are_rejected(client: TestClient, session_id: str) -> None:
+    for value in (math.nan, math.inf, -math.inf):
+        sequence = {
+            "version": 1,
+            "canvas_width": 2048,
+            "canvas_height": 2048,
+            "strokes": [
+                {
+                    "tool": "pressure",
+                    "pointer": "pen",
+                    "points": [{"x": value, "y": 2, "p": 0.5, "t": 0}],
+                }
+            ],
+        }
+        payload = gzip.compress(json.dumps(sequence).encode("utf-8"))
+        status, body = post_search(client, session_id, png_bytes(draw_figure), strokes=payload)
+        assert status == 400
+        assert body["error"]["code"] == "strokes_malformed"
+        assert body["retryable"] is False
 
 
 def test_oversized_strokes_are_413(client: TestClient, session_id: str) -> None:
@@ -247,6 +288,21 @@ def test_results_never_include_disabled_assets(client: TestClient, session_id: s
         assert disabled not in ids
 
 
+def test_trace_allowed_follows_native_origin(client: TestClient, session_id: str) -> None:
+    _, body = post_search(
+        client, session_id, png_bytes(draw_figure), stroke_count=14, point_count=900
+    )
+    seen_native = False
+    seen_extracted = False
+    for group in body["groups"]:
+        for result in group["results"]:
+            native = result["origin"] == "native_line_art"
+            assert result["trace_allowed"] is native
+            seen_native = seen_native or native
+            seen_extracted = seen_extracted or not native
+    assert seen_native and seen_extracted
+
+
 def test_no_result_below_relevance_floor(client: TestClient, session_id: str) -> None:
     from linescout_api.fixture_ranker import RELEVANCE_FLOOR
 
@@ -285,18 +341,38 @@ def test_explicit_style_moves_row_second_but_best_match_stays_first(
     assert best_ids == [result["asset_id"] for result in baseline["groups"][0]["results"]]
 
 
-def test_not_ready_api_returns_structured_422(tmp_path: Path, session_id: str) -> None:
+def test_not_ready_api_returns_structured_503(tmp_path: Path, session_id: str) -> None:
     settings = make_settings(tmp_path, gallery_manifest=tmp_path / "missing.json")
     with TestClient(create_app(settings)) as client:
         status, body = post_search(
             client, session_id, png_bytes(draw_figure), stroke_count=14, point_count=900
         )
-        assert status == 422 and body["error"]["code"] == "not_ready"
+        assert status == 503 and body["error"]["code"] == "not_ready"
+        assert body["retryable"] is True
+        assert body["schema_version"] == 1
+        UUID(str(body["request_id"]))
         # Insufficient input short-circuits before readiness so a blank canvas still gets 200.
         status, body = post_search(
             client, session_id, png_bytes(None), stroke_count=0, point_count=0
         )
         assert status == 200 and body["mode"] == "insufficient"
+
+
+def test_imported_raster_with_zero_points_is_searchable(
+    client: TestClient, session_id: str
+) -> None:
+    status, body = post_search(
+        client, session_id, png_bytes(draw_figure), stroke_count=0, point_count=0
+    )
+    assert status == 200
+    assert body["mode"] in ("provisional", "confident")
+    assert body["groups"]
+
+
+def test_zip_bomb_strokes_are_413(client: TestClient, session_id: str) -> None:
+    bomb = gzip.compress(b"\x00" * (2 * 1024 * 1024))
+    status, body = post_search(client, session_id, png_bytes(draw_figure), strokes=bomb)
+    assert status == 413 and body["error"]["code"] == "strokes_too_large"
 
 
 # ---------------------------------------------------------------- assets

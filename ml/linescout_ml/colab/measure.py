@@ -430,11 +430,11 @@ def duplicate_groups(hashes: Sequence[str], threshold: int) -> list[list[int]]:
     )
 
 
-def make_thumbnail(gray: Image.Image, size: int) -> Image.Image:
-    """Aspect-fit into a ``size``×``size`` white square (reference-panel tile)."""
-    width, height = gray.size
+def make_thumbnail(image: Image.Image, size: int) -> Image.Image:
+    """Aspect-fit the extracted artifact into a ``size``×``size`` white square."""
+    width, height = image.size
     scale = size / max(width, height)
-    fitted = gray.resize(
+    fitted = image.resize(
         (max(1, round(width * scale)), max(1, round(height * scale))),
         Image.Resampling.LANCZOS,
     )
@@ -482,7 +482,7 @@ def measure_image(gray: Image.Image, *, analysis_edge: int = 512) -> Measurement
 
 
 def sha256_file(path: Path, chunk_size: int = 1 << 20) -> str:
-    """Streaming SHA-256 of a file, used for the manifest's ``checksum``."""
+    """Streaming SHA-256 of a file, used for source and derivative checksums."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         while block := handle.read(chunk_size):
