@@ -42,7 +42,7 @@ function runCapture(cmd, args) {
 
 function venvPython(workspace) {
   for (const suffix of VENV_PY_CANDIDATES) {
-    const candidate = join(workspace, '.venv', suffix)
+    const candidate = resolve(root, workspace, '.venv', suffix)
     if (existsSync(candidate)) return candidate
   }
   return null

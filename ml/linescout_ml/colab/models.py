@@ -300,9 +300,7 @@ class DinoEncoder(ImageEncoder):
         try:
             # trust_repo=True keeps a non-interactive Colab cell from blocking on
             # torch.hub's "do you trust this repo?" prompt.
-            model = torch.hub.load(
-                "facebookresearch/dinov2", card.name, device=device, trust_repo=True
-            )
+            model = torch.hub.load("facebookresearch/dinov2", card.name, trust_repo=True).to(device)
         except Exception as error:  # hub failures are network or permission shaped
             msg = f"could not load DINOv2 {card.name} from torch.hub: {error}"
             raise EncoderError(msg) from error

@@ -230,7 +230,7 @@ def test_the_dry_run_cell_executes_end_to_end(tmp_path: Path) -> None:
     """
     text = code_sources()[notebook_index()]
     assert "/content/linescout-dryrun" in text, "unexpected dry-run root"
-    text = text.replace("/content/linescout-dryrun", str(tmp_path / "dryrun"))
+    text = text.replace("/content/linescout-dryrun", (tmp_path / "dryrun").as_posix())
 
     namespace: dict[str, Any] = {
         "REPO": REPO_ROOT,
@@ -286,7 +286,7 @@ def test_the_dry_run_cell_executes_end_to_end(tmp_path: Path) -> None:
 def test_dry_run_cell_output_matches_the_documented_claims(tmp_path: Path) -> None:
     """The prose promises a gallery tree; check the dry run really produces it."""
     text = code_sources()[notebook_index()].replace(
-        "/content/linescout-dryrun", str(tmp_path / "dryrun")
+        "/content/linescout-dryrun", (tmp_path / "dryrun").as_posix()
     )
     namespace: dict[str, Any] = {
         "REPO": REPO_ROOT,

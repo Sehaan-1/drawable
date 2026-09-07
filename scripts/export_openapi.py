@@ -41,8 +41,12 @@ def main() -> int:
     (CONTRACTS / "openapi.json").write_text(
         json.dumps(spec, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    (CONTRACTS / "manifest.schema.json").write_text(dump_json_schema(), encoding="utf-8")
-    print(f"wrote {CONTRACTS / 'openapi.json'} and {CONTRACTS / 'manifest.schema.json'}")
+    (CONTRACTS / "manifest.schema.json").write_text(
+        dump_json_schema(), encoding="utf-8"
+    )
+    print(
+        f"wrote {CONTRACTS / 'openapi.json'} and {CONTRACTS / 'manifest.schema.json'}"
+    )
     return 0
 
 

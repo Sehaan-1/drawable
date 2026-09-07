@@ -34,13 +34,14 @@ async function checkPackage(pkg, module) {
   if (!existsSync(py)) {
     throw new Error(`Missing virtualenv for ${pkg}. Run \`npm run setup:py\` first.`)
   }
+  const opts = { cwd: resolve(root, pkg) }
   console.log(`\n==> ${pkg}: ruff`)
-  await run(py, ['-m', 'ruff', 'check', '.'])
-  await run(py, ['-m', 'ruff', 'format', '--check', '.'])
+  await run(py, ['-m', 'ruff', 'check', '.'], opts)
+  await run(py, ['-m', 'ruff', 'format', '--check', '.'], opts)
   console.log(`==> ${pkg}: mypy`)
-  await run(py, ['-m', 'mypy', module])
+  await run(py, ['-m', 'mypy', module], opts)
   console.log(`==> ${pkg}: pytest`)
-  await run(py, ['-m', 'pytest', '-q'])
+  await run(py, ['-m', 'pytest', '-q'], opts)
 }
 
 async function main() {

@@ -29,7 +29,9 @@ def main() -> int:
             "SELECT review_state, COUNT(*) FROM assets GROUP BY review_state"
         ).fetchall()
         conn.execute("DELETE FROM curation_labels")
-        conn.execute("UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 1")
+        conn.execute(
+            "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 1"
+        )
         conn.commit()
         after = conn.execute(
             "SELECT review_state, COUNT(*) FROM assets GROUP BY review_state"

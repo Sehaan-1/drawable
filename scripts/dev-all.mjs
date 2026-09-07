@@ -33,7 +33,14 @@ const children = [
   ['api', python, ['-m', 'linescout_api.main'], join(root, 'services/api')],
   ['web', 'npm', ['run', 'dev', '--workspace=@drawable/web'], root],
 ].map(([name, cmd, args, cwd]) => {
-  const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const isCmd = process.platform === 'win32' && cmd === 'npm'
+  const executable = isCmd ? 'npm.cmd' : cmd
+  const child = spawn(executable, args, {
+    cwd,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: isCmd,
+  })
   const tag = `[${name}] `
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', (chunk) => process.stdout.write(chunk.toString().replace(/^(?=.)/gm, tag)))

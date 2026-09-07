@@ -26,7 +26,9 @@ def _multipart(
     body = bytearray()
     for name, value in fields.items():
         body += f"--{boundary}\r\n".encode()
-        body += f'Content-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        body += (
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode()
+        )
     for name, (filename, data, content_type) in files.items():
         body += f"--{boundary}\r\n".encode()
         body += f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'.encode()
@@ -53,7 +55,11 @@ def _figure_png() -> bytes:
 def _get(url: str) -> tuple[int, bytes, str]:
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
-            return response.status, response.read(), response.headers.get("content-type", "")
+            return (
+                response.status,
+                response.read(),
+                response.headers.get("content-type", ""),
+            )
     except urllib.error.HTTPError as error:
         return error.code, error.read(), error.headers.get("content-type", "")
 
@@ -70,7 +76,9 @@ def main(base: str) -> int:
     health = json.loads(raw)
     check(status == 200, "health returns 200")
     check(health["ready"] is True, f"api is ready (warnings={health['warnings']})")
-    check(health["gallery_size"] > 0, f"gallery loaded ({health['gallery_size']} assets)")
+    check(
+        health["gallery_size"] > 0, f"gallery loaded ({health['gallery_size']} assets)"
+    )
 
     session = str(uuid.uuid4())
     fields = {
@@ -81,15 +89,23 @@ def main(base: str) -> int:
         "stroke_count": "14",
         "point_count": "900",
     }
-    body, content_type = _multipart(fields, {"image": ("s.png", _figure_png(), "image/png")})
+    body, content_type = _multipart(
+        fields, {"image": ("s.png", _figure_png(), "image/png")}
+    )
     request = urllib.request.Request(
         f"{base}/api/v1/search", data=body, headers={"Content-Type": content_type}
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         search = json.loads(response.read())
     check(search["revision"] == 12, "search echoes the request revision")
-    check(search["mode"] == "confident", f"full figure is confident (got {search['mode']})")
-    check(search["groups"] and search["groups"][0]["kind"] == "best_match", "Best Match is first")
+    check(
+        search["mode"] == "confident",
+        f"full figure is confident (got {search['mode']})",
+    )
+    check(
+        search["groups"] and search["groups"][0]["kind"] == "best_match",
+        "Best Match is first",
+    )
     check(len(search["groups"][0]["results"]) <= 8, "Best Match has at most 8 results")
     check(
         all(len(g["results"]) <= 6 for g in search["groups"][1:]),
@@ -102,11 +118,15 @@ def main(base: str) -> int:
 
     first = search["groups"][0]["results"][0]
     status, data, kind = _get(f"{base}{first['thumbnail_url']}")
-    check(status == 200 and kind == "image/png" and len(data) > 0, "thumbnail is served")
+    check(
+        status == 200 and kind == "image/png" and len(data) > 0, "thumbnail is served"
+    )
     status, data, kind = _get(f"{base}{first['asset_url']}")
     check(status == 200 and kind == "image/png", "trace-compatible line art is served")
 
-    body, content_type = _multipart(fields, {"image": ("s.png", b"not a png", "image/png")})
+    body, content_type = _multipart(
+        fields, {"image": ("s.png", b"not a png", "image/png")}
+    )
     request = urllib.request.Request(
         f"{base}/api/v1/search", data=body, headers={"Content-Type": content_type}
     )
