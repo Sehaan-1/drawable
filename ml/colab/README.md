@@ -83,9 +83,19 @@ is verified the same way, against GitHub rather than a fixture:
 
 ```bash
 .venv/bin/linescout-repro checkout --dir /tmp/ls-pin --rev <pin>   # canonical + mirror
+# and prove the pinned tree is self-consistent, with *its* code on the path:
+cd /tmp && PYTHONPATH=/tmp/ls-pin/ml <repo>/ml/.venv/bin/python -c \
+  "from pathlib import Path; from linescout_ml.colab import run_selfcheck; \
+print(run_selfcheck(Path('/tmp/ls-pin')))"
 ```
 
-which prints `HEAD : 407a483f17fd  (matches the pin)` for both URLs. The reason the
+The first prints `HEAD : 407a483f17fd  (matches the pin)` for both URLs; the second
+prints `[]`, which is the stronger claim — the pinned commit's own notebook,
+environment spec, checkpoint lock, and docs agree with *each other*, not merely with
+whatever the working tree looks like now. Running it from the repository root instead
+of `/tmp` silently audits the pinned files against the working tree's `COLAB_PIN` and
+invents two spurious problems, which is the one way to get a false failure out of this
+design. The reason the
 canonical URL answers at all is that `Sehaan-1/drawable` is a *fork* of
 `junosapollo/drawable` and GitHub shares object storage across a fork network — enough
 to run today, a hazard tomorrow, because a pin reachable only through a fork breaks
