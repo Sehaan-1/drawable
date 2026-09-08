@@ -77,10 +77,16 @@ when the canonical URL is unreachable, and it cannot change what runs: whatever 
 is checked out by SHA and the checkout is refused if HEAD is not the pin. Content
 addressing is what makes a mirror safe; "a second URL I trust" would not be.
 
-That commit is `ml: make the Colab pipeline reproducible beyond lockfiles`. It was
-pushed to `Sehaan-1/drawable` first, so until it reaches the canonical repository the
-notebook resolves it through the mirror — which is the fallback's whole purpose, and
-visible in cell 2's output as a `note:` line rather than as a silent substitution.
+That commit is `ml: make the Colab pipeline reproducible beyond lockfiles`, and both
+URLs were asked whether they could serve it: `linescout-repro checkout --rev <pin>`
+fetched it from `junosapollo/drawable.git` *and* from the mirror, printing
+`HEAD : 06ae97663c8c  (matches the pin)` either way. The reason the canonical URL
+answers is that `Sehaan-1/drawable` is a fork of `junosapollo/drawable` and GitHub
+shares object storage across a fork network — which is fine today and a hazard
+tomorrow, because a pin that is reachable only through a fork breaks the moment that
+fork is re-created or detached. **Merging the branch is what makes this pin permanent**;
+until then the fetch works for an incidental reason rather than the intended one.
+
 `0000000000000000000000000000000000000000` is what the pin held before that commit
 existed: a format-valid SHA no repository contains, named out loud by
 `COLAB_PIN_PLACEHOLDER` so that `linescout-repro pin --check` (wired into CI) fails

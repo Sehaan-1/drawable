@@ -50,11 +50,12 @@ COLAB_MIRROR_URLS: tuple[str, ...] = ("https://github.com/Sehaan-1/drawable.git"
 #: ``linescout-repro selfcheck`` and the notebook's tests to see what moved, and
 #: re-run the documented Colab smoke test before landing a new pin.
 #:
-#: The commit must be *reachable* from :data:`COLAB_REPO_URL` or a mirror before a
-#: Colab runtime can fetch it: a pin that only exists on an unpushed local branch
-#: fails in a notebook, not in CI. This one is ``ml: make the Colab pipeline
-#: reproducible beyond lockfiles``, pushed to ``Sehaan-1/drawable`` and therefore
-#: resolvable through the mirror until it is merged into the canonical repository.
+#: The commit must be *reachable from a ref in the canonical repository* before a
+#: Colab runtime can fetch it; a pin that only exists on an unpushed local branch
+#: fails in a notebook, not in CI. A pinned commit that resolves only because a fork
+#: shares the parent's object storage is one `git remote remove` away from being
+#: unreachable, which is the difference between this pin and a permanent one.
+#: Verified with: ``linescout-repro checkout --dir /tmp/x --rev <COLAB_PIN>``.
 COLAB_PIN = "06ae97663c8c322f5020ae3574cb9ec55f00dbe3"
 
 #: A revision must be a full commit hash. Abbreviated hashes and branch names are

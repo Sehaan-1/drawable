@@ -23,6 +23,7 @@ reading the table at the bottom.
 | `requirements-colab.txt` agrees with `ml/uv.lock`, its names are all in the `[gpu]` extra, and no runtime pin is installed by pip | `linescout-repro selfcheck` |
 | Every checkpoint the default pipeline selects has a lock entry; nothing is fetched by tag; a digest or size mismatch stops the run | `pytest tests/test_colab_checkpoints.py` |
 | No heavy import is reachable at module scope, so CPU tests need no torch | `linescout-repro selfcheck` |
+| The checkout contract against a real remote: shallow fetch of the pinned SHA, HEAD compared, both URLs, and a reuse of the existing checkout | `linescout-repro checkout --dir /tmp/x --rev 06ae976…` — 12 hex out of a real clone of `junosapollo/drawable`, not a fixture |
 | The docs still describe the setup CI runs | `linescout-repro selfcheck` |
 
 Reproduce that block anywhere:
@@ -91,7 +92,7 @@ gap rather than silently missing.
 
 | Symptom | What it means | Do |
 |---|---|---|
-| `no commit ... in this repository` during the fetch | The pin names a commit the remote does not have (placeholder, unpushed branch, or a force-push) | Check `linescout-repro pin --check`; push the pinned commit or bump the pin. Never `git pull` inside the checkout to "fix" it. |
+| `no commit ... in this repository` during the fetch | The pin names a commit the remote does not have (placeholder, unpushed branch, force-push, or a detached fork whose objects went away) | Check `linescout-repro pin --check`, then `git ls-remote <url> <branch>`: the pin must be reachable from a *ref* in the canonical repo, not only through a fork's object network |
 | `refusing a checkout with uncommitted changes` | `REPO_ALLOW_DIRTY = False` and the tree is dirty | Commit elsewhere and re-point the pin, or set it to `True` knowing the run is recorded `dirty` |
 | `is N bytes, the lock says M` | A truncated or replaced download | Re-run; if it persists, the CDN served something else — record the URL and the digest in the issue |
 | `SHA-256 mismatch ... Refusing to run on bytes that do not match the lock` | The cached file is not the pinned file | The message names the path; delete *that file*, not the directory, and re-run |
