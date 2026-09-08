@@ -73,9 +73,11 @@ describe('useWriteLabel', () => {
         asset_id: 'a',
         expected_review_state: 'unreviewed',
         decision: 'keep',
+        primary_scope: 'eye',
+        secondary_scopes: [],
+        blockers: [],
         quality: 3,
-        malformed_anatomy: false,
-        poor_extraction: false,
+        sfw_safe: true,
       })
       await Promise.resolve()
     })

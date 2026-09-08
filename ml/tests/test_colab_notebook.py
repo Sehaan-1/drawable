@@ -28,6 +28,7 @@ import pytest
 
 from linescout_ml import colab
 from linescout_ml.colab import read_manifest
+from linescout_ml.manifest import is_servable
 
 NOTEBOOK_PATH = Path(__file__).resolve().parents[1] / "colab" / "linescout_gpu_pipeline.ipynb"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -291,7 +292,7 @@ def test_the_dry_run_cell_executes_end_to_end(tmp_path: Path) -> None:
         for relative in (record.original_path, record.line_art_path, record.thumbnail_path):
             assert relative in names, f"{relative} is missing from the export zip"
         assert record.review.state.value == "unreviewed"
-        assert record.enabled is False
+        assert is_servable(record) is False
 
 
 def test_dry_run_cell_output_matches_the_documented_claims(tmp_path: Path) -> None:
