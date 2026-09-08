@@ -78,23 +78,7 @@ jobs:
         run: .venv/bin/mypy ${{ matrix.module }}
       - name: Pytest
         working-directory: ${{ matrix.package }}
-        run: |
-          set +e
-          .venv/bin/pytest -q --junitxml=/tmp/pytest-results.xml 2>&1 | tail -5
-          status=$?
-          python3 - <<'PYEOF'
-          import xml.etree.ElementTree as ET
-          try:
-              tree = ET.parse('/tmp/pytest-results.xml')
-          except Exception:
-              raise SystemExit(0)
-          for tc in tree.iter('testcase'):
-              for result in list(tc):
-                  if result.tag in ('failure', 'error'):
-                      text = (result.text or '').replace('%', '%25').replace('\n', '%0A').replace('\r', '%0D')[:800]
-                      print(f"::error ::{tc.get('classname')}::{tc.get('name')}%0A{text}")
-          PYEOF
-          exit $status
+        run: .venv/bin/pytest -q
 
   synthetic-smoke:
     name: Synthetic-data smoke test
