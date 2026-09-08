@@ -53,6 +53,78 @@
       "title": "ArtifactContract",
       "type": "object"
     },
+    "CheckpointProvenance": {
+      "additionalProperties": false,
+      "description": "One pinned model artifact, as verified by the pipeline that used it.\n\n``status`` is the whole point: ``verified`` means the bytes matched a\npublished digest, ``recorded`` means the digest was captured on first use\nbecause the publisher exposes none, ``revision`` means only a repository\ncommit pinned it, and ``unchecked`` means verification was switched off.\nA dataset that quietly mixed those three is the failure this file exists to\nprevent, so the difference is written down per artifact.",
+      "properties": {
+        "group": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Group",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 3,
+          "title": "Id",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 512,
+          "title": "Locator",
+          "type": "string"
+        },
+        "pinned": {
+          "title": "Pinned",
+          "type": "boolean"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Bytes"
+        },
+        "status": {
+          "enum": [
+            "verified",
+            "recorded",
+            "revision",
+            "unchecked"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "group",
+        "locator",
+        "status",
+        "pinned"
+      ],
+      "title": "CheckpointProvenance",
+      "type": "object"
+    },
     "CropBox": {
       "additionalProperties": false,
       "description": "Crop coordinates in source-image pixel space (inclusive-exclusive).",
@@ -214,6 +286,19 @@
           ],
           "default": null,
           "title": "Extraction Model"
+        },
+        "extraction_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraction Sha256"
         },
         "extraction_version": {
           "anyOf": [
@@ -539,6 +624,136 @@
       "title": "Permissions",
       "type": "object"
     },
+    "PipelineProvenance": {
+      "additionalProperties": false,
+      "description": "Which code, environment, and weights produced this gallery.\n\nIdentity only \u2014 no timestamps, because ``Manifest.content_hash()`` keys the\nderived indexes and must not move when nothing but the clock did.",
+      "properties": {
+        "checkpoint_policy": {
+          "default": "record",
+          "enum": [
+            "strict",
+            "record",
+            "off"
+          ],
+          "title": "Checkpoint Policy",
+          "type": "string"
+        },
+        "checkpoints": {
+          "items": {
+            "$ref": "#/$defs/CheckpointProvenance"
+          },
+          "maxItems": 64,
+          "title": "Checkpoints",
+          "type": "array"
+        },
+        "environment_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment Sha256"
+        },
+        "model_lock_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Lock Sha256"
+        },
+        "pipeline_version": {
+          "default": "colab-m2-1",
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Pipeline Version",
+          "type": "string"
+        },
+        "runtime": {
+          "additionalProperties": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "maxProperties": 64,
+          "title": "Runtime",
+          "type": "object"
+        },
+        "schema_version": {
+          "const": 3,
+          "default": 3,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_action": {
+          "anyOf": [
+            {
+              "enum": [
+                "cloned",
+                "reused",
+                "fetched",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Action"
+        },
+        "source_dirty": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Dirty"
+        },
+        "source_repo": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Repo"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        }
+      },
+      "title": "PipelineProvenance",
+      "type": "object"
+    },
     "PrimaryStyle": {
       "description": "Exactly one primary style per asset. Also the five reference-panel rows.",
       "enum": [
@@ -686,6 +901,17 @@
       "pattern": "^\\d{4}\\.\\d{2}\\.\\d{2}(-[a-z0-9]+)?$",
       "title": "Dataset Version",
       "type": "string"
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PipelineProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "records": {
       "items": {

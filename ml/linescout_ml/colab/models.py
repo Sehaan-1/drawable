@@ -31,10 +31,14 @@ import numpy as np
 from PIL import Image
 
 from linescout_ml.colab._optional import optional_module
+from linescout_ml.colab.checkpoints import CheckpointError, CheckpointVerifier
 from linescout_ml.colab.runtime import clear_gpu_cache
 
 OPEN_CLIP_HINT = "pip install open-clip-torch timm   # MobileCLIP2 needs open_clip >= 3.1"
 TORCH_HINT = "pip install torch torchvision   # Colab already ships a CUDA build"
+
+#: Where torch.hub clones the DINOv2 code from; a verifier appends ``:<commit>``.
+HUB_REPO = "facebookresearch/dinov2"
 
 #: DINOv2's published eval transform: resize shortest edge, centre-crop, ImageNet norm.
 DINO_RESIZE_EDGE = 256
@@ -63,6 +67,14 @@ class ModelCard:
     license: str
     upstream: str
     citation: str
+    #: Which ``models.lock.json`` group holds this encoder's pinned code/weights.
+    #: Defaults to the card key: an encoder without a lock entry is used anyway,
+    #: but it is reported as unpinned in the run report instead of looking safe.
+    checkpoint_group: str = ""
+
+    @property
+    def artifacts(self) -> str:
+        return self.checkpoint_group or self.key
 
 
 MOBILECLIP2_S2 = ModelCard(
@@ -75,6 +87,7 @@ MOBILECLIP2_S2 = ModelCard(
     license=APPLE_RESEARCH_LICENSE,
     upstream="https://huggingface.co/timm/MobileCLIP2-S2-OpenCLIP",
     citation="Faghri et al., MobileCLIP2: Improving Multi-Modal Reinforced Training, TMLR 2025",
+    checkpoint_group="mobileclip2_s2",
 )
 MOBILECLIP2_S0 = ModelCard(
     key="mobileclip2_s0",
@@ -86,6 +99,7 @@ MOBILECLIP2_S0 = ModelCard(
     license=APPLE_RESEARCH_LICENSE,
     upstream="https://huggingface.co/timm/MobileCLIP2-S0-OpenCLIP",
     citation="Faghri et al., MobileCLIP2: Improving Multi-Modal Reinforced Training, TMLR 2025",
+    checkpoint_group="mobileclip2_s0",
 )
 DINOV2_VITS14 = ModelCard(
     key="dinov2_vits14",
@@ -163,11 +177,18 @@ def _torch() -> Any:
 class ImageEncoder:
     """Common surface for both encoder families."""
 
-    def __init__(self, card: ModelCard, device: str) -> None:
+    def __init__(
+        self,
+        card: ModelCard,
+        device: str,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> None:
         self.card = card
         self.device = device
         #: Learned from the first batch when the card does not pin a dimension.
         self.observed_dim = card.dim
+        #: Checkpoint verification result, for the run report and the manifest.
+        self.checkpoint = checkpoint or {"pinned": False, "artifacts": []}
 
     @property
     def key(self) -> str:
@@ -211,8 +232,9 @@ class OpenClipEncoder(ImageEncoder):
         model: Any,
         preprocess: Any,
         tokenizer: Any | None = None,
+        checkpoint: dict[str, Any] | None = None,
     ) -> None:
-        super().__init__(card, device)
+        super().__init__(card, device, checkpoint)
         self.model = model
         self.preprocess = preprocess
         self.tokenizer = tokenizer
@@ -224,23 +246,48 @@ class OpenClipEncoder(ImageEncoder):
         device: str = "cpu",
         *,
         pretrained: str | None = None,
+        verifier: CheckpointVerifier | None = None,
     ) -> OpenClipEncoder:
         """``model`` may be a registry key (``mobileclip2_s2``) or an open_clip
-        architecture name (``MobileCLIP2-S2``)."""
+        architecture name (``MobileCLIP2-S2``).
+
+        With a verifier and a lock entry for this card, the weights, config, and
+        tokenizer all come from a *pinned revision* the verifier hash-checked, and
+        open_clip is pointed at it with its ``local-dir:`` schema — which keeps the
+        preprocessing the checkpoint was trained with, instead of letting a
+        separately downloaded config drift from the weights.
+        """
         card = open_clip_card(model, pretrained)
         _torch()  # fail early with the torch hint, not open_clip's vaguer ImportError
         open_clip = optional_module("open_clip", OPEN_CLIP_HINT)
+        checkpoint: dict[str, Any] | None = None
+        source: str = card.name
+        weight_ref: str | None = None
+        if verifier is not None and verifier.knows(card.artifacts) and card.family == "open_clip":
+            try:
+                directory = verifier.directory(card.artifacts)
+            except CheckpointError as error:
+                msg = f"{card.key}: {error}"
+                raise EncoderError(msg) from error
+            weight_ref = f"local-dir:{directory}"
+            checkpoint = verifier.as_dict()
         try:
-            # ``network`` not ``model``: the parameter is the model *name*.
-            network, _, preprocess = open_clip.create_model_and_transforms(
-                card.name, pretrained=pretrained or card.pretrained, device=device
-            )
-            tokenizer = open_clip.get_tokenizer(card.name)
+            if weight_ref is None:
+                # ``network`` not ``model``: the parameter is the model *name*.
+                network, _, preprocess = open_clip.create_model_and_transforms(
+                    source, pretrained=pretrained or card.pretrained, device=device
+                )
+                tokenizer = open_clip.get_tokenizer(card.name)
+            else:
+                network, _, preprocess = open_clip.create_model_and_transforms(
+                    weight_ref, device=device
+                )
+                tokenizer = open_clip.get_tokenizer(weight_ref)
         except Exception as error:  # any load failure gets the same actionable message
             msg = f"could not load {card.name}: {error}. Try: {OPEN_CLIP_HINT}"
             raise EncoderError(msg) from error
         network.eval()
-        return cls(card, device, network, preprocess, tokenizer)
+        return cls(card, device, network, preprocess, tokenizer, checkpoint)
 
     def _autocast(self, torch: Any) -> Any:
         """Half precision on the GPU; no autocast on CPU (bfloat16 is slower here)."""
@@ -286,26 +333,60 @@ class DinoEncoder(ImageEncoder):
     needs no torchvision transforms and stays deterministic across versions.
     """
 
-    def __init__(self, card: ModelCard, device: str, model: Any) -> None:
-        super().__init__(card, device)
+    def __init__(
+        self, card: ModelCard, device: str, model: Any, checkpoint: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(card, device, checkpoint)
         self.model = model
 
     @classmethod
-    def load(cls, key: str, device: str = "cpu") -> DinoEncoder:
+    def load(
+        cls, key: str, device: str = "cpu", *, verifier: CheckpointVerifier | None = None
+    ) -> DinoEncoder:
+        """Load a DINOv2 encoder.
+
+        torch.hub clones code, and the *weights* are a second download from a
+        different host — so with a verifier the clone is pinned to a commit and
+        the checkpoint is fetched and hash-checked separately, then loaded with
+        ``strict=True``. An architecture that does not match the checkpoint fails
+        here rather than producing plausible-looking features.
+        """
         card = card_for(key)
         if card.family != "torch_hub":
             msg = f"{key} is not a torch.hub model"
             raise EncoderError(msg)
         torch = _torch()
+        repo = HUB_REPO
+        checkpoint: dict[str, Any] | None = None
+        weights: Any = None
+        if verifier is not None and verifier.knows(card.artifacts):
+            pinned = verifier.hub_repo_ref(card.artifacts)
+            if pinned is not None:
+                repo = pinned
+            try:
+                weights = verifier.weights_file(card.artifacts)
+                checkpoint = verifier.as_dict()
+            except CheckpointError as error:
+                msg = f"{card.key}: {error}"
+                raise EncoderError(msg) from error
         try:
             # trust_repo=True keeps a non-interactive Colab cell from blocking on
             # torch.hub's "do you trust this repo?" prompt.
-            model = torch.hub.load("facebookresearch/dinov2", card.name, trust_repo=True).to(device)
+            model = torch.hub.load(
+                repo,
+                card.name,
+                trust_repo=True,
+                # When we have verified bytes, build the architecture only and
+                # load the checkpoint ourselves: hub's own download is unverified.
+                **({} if weights is None else {"pretrained": False}),
+            ).to(device)
+            if weights is not None:
+                model.load_state_dict(torch.load(weights, map_location="cpu", weights_only=True))
         except Exception as error:  # hub failures are network or permission shaped
-            msg = f"could not load DINOv2 {card.name} from torch.hub: {error}"
+            msg = f"could not load DINOv2 {card.name} from {repo}: {error}"
             raise EncoderError(msg) from error
         model.eval()
-        return cls(card, device, model)
+        return cls(card, device, model, checkpoint)
 
     def _autocast(self, torch: Any) -> Any:
         if not self.device.startswith("cuda"):
@@ -345,8 +426,11 @@ class DinoEncoder(ImageEncoder):
         super().release()
 
 
-def load_encoder(key: str, device: str = "cpu") -> ImageEncoder:
-    """Load any registered encoder by key."""
-    if card_for(key).family == "open_clip":
-        return OpenClipEncoder.load(key, device)
-    return DinoEncoder.load(key, device)
+def load_encoder(
+    key: str, device: str = "cpu", *, verifier: CheckpointVerifier | None = None
+) -> ImageEncoder:
+    """Load any registered encoder by key, optionally from pinned checkpoints."""
+    card = card_for(key)
+    if card.family == "open_clip":
+        return OpenClipEncoder.load(key, device, verifier=verifier)
+    return DinoEncoder.load(key, device, verifier=verifier)

@@ -35,6 +35,7 @@ from typing import Any
 from PIL import Image
 
 from linescout_ml.colab._optional import optional_module
+from linescout_ml.colab.checkpoints import CheckpointError, CheckpointVerifier
 from linescout_ml.colab.measure import to_gray
 from linescout_ml.colab.runtime import clear_gpu_cache
 
@@ -54,6 +55,10 @@ class ExtractorSpec:
     upstream: str
     license: str
     best_for: str
+    #: Artifacts in ``models.lock.json`` that this detector may load. The files
+    #: are handed to ``controlnet_aux`` as a *directory*, so the library's own
+    #: download path is bypassed rather than trusted.
+    checkpoint_group: str = ""
 
 
 ANIME2SKETCH = ExtractorSpec(
@@ -64,6 +69,7 @@ ANIME2SKETCH = ExtractorSpec(
     upstream="https://github.com/Mukosame/Anime2Sketch",
     license="MIT",
     best_for="manga, anime, cel-shaded illustration",
+    checkpoint_group="anime2sketch",
 )
 INFORMATIVE_DRAWINGS = ExtractorSpec(
     key="informative_drawings",
@@ -73,6 +79,7 @@ INFORMATIVE_DRAWINGS = ExtractorSpec(
     upstream="https://github.com/carolineec/informative-drawings",
     license="MIT",
     best_for="photographs, paintings, academic figure drawing",
+    checkpoint_group="informative_drawings",
 )
 
 EXTRACTOR_SPECS: dict[str, ExtractorSpec] = {
@@ -104,27 +111,64 @@ def library_version() -> str:
 class LineArtExtractor:
     """A loaded detector plus the provenance to record alongside its output."""
 
-    def __init__(self, spec: ExtractorSpec, detector: Any, version: str, device: str) -> None:
+    def __init__(
+        self,
+        spec: ExtractorSpec,
+        detector: Any,
+        version: str,
+        device: str,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> None:
         self.spec = spec
         self.detector = detector
         self.version = version
         self.device = device
+        #: What the checkpoint verifier concluded about the weights in use.
+        self.checkpoint = checkpoint or {"pinned": False, "artifacts": []}
 
     @classmethod
-    def load(cls, key: str, device: str = "cpu") -> LineArtExtractor:
+    def load(
+        cls,
+        key: str,
+        device: str = "cpu",
+        *,
+        verifier: CheckpointVerifier | None = None,
+    ) -> LineArtExtractor:
+        """Build a detector.
+
+        With a :class:`~linescout_ml.colab.checkpoints.CheckpointVerifier` the
+        weights come from the pinned, hash-checked directory instead of whatever
+        ``lllyasviel/Annotators`` happens to serve today; without one the
+        behaviour is the historical ``from_pretrained(repo)``.
+        """
         spec = spec_for(key)
         controlnet_aux = optional_module("controlnet_aux", CONTROLNET_AUX_HINT)
         detector_class = getattr(controlnet_aux, spec.class_name, None)
         if detector_class is None:
             msg = f"controlnet_aux has no {spec.class_name}; upgrade it: {CONTROLNET_AUX_HINT}"
             raise ExtractorError(msg)
+        source: Any = ANNOTATORS_REPO
+        checkpoint: dict[str, Any] | None = None
+        if verifier is not None and spec.checkpoint_group and verifier.knows(spec.checkpoint_group):
+            try:
+                source = verifier.directory(spec.checkpoint_group)
+            except CheckpointError as error:
+                msg = f"{spec.key}: {error}"
+                raise ExtractorError(msg) from error
+            checkpoint = verifier.as_dict()
         try:
-            detector = detector_class.from_pretrained(ANNOTATORS_REPO)
+            detector = detector_class.from_pretrained(source)
         except Exception as error:  # weight download or checkpoint-shape failures
-            msg = f"could not load {spec.key} weights from {ANNOTATORS_REPO}: {error}"
+            msg = f"could not load {spec.key} weights from {source}: {error}"
             raise ExtractorError(msg) from error
         detector.to(device)
-        return cls(spec, detector, str(getattr(controlnet_aux, "__version__", "unknown")), device)
+        return cls(
+            spec,
+            detector,
+            str(getattr(controlnet_aux, "__version__", "unknown")),
+            device,
+            checkpoint,
+        )
 
     def extract(
         self,
@@ -152,6 +196,21 @@ class LineArtExtractor:
         if gray.size != rgb.size:
             gray = gray.resize(rgb.size, Image.Resampling.LANCZOS)
         return gray
+
+    @property
+    def checkpoint_sha256(self) -> str | None:
+        """Digest of the weights file this detector actually loaded, if pinned.
+
+        ``None`` means the run used unpinned bytes and says so in the manifest,
+        rather than leaving the field empty for someone to misread as "verified".
+        """
+        for entry in self.checkpoint.get("artifacts", []):
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("path", "")).endswith(self.spec.weights_file):
+                digest = entry.get("sha256")
+                return str(digest) if digest else None
+        return None
 
     def release(self) -> None:
         self.detector = None

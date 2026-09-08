@@ -20,8 +20,8 @@ from linescout_api.schemas import StrokeSequence
 
 INK_THRESHOLD = 200  # grayscale values below this count as ink
 MAX_SNAPSHOT_EDGE = 4096
-MAX_COMPRESSED_BYTES = 256 * 1024  # 256 KiB
-MAX_DECOMPRESSED_BYTES = 1024 * 1024  # 1 MiB
+MAX_COMPRESSED_BYTES = 256 * 1024  # 256 KiB — gzipped strokes, as uploaded
+MAX_DECOMPRESSED_BYTES = 1024 * 1024  # 1 MiB — stroke JSON after decompression
 
 
 class SnapshotError(ValueError):
@@ -31,6 +31,19 @@ class SnapshotError(ValueError):
         self.message = message
         #: Payload size when the failure is size-related, for error ``details``.
         self.received_bytes = received_bytes
+
+
+class GzipLimitError(ValueError):
+    """A stroke payload crossed a hard size cap during decompression.
+
+    Carries the counters so logs and tests can confirm the decompressor
+    stopped *at* the limit instead of buffering the whole bomb first.
+    """
+
+    def __init__(self, message: str, *, input_bytes_used: int, output_bytes_produced: int) -> None:
+        super().__init__(message)
+        self.input_bytes_used = input_bytes_used
+        self.output_bytes_produced = output_bytes_produced
 
 
 @dataclass(frozen=True)
@@ -63,13 +76,22 @@ def decode_snapshot(data: bytes, max_bytes: int) -> Image.Image:
         raise SnapshotError("image_missing", "image field is empty")
     try:
         image = Image.open(io.BytesIO(data))
-        image.load()
+    except Image.DecompressionBombError as error:
+        # PIL's own header-stage guard fired: the declared raster is enormous.
+        raise SnapshotError("image_dimensions", f"unsupported image size: {error}") from error
     except (UnidentifiedImageError, OSError, ValueError) as error:
         raise SnapshotError("image_malformed", f"image could not be decoded: {error}") from error
+    # Inspect the container header BEFORE decoding a single pixel, so a
+    # hostile raster (huge IHDR dimensions, decompression-bomb shapes) is
+    # rejected without materializing megabytes/gigabytes of pixels.
     if image.format != "PNG":
         raise SnapshotError("image_format", f"image must be PNG, got {image.format}")
     if image.width < 16 or image.height < 16 or max(image.size) > MAX_SNAPSHOT_EDGE:
         raise SnapshotError("image_dimensions", f"unsupported image dimensions {image.size}")
+    try:
+        image.load()
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise SnapshotError("image_malformed", f"image could not be decoded: {error}") from error
     return normalize_to_gray(image)
 
 
@@ -124,41 +146,71 @@ def tight_crop(gray: Image.Image, stats: InkStats, padding: float = 0.10) -> Ima
     return square
 
 
-def safe_decompress_gzip(data: bytes) -> bytes:
-    """Stream gzip decompression with hard caps (zip-bomb proof)."""
-    if len(data) > MAX_COMPRESSED_BYTES:
-        raise ValueError("compressed_payload_too_large")
+def safe_decompress_gzip(
+    data: bytes,
+    *,
+    max_compressed_bytes: int = MAX_COMPRESSED_BYTES,
+    max_expanded_bytes: int = MAX_DECOMPRESSED_BYTES,
+) -> bytes:
+    """Gunzip a stroke payload under hard caps, with strict container checks.
 
-    # 16 + zlib.MAX_WBITS tells zlib to decode standard gzip headers.
+    * ``zlib.decompressobj`` is called with a ``max_length`` of
+      ``remaining + 1`` output bytes — the single overflow-detection byte —
+      and re-fed its own ``unconsumed_tail``, so expansion stops at the cap
+      instead of flushing a zip bomb into memory.
+    * The gzip member must end exactly at the end of the input: a truncated
+      stream (no EOF marker), trailing bytes, or a concatenated second member
+      are all rejected; zlib itself rejects bad CRCs and malformed headers.
+    """
+    if len(data) > max_compressed_bytes:
+        raise GzipLimitError(
+            "compressed_payload_too_large", input_bytes_used=0, output_bytes_produced=0
+        )
+
+    # 16 + zlib.MAX_WBITS tells zlib to decode standard gzip headers and
+    # verify the CRC32/ISIZE trailer itself.
     decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    uncompressed = bytearray()
-    chunk_size = 16 * 1024
+    output = bytearray()
+    pending: bytes = data
+    while pending:
+        # Remaining allowance plus exactly one overflow-detection byte. A
+        # single zlib call can therefore never produce more than the cap + 1.
+        allowance = max_expanded_bytes + 1 - len(output)
+        output += decompressor.decompress(pending, allowance)
+        if len(output) > max_expanded_bytes:
+            raise GzipLimitError(
+                "decompressed_payload_too_large",
+                input_bytes_used=len(data) - len(decompressor.unconsumed_tail),
+                output_bytes_produced=len(output),
+            )
+        # Non-empty only when the allowance bound stopped consumption; loop
+        # with a fresh allowance instead of an unbounded flush().
+        pending = decompressor.unconsumed_tail
 
-    for offset in range(0, len(data), chunk_size):
-        chunk = data[offset : offset + chunk_size]
-        decompressed_chunk = decompressor.decompress(chunk)
-        uncompressed.extend(decompressed_chunk)
-        if len(uncompressed) > MAX_DECOMPRESSED_BYTES:
-            raise ValueError("decompressed_payload_too_large")
-
-    uncompressed.extend(decompressor.flush())
-    if len(uncompressed) > MAX_DECOMPRESSED_BYTES:
-        raise ValueError("decompressed_payload_too_large")
-
+    if not decompressor.eof:
+        raise ValueError("gzip stream is truncated (missing end-of-stream marker)")
     if decompressor.unused_data:
-        raise ValueError("trailing_garbage_rejected")
+        # Everything past the member's end: trailing garbage or a second
+        # concatenated member — both rejected outright.
+        raise ValueError("trailing data after the gzip member is not allowed")
+    return bytes(output)
 
-    return bytes(uncompressed)
 
-
-def decode_strokes(data: bytes | None, max_bytes: int) -> StrokeSequence | None:
+def decode_strokes(
+    data: bytes | None,
+    max_bytes: int,
+    *,
+    max_expanded_bytes: int = MAX_DECOMPRESSED_BYTES,
+) -> StrokeSequence | None:
     """Decode the optional gzip-compressed JSON stroke sequence."""
     if data is None or len(data) == 0:
         return None
     if len(data) > max_bytes:
         raise SnapshotError("strokes_too_large", f"strokes exceed {max_bytes} bytes compressed")
     try:
-        raw = safe_decompress_gzip(data)
+        raw = safe_decompress_gzip(
+            data, max_compressed_bytes=max_bytes, max_expanded_bytes=max_expanded_bytes
+        )
     except ValueError as error:
         reason = str(error)
         if "too_large" in reason:

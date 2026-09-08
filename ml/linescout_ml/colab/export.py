@@ -69,9 +69,19 @@ def build_run_report(
     embedders: Iterable[Mapping[str, Any]],
     outputs: Mapping[str, Any] | None = None,
     started_at: str | None = None,
+    source: Mapping[str, Any] | None = None,
+    environment: Mapping[str, Any] | None = None,
+    checkpoints: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Assemble the report payload. Pure, so it is testable without a GPU."""
-    return {
+    """Assemble the report payload. Pure, so it is testable without a GPU.
+
+    ``source``, ``environment``, and ``checkpoints`` are what make a run
+    re-creatable rather than merely described: the commit the code came from,
+    the versions the runtime actually had (including the ones it shipped with),
+    and the digest of every weight file that was loaded. A field is *absent*
+    only when nothing recorded it, which is a different fact from a guess.
+    """
+    report: dict[str, Any] = {
         "schema_version": 1,
         "created_at": _now(),
         "started_at": started_at or _now(),
@@ -82,6 +92,13 @@ def build_run_report(
         "embedders": [dict(embedder) for embedder in embedders],
         "outputs": dict(outputs or {}),
     }
+    if source is not None:
+        report["source"] = dict(source)
+    if environment is not None:
+        report["environment"] = dict(environment)
+    if checkpoints is not None:
+        report["checkpoints"] = dict(checkpoints)
+    return report
 
 
 def write_run_report(root: Path, report: Mapping[str, Any]) -> Path:

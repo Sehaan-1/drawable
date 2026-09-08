@@ -11,9 +11,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from starlette.types import ASGIApp
@@ -28,14 +29,17 @@ from linescout_api.errors import (
     resolve_request_id,
     validation_error_handler,
 )
+from linescout_api.limits import RequestBodyLimitMiddleware
 from linescout_api.routers import assets, curation, events, health, preferences, search
 from linescout_api.state import build_state
 
 log = logging.getLogger(__name__)
 
-# Loopback-only Host names. ``testserver`` is Starlette's TestClient default;
-# production traffic never uses it, and DNS-rebinding hosts are still rejected.
-ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1", "testserver"}
+# Loopback-only Host names. Test-only hostnames (e.g. Starlette TestClient's
+# "testserver") are deliberately NOT here: they enter only through
+# ``Settings.additional_allowed_hosts``, which production leaves empty so
+# DNS-rebinding hostnames keep being rejected.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -48,11 +52,35 @@ def _host_name(host_header: str) -> str:
 
 
 class LoopbackSecurityMiddleware(BaseHTTPMiddleware):
-    """Reject non-loopback Host headers and cross-origin mutations (DNS rebinding / CSRF)."""
+    """DNS-rebinding and CSRF guard for the loopback-only API.
 
-    def __init__(self, app: ASGIApp, allowed_origins: Sequence[str]) -> None:
+    Host policy: every request must target a loopback hostname
+    (:data:`LOOPBACK_HOSTS`) or a hostname explicitly added for tests via
+    ``Settings.additional_allowed_hosts``.
+
+    Origin policy for mutations (POST/PUT/PATCH/DELETE):
+
+    * ``Origin`` present → it must exactly match one of
+      ``Settings.cors_origins``; anything else is a cross-site browser
+      request and is rejected.
+    * ``Origin`` absent → allowed. Browsers always attach ``Origin`` to
+      cross-site mutations, so an Origin-less mutation cannot come from a
+      cross-site browser context; curl, scripts, and the TestClient omit it
+      legitimately. Reading (GET/HEAD/OPTIONS) is not gated here — CORS
+      governs what a browser may read back.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        allowed_origins: Sequence[str],
+        allowed_hosts: Sequence[str] | None = None,
+    ) -> None:
         super().__init__(app)
         self.allowed_origins = frozenset(allowed_origins)
+        self.allowed_hosts = (
+            frozenset(allowed_hosts) if allowed_hosts is not None else LOOPBACK_HOSTS
+        )
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -60,7 +88,7 @@ class LoopbackSecurityMiddleware(BaseHTTPMiddleware):
         request_id = resolve_request_id(request)
         request.state.request_id = request_id
         host = _host_name(request.headers.get("host", ""))
-        if host not in ALLOWED_HOSTS:
+        if host not in self.allowed_hosts:
             return json_error(
                 403,
                 "invalid_host",
@@ -129,7 +157,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "OPTIONS"],
         allow_headers=["*"],
     )
-    app.add_middleware(LoopbackSecurityMiddleware, allowed_origins=settings.cors_origins)
+    app.add_middleware(
+        LoopbackSecurityMiddleware,
+        allowed_origins=settings.cors_origins,
+        allowed_hosts=sorted(LOOPBACK_HOSTS | set(settings.additional_allowed_hosts)),
+    )
+    # Added last so it is the outermost layer: the body is counted and capped
+    # on the receive channel before the Host/Origin check, before CORS, and
+    # before BaseHTTPMiddleware's request-body caching or any multipart
+    # parsing can buffer it.
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=settings.max_request_bytes,
+        max_multipart_parts=settings.max_request_parts,
+    )
+    # Register against Starlette's HTTPException (the base FastAPI's own
+    # subclass derives from) so framework-raised errors — 404/405 routing
+    # misses, multipart parser failures — also wear the error envelope.
     app.add_exception_handler(ApiError, api_error_handler)
     app.add_exception_handler(HTTPException, http_error_handler)
     app.add_exception_handler(RequestValidationError, validation_error_handler)

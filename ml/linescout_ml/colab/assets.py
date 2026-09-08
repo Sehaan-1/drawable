@@ -11,13 +11,14 @@ actually load. Two rules from ``services/api`` shape the output:
   byte-for-byte (JPEG stays JPEG) so source hashes remain independent of
   derivative hashes.
 
-Freshly ingested assets are written ``enabled=false`` with
-``review.state="unreviewed"`` (unsafe assets instead get
-``quarantined`` + ``enabled=false``). Unreviewed assets stay out of
-production search until a human accepts them; the curation UI renders them
-through dedicated preview routes, not the public asset endpoints. ``enabled``
-is true only when the asset is SFW-safe *and* the review state is
-``accepted``.
+Freshly ingested assets are written ``review.state="unreviewed"`` with no
+``sfw_human`` approval and no quality grade, and assets that fail the SFW screen
+are written ``quarantined``. Under the v2 contract there is no stored ``enabled``
+flag to flip: serving is the derived ``is_servable`` predicate — gallery member,
+display grant, human acceptance with a quality grade, human SFW approval, no
+blockers — so an unreviewed asset is invisible to search by construction rather
+than by a field the pipeline could have set wrongly. The curation UI renders such
+assets through dedicated preview routes, not the public endpoints.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from linescout_ml.manifest import (
     Manifest,
     ManifestRecord,
     Permissions,
+    PipelineProvenance,
     check_parent_integrity,
     check_split_integrity,
     derivative_reasons,
@@ -191,6 +193,7 @@ def build_record(
             origin=source.origin,
             extraction_model=candidate.extraction_model if extracted else None,
             extraction_version=candidate.extraction_version if extracted else None,
+            extraction_sha256=candidate.extraction_sha256 if extracted else None,
             primary_style=labels.primary_style,
             primary_scope=labels.primary_scope,
             secondary_scopes=list(labels.secondary_scopes),
@@ -231,6 +234,7 @@ def build_manifest(
     dataset_version: str,
     *,
     artifact_contract: ArtifactContract | None = None,
+    provenance: PipelineProvenance | None = None,
 ) -> Manifest:
     """Validate records as a whole, including the one-group-one-split rule.
 
@@ -239,6 +243,12 @@ def build_manifest(
     by this pipeline carry config's generation fields; records merged from an
     older manifest that do not match stay in the output for audit and are
     disabled by :func:`is_servable` until re-processed.
+
+    ``provenance`` names the code, environment, and model checkpoints that
+    produced the records. It is part of the manifest rather than only the run
+    report because the report travels with one *run* while the manifest travels
+    with the *dataset*: a gallery merged over three months still has to say
+    which pins the oldest records were built from.
     """
     problems = check_split_integrity(records) + check_parent_integrity(records)
     if problems:
@@ -249,6 +259,7 @@ def build_manifest(
             dataset_version=dataset_version,
             artifact_contract=artifact_contract,
             records=list(records),
+            provenance=provenance,
         )
     except ValueError as error:
         msg = f"manifest failed validation: {error}"

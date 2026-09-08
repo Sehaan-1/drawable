@@ -149,7 +149,11 @@ def test_no_manifest_in_fixture_mode_is_ready_but_empty(tmp_path: Path) -> None:
 def test_fixture_mode_defaults_to_the_synthetic_gallery(tmp_path: Path) -> None:
     from linescout_api.config import SYNTHETIC_MANIFEST, Settings
 
-    settings = Settings(_env_file=None, db_path=tmp_path / "d.sqlite3")  # type: ignore[call-arg]
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        db_path=tmp_path / "d.sqlite3",
+        additional_allowed_hosts=["testserver"],
+    )
     assert settings.gallery_manifest == SYNTHETIC_MANIFEST
     assert Settings(_env_file=None, gallery_manifest="").gallery_manifest is None  # type: ignore[call-arg]
     assert Settings(_env_file=None, fixture_mode=False).gallery_manifest is None  # type: ignore[call-arg]

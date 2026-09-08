@@ -15,25 +15,35 @@ probabilities are kept beside it, and the curation UI exists to correct all of
 it. Nothing here is a ground truth claim.
 
 The SFW gate is deliberately separate from the style/scope gate, and under the
-v2 contract it is an *automated screen only*: a source whose terms already
-guarantee SFW content (museum open-access scans, children's drawing datasets)
-is recorded with ``method="source_rating"``, and only scraped sources pay for
-``opennsfw2``. A screen that does not clear the confidence floor is
-quarantined — ``review.state="quarantined"`` — so an unsafe or unsure asset
-cannot be served by accident. A screen, however safe, is never a human
-approval: only curation records that.
+v2 contract it is an *automated screen only*: a source whose terms already guarantee
+SFW content (museum open-access scans, children's drawing datasets) is recorded with
+``method="source_rating"``, and only scraped sources pay for ``opennsfw2``. A screen
+that does not clear the confidence floor is quarantined — ``review.state="quarantined"``
+— so an unsafe or unsure asset cannot be served by accident. A screen, however safe, is
+never a human approval: only curation records that.
+
+Which method a source may rely on is decided by *who made the guarantee*, not by how
+innocuous the dataset looks. A publisher's own programme — a museum's open-access
+release, a corpus gated behind an access application — can support ``source_rating``,
+which runs no classifier and records that it ran none. A community site's rules are
+enforced by the people posting, so its rating tags are the claim under test rather than
+a pass, and such a source gets ``source_rating+opennsfw2``: both verdicts computed, the
+stricter kept. ``SFW_POLICY`` in ``tests/test_colab_config.py`` is that table.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 from PIL import Image
 
 from linescout_ml.colab._optional import optional_module
+from linescout_ml.colab.checkpoints import CheckpointError, CheckpointVerifier
 from linescout_ml.colab.config import SfwMethod, SourceSpec
 from linescout_ml.colab.models import OpenClipEncoder
 from linescout_ml.colab.sources import AssetLabels
@@ -48,6 +58,11 @@ from linescout_ml.taxonomy import (
 )
 
 OPENNSFW2_HINT = "pip install opennsfw2   # needs TensorFlow, which Colab ships"
+
+
+class OpenNsfw2Error(RuntimeError):
+    """The NSFW classifier could not be loaded or verified."""
+
 
 #: Prompt sets. Several phrasings per label, averaged, because a single prompt
 #: makes CLIP-family models brittle on line art (no colour, no shading cues).
@@ -196,8 +211,16 @@ class ZeroShotLabeler:
         model: str = "MobileCLIP2-S2",
         pretrained: str = "dfndr2b",
         device: str = "cpu",
+        *,
+        verifier: CheckpointVerifier | None = None,
     ) -> ZeroShotLabeler:
-        encoder = OpenClipEncoder.load(model, device, pretrained=pretrained)
+        """Load the labeler.
+
+        ``verifier`` pins the CLIP weights and tokenizer to a repository
+        revision and a SHA-256; without it the encoder still loads, but the run
+        report says the labels came from unpinned bytes.
+        """
+        encoder = OpenClipEncoder.load(model, device, pretrained=pretrained, verifier=verifier)
         return cls(encoder, logit_scale=_read_logit_scale(encoder))
 
     @classmethod
@@ -307,7 +330,15 @@ UNSAFE_FLOOR = 0.5
 
 
 def source_rating_sfw(confidence: float = 1.0) -> SfwScreening:
-    """SFW verdict taken from the source's own rating or terms."""
+    """Record that the *source* vouched for this content, and that nothing checked.
+
+    No image is opened here. That is the point of the method existing — a museum's
+    open-access programme is a real guarantee, and paying a classifier to rediscover it
+    would only add false positives over public-domain nudes — but a
+    ``SOURCE_RATING`` screening is a claim about provenance, not an inspection, which is
+    why a preset that scraped a community site does not get to use it alone. Nor is it
+    an approval: ``is_servable`` still wants ``sfw_human`` from a person.
+    """
     return SfwScreening(
         verdict=SfwVerdict.SAFE,
         confidence=round(min(max(confidence, 0.0), 1.0), 4),
@@ -315,24 +346,64 @@ def source_rating_sfw(confidence: float = 1.0) -> SfwScreening:
     )
 
 
-class OpenNsfw2Classifier:
-    """Optional NSFW screen. Needs TensorFlow, which Colab ships preinstalled."""
+#: Where opennsfw2 looks for its weights, and what its own download helper uses.
+WEIGHTS_FILENAME = "open_nsfw_weights.h5"
+#: The lock id of the classifier's checkpoint (``opennsfw2`` group).
+NSFW_ARTIFACT_ID = "opennsfw2/open_nsfw_weights.h5"
+NSFW_GROUP = "opennsfw2"
 
-    def __init__(self, module: Any, batch_size: int = 8) -> None:
+
+def default_weights_path() -> Path:
+    """opennsfw2's own default location, honouring ``OPENNSFW2_HOME``."""
+    home = os.environ.get("OPENNSFW2_HOME") or str(Path.home())
+    return Path(home) / ".opennsfw2" / "weights" / WEIGHTS_FILENAME
+
+
+class OpenNsfw2Classifier:
+    """Optional NSFW screen. Needs TensorFlow, which Colab ships preinstalled.
+
+    The gate decides whether an asset is quarantined, so the classifier is pinned
+    like everything else: with a verifier, the weights are downloaded through it
+    and hash-checked before Keras ever reads them.
+    """
+
+    def __init__(
+        self,
+        module: Any,
+        batch_size: int = 8,
+        weights_path: Path | None = None,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> None:
         self.module = module
         self.batch_size = batch_size
+        self.weights_path = weights_path
+        self.checkpoint = checkpoint or {"pinned": False, "artifacts": []}
 
     @classmethod
-    def load(cls, batch_size: int = 8) -> OpenNsfw2Classifier:
-        return cls(optional_module("opennsfw2", OPENNSFW2_HINT), batch_size=batch_size)
+    def load(
+        cls, batch_size: int = 8, *, verifier: CheckpointVerifier | None = None
+    ) -> OpenNsfw2Classifier:
+        module = optional_module("opennsfw2", OPENNSFW2_HINT)
+        weights: Path | None = None
+        checkpoint: dict[str, Any] | None = None
+        if verifier is not None and verifier.knows(NSFW_GROUP):
+            destination = default_weights_path()
+            try:
+                verifier.ensure_at(NSFW_ARTIFACT_ID, destination)
+            except CheckpointError as error:
+                msg = f"opennsfw2: {error}"
+                raise OpenNsfw2Error(msg) from error
+            weights, checkpoint = destination, verifier.as_dict()
+        return cls(module, batch_size=batch_size, weights_path=weights, checkpoint=checkpoint)
 
     def nsfw_probabilities(self, images: Sequence[Image.Image]) -> list[float]:
         """P(NSFW) per image, in input order."""
         if not images:
             return []
-        produced = self.module.predict_images(
-            [image.convert("RGB") for image in images], batch_size=self.batch_size
-        )
+        kwargs: dict[str, Any] = {"batch_size": self.batch_size}
+        if self.weights_path is not None:
+            kwargs["weights_path"] = str(self.weights_path)
+        produced = self.module.predict_images([image.convert("RGB") for image in images], **kwargs)
         return [float(probability) for probability in produced]
 
     def decision(self, image: Image.Image, *, min_confidence: float) -> SfwScreening:

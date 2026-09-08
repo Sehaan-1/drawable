@@ -16,11 +16,19 @@ Two rules from the manifest contract shape this file:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from linescout_ml.taxonomy import (
     LineArtOrigin,
@@ -49,6 +57,9 @@ SfwMethod = Literal["source_rating", "opennsfw2", "source_rating+opennsfw2", "ma
 DEFAULT_IMAGE_PATTERNS: tuple[str, ...] = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.gif")
 
 DATASET_VERSION_PATTERN = r"^\d{4}\.\d{2}\.\d{2}(-[a-z0-9]+)?$"
+
+#: A committed revision or a verified digest: 64 lowercase hex characters.
+Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 
 class SplitFractions(BaseModel):
@@ -125,8 +136,13 @@ class SourceSpec(BaseModel):
     origin: LineArtOrigin = LineArtOrigin.EXTRACTED
     extractor: ExtractorKey = "anime2sketch"
 
-    #: ``source_rating`` for datasets whose terms already guarantee SFW content,
-    #: ``opennsfw2`` for anything scraped. ``+`` runs both and keeps the stricter.
+    #: What the SFW gate is allowed to trust. ``source_rating`` runs no classifier and
+    #: is only defensible when a *publisher's* terms make the guarantee (a museum's
+    #: open-access programme, an application-gated research corpus); it is not
+    #: defensible for a community site whose rules are enforced by the people posting.
+    #: ``opennsfw2`` is the classifier alone, and ``+`` runs both and keeps the
+    #: stricter verdict — the right answer for anything scraped, including where the
+    #: source claims a rating, because that claim is what is being checked.
     sfw_method: SfwMethod = "source_rating"
 
     #: Images that share a work must share a split. ``filename`` treats every
@@ -176,6 +192,22 @@ class SourceSpec(BaseModel):
         if self.url_template is None:
             return None
         return self.url_template.format(item_id=item_id)
+
+    @property
+    def uses_extractor(self) -> bool:
+        """Whether this source needs a GPU line-art detector loaded."""
+        return self.origin is LineArtOrigin.EXTRACTED and self.extractor != "none"
+
+    @property
+    def requires_nsfw(self) -> bool:
+        """Whether the SFW gate must run a classifier over this source.
+
+        Read from the *resolved* spec on purpose: the Human-Art preset asks for
+        ``opennsfw2`` by default, and a run that leaves the form field blank only
+        knows that once the preset has been expanded. Dependency preflight and
+        the label stage both ask this question, so they can never disagree.
+        """
+        return self.sfw_method in {"opennsfw2", "source_rating+opennsfw2"}
 
 
 def _default_embedders() -> list[EmbedderKey]:
@@ -253,6 +285,29 @@ class PipelineConfig(BaseModel):
     #: stale until re-processed.
     processing_revision: Annotated[int, Field(ge=1)] = 1
 
+    # Reproducibility. Everything here is *recorded* from the runtime rather than
+    # assumed: the notebook fills in the git facts after verifying HEAD, and the
+    # digests name the environment and model pins the run actually used.
+    #: Repository that supplied the code, e.g. ``junosapollo/drawable``.
+    source_repo: Annotated[str, StringConstraints(max_length=128)] | None = None
+    #: Full commit SHA the checkout was verified against (never a branch name).
+    source_revision: Annotated[str | None, StringConstraints(pattern=r"^[0-9a-f]{40}$")] = None
+    #: The tree carried local edits — recorded so a rerun knows it was not the pin.
+    source_dirty: bool | None = None
+    #: How the code got there, from :func:`linescout_ml.colab.repro.ensure_checkout`.
+    source_action: Literal["cloned", "reused", "fetched", "failed"] | None = None
+    #: SHA-256 of ``ml/colab/requirements-colab.txt`` as installed.
+    environment_sha256: Sha256 | None = None
+    #: SHA-256 of ``models.lock.json``, the checkpoint pins this run checked against.
+    model_lock_sha256: Sha256 | None = None
+    #: ``strict`` refuses any artifact without a pinned digest; ``record`` (the
+    #: default) verifies what is pinned and records the rest; ``off`` is debug-only.
+    checkpoint_policy: Literal["strict", "record", "off"] = "record"
+    #: Where verified weights live. Defaults to ``~/.cache/linescout/checkpoints``.
+    checkpoint_cache_dir: Path | None = None
+    #: Set to verify against a different lock (tests, or a fork of the pins).
+    model_lock_path: Path | None = None
+
     @model_validator(mode="after")
     def _unique_source_names(self) -> Self:
         names = [source.name for source in self.sources]
@@ -273,6 +328,30 @@ class PipelineConfig(BaseModel):
     @property
     def manifest_path(self) -> Path:
         return self.output_root / "manifest.json"
+
+    def source_provenance(self) -> dict[str, Any] | None:
+        """The checkout facts to record, or ``None`` when nothing was verified.
+
+        ``None`` is deliberately distinguishable from "clean at an unknown
+        revision": a report that says nothing and a report that says "we did not
+        look" should not look the same to whoever audits a dataset later.
+        """
+        recorded = (
+            self.source_repo,
+            self.source_revision,
+            self.source_dirty,
+            self.source_action,
+        )
+        if all(value is None for value in recorded):
+            return None
+        return {
+            "repo": self.source_repo,
+            "revision": self.source_revision,
+            "dirty": self.source_dirty,
+            "action": self.source_action,
+            #: HEAD was compared against the pin this run asked for.
+            "verified": self.source_revision is not None,
+        }
 
     def resolved_embeddings_root(self) -> Path:
         if self.embeddings_root is not None:
@@ -336,14 +415,14 @@ SOURCE_PRESETS: dict[str, SourcePreset] = {
         ),
         SourcePreset(
             key="amateur_drawings",
-            description="Amateur Drawings (Informative Drawings) — 1,338 sketch pages",
+            description="Amateur Drawings (Informative Drawings) — 1,338 community sketch pages",
             license_note="informative-drawings: MIT code, dataset terms on the project page",
             defaults={
                 "default_style": PrimaryStyle.GESTURE_SKETCH,
                 "default_scopes": [ScopeLabel.FULL_BODY],
                 "origin": LineArtOrigin.NATIVE,
                 "extractor": "none",
-                "sfw_method": "source_rating",
+                "sfw_method": "source_rating+opennsfw2",
                 "work_grouping": "parent_dir",
             },
         ),
@@ -388,14 +467,14 @@ SOURCE_PRESETS: dict[str, SourcePreset] = {
         ),
         SourcePreset(
             key="safebooru",
-            description="Safebooru — the SFW-rated booru; rated safe by the source itself",
+            description="Safebooru — a booru whose posts carry user-assigned rating tags",
             license_note="per-post artist licences vary; record the post licence, not the site's",
             defaults={
                 "default_style": PrimaryStyle.MANGA_ANIME,
                 "default_scopes": [ScopeLabel.FULL_BODY, ScopeLabel.FACE_HEAD],
                 "origin": LineArtOrigin.EXTRACTED,
                 "extractor": "anime2sketch",
-                "sfw_method": "source_rating",
+                "sfw_method": "source_rating+opennsfw2",
                 "work_grouping": "filename",
                 "url_template": "https://safebooru.org/index.php?page=post&s=view&id={item_id}",
             },
@@ -454,6 +533,127 @@ def preset_source(
     fields = dict(preset.defaults)
     fields.update(overrides)
     return SourceSpec(name=name or preset.slug or key, root=root, license_id=license_id, **fields)
+
+
+#: Licence values that mean "nobody verified anything". The manifest is a
+#: provenance document, so a placeholder stops the run instead of being written
+#: into a dataset that outlives it.
+PLACEHOLDER_LICENSES: frozenset[str] = frozenset(
+    {
+        "-",
+        "changeme",
+        "fixme",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "placeholder",
+        "proprietary",
+        "replace",
+        "replace-me",
+        "replace_me",
+        "tbd",
+        "todo",
+        "unknown",
+        "unverified",
+    }
+)
+
+#: Which ``SOURCES`` form fields a run may override on a preset. Anything left
+#: blank keeps the preset's own value; that is why the preset has to be expanded
+#: before the runtime can know what it needs.
+FORM_OVERRIDE_FIELDS: tuple[str, ...] = ("extractor", "sfw_method", "work_grouping")
+
+
+class SourceConfigurationError(ValueError):
+    """A form entry cannot be turned into a valid :class:`SourceSpec`."""
+
+
+def spec_from_entry(
+    entry: Mapping[str, Any],
+    *,
+    sources_root: Path | None = None,
+    root: Path | None = None,
+) -> SourceSpec:
+    """Expand one ``SOURCES`` entry (preset + licence + overrides) into a spec.
+
+    Lives in the package rather than in a notebook cell because two things need
+    the same answer *before* any heavy work: the dependency preflight, which has
+    to know that the Human-Art preset asks for an NSFW classifier, and the
+    runner, which has to agree about the extractor. Resolving twice, in two
+    languages, is how those two drift apart.
+    """
+    preset = str(entry.get("preset", "")).strip()
+    if not preset:
+        msg = f"every SOURCES entry needs a 'preset' key; got {entry}"
+        raise SourceConfigurationError(msg)
+    licence = str(entry.get("license_id", "")).strip()
+    if licence.lower() in PLACEHOLDER_LICENSES:
+        msg = (
+            f"source '{preset}' needs a real license_id. The manifest is a provenance\n"
+            "document: record the licence you were actually granted (for example\n"
+            "'CC0-1.0', 'cc-by-nc-4.0', 'manga109-research-only'), not a placeholder."
+        )
+        raise SourceConfigurationError(msg)
+    overrides = {
+        field: str(entry[field])
+        for field in FORM_OVERRIDE_FIELDS
+        if str(entry.get(field, "")).strip()
+    }
+    folder = root or _entry_root(entry, preset, sources_root=sources_root)
+    try:
+        return preset_source(
+            preset, root=folder, license_id=licence, name=entry.get("name"), **overrides
+        )
+    except ValidationError as error:
+        # For example: an extractor override on a native-line-art source.
+        msg = f"source '{preset}' is not a valid combination:\n{error}"
+        raise SourceConfigurationError(msg) from error
+    except ValueError as error:
+        raise SourceConfigurationError(str(error)) from error
+
+
+def _entry_root(entry: Mapping[str, Any], preset: str, *, sources_root: Path | None) -> Path:
+    """An absolute ``root`` beats ``folder``, which beats the preset's own name."""
+    explicit = str(entry.get("root", "")).strip()
+    if explicit:
+        return Path(explicit)
+    if sources_root is None:
+        msg = (
+            f"source '{preset}' needs either a 'root' or a sources_root to resolve 'folder' against"
+        )
+        raise SourceConfigurationError(msg)
+    return Path(sources_root) / str(entry.get("folder") or preset)
+
+
+def resolve_sources(
+    entries: Sequence[Mapping[str, Any]],
+    *,
+    sources_root: Path | None = None,
+) -> list[SourceSpec]:
+    """Resolve every form entry into complete specs, all errors reported at once.
+
+    Called before any package is installed: the plan for what to install is a
+    function of these objects, so an unresolved preset cannot be a reason to
+    skip a dependency.
+    """
+    problems: list[str] = []
+    specs: list[SourceSpec] = []
+    for entry in entries:
+        try:
+            specs.append(spec_from_entry(entry, sources_root=sources_root))
+        except SourceConfigurationError as error:
+            problems.append(str(error))
+    if problems:
+        raise SourceConfigurationError("\n\n".join(problems))
+    if not specs:
+        msg = "SOURCES is empty — add at least one dataset to process."
+        raise SourceConfigurationError(msg)
+    names = [spec.name for spec in specs]
+    if len(set(names)) != len(names):
+        msg = f"source names must be unique, got {names}"
+        raise SourceConfigurationError(msg)
+    return specs
 
 
 def preset_table() -> list[dict[str, str]]:

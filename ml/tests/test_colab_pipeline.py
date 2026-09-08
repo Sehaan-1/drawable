@@ -638,7 +638,8 @@ def test_embeddings_are_written_as_resumable_shards(
 ) -> None:
     source_tree(tmp_path / "sources", count=5, size=320)
     monkeypatch.setattr(
-        "linescout_ml.colab.runner.load_encoder", lambda key, device="cpu": StubEncoder(key)
+        "linescout_ml.colab.runner.load_encoder",
+        lambda key, device="cpu", **_: StubEncoder(key),
     )
     config = _config(tmp_path, embed=True, embedding_shard_size=2, batch_size=2)
     runner = PipelineRunner(config)
@@ -664,7 +665,7 @@ def test_embedding_resume_skips_what_is_already_stored(
     source_tree(tmp_path / "sources", count=4, size=320)
     calls: list[str] = []
 
-    def fake_loader(key: str, device: str = "cpu") -> StubEncoder:
+    def fake_loader(key: str, device: str = "cpu", **_: Any) -> StubEncoder:
         calls.append(key)
         return StubEncoder(key)
 
@@ -685,7 +686,8 @@ def test_embedding_shards_record_the_model_licence(
 ) -> None:
     source_tree(tmp_path / "sources", count=1, size=320)
     monkeypatch.setattr(
-        "linescout_ml.colab.runner.load_encoder", lambda key, device="cpu": StubEncoder(key)
+        "linescout_ml.colab.runner.load_encoder",
+        lambda key, device="cpu", **_: StubEncoder(key),
     )
     config = _config(tmp_path, embed=True)
     PipelineRunner(config).run_all()
@@ -820,3 +822,74 @@ def test_run_all_reports_its_outputs(tmp_path: Path) -> None:
     assert Path(report["outputs"]["run_report"]).is_file()
     with zipfile.ZipFile(archive) as bundle:
         assert "run_report.json" in bundle.namelist()
+
+
+def test_the_notebooks_reporting_cells_execute_against_a_real_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run the notebook's summary cells, instead of only reading them.
+
+    Every other notebook test inspects source, because no ordinary test suite can pay for a
+    GPU session. These three cells cost nothing and they are where the notebook's own
+    lifetime bugs live: each one reads per-asset attributes, and when the manifest contract
+    moved to v2 they kept reading `record.enabled`, `labels.sfw.safe`, `labels.scopes` and
+    `summary["by_split"]` — names that no longer exist. An `AttributeError` in cell 9 lands
+    forty minutes into someone's Colab run, hundreds of megabytes of weights already
+    downloaded, with the cell's output the only proof the pipeline ever spoke the old
+    schema; the suite above stayed green throughout, because it never executes a cell.
+
+    So execute the reporting cells against a runner that has genuinely finished, and check
+    the lines they print: an object's attributes are verified by using them, not by
+    declaring the name still exists.
+    """
+    from test_colab_notebook import cell_titled, strip_magics
+
+    source_tree(tmp_path / "sources", count=3, size=320)
+    styles = {style: 0.075 for style in PrimaryStyle}
+    styles[PrimaryStyle.MANGA_ANIME] = 0.7
+    _stub_labeler(
+        monkeypatch,
+        LabelScores(
+            styles=styles,
+            scopes={scope: 0.02 for scope in ScopeLabel if scope is not ScopeLabel.UNKNOWN},
+        ),
+    )
+    config = _config(tmp_path, label=True)
+    runner = PipelineRunner(config)
+    runner.run_all()
+    capsys.readouterr()
+
+    namespace: dict[str, Any] = {"RUNNER": runner, "CONFIG": config, "close_bars": lambda: None}
+    for title in (
+        "6 · Extract",
+        "7 · Measure",
+        "8 · De-duplicate",
+        "9 · Zero-shot labels",
+        "11 · Manifest slice",
+    ):
+        cell = strip_magics(cell_titled(title))
+        exec(compile(cell, f"<notebook cell: {title}>", "exec"), namespace)  # noqa: S102
+
+    printed = capsys.readouterr().out
+    # Cells 6 and 7 re-run against a finished store, so they report skips rather than
+    # work — and cell 7 reads its measurement fields through `getattr(item, field)`, the
+    # one place in the notebook a rename hides from every static check. It still printed
+    # them, which is the only way anyone would notice if `LineArtMeasurements` changed.
+    assert "ink_coverage" in printed
+    assert "seconds   :" in printed
+    assert printed.count("processed : ") >= 3
+    # Cell 9: the label block ran, so the screen is reported through v2's tri-state verdict
+    # and the human approval the gate still waits for is counted. A cell reading
+    # `item.sfw.safe` or `item.scopes` dies before any of this is printed.
+    assert "sfw screen :" in printed
+    assert "safe via source_rating" in printed
+    assert "needs a human SFW approval" in printed
+    assert "written disabled" not in printed  # v2 words, not v1's flag
+    # Cell 11: the manifest slice reports v2's derived servability, and a gallery nobody
+    # has reviewed yet is empty — the property the notebook tells operators to expect.
+    assert "records        : 3" in printed
+    assert "servable       : 0 of 3" in printed
+    assert "missing files  : 0" in printed
+    assert "review   : {'unreviewed': 3}" in printed
