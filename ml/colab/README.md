@@ -84,8 +84,9 @@ fetched it from `junosapollo/drawable.git` *and* from the mirror, printing
 answers is that `Sehaan-1/drawable` is a fork of `junosapollo/drawable` and GitHub
 shares object storage across a fork network — which is fine today and a hazard
 tomorrow, because a pin that is reachable only through a fork breaks the moment that
-fork is re-created or detached. **Merging the branch is what makes this pin permanent**;
-until then the fetch works for an incidental reason rather than the intended one.
+fork is re-created or detached. Merging into the *canonical* repository is what makes
+this pin permanent: a merge into `Sehaan-1/drawable` makes the mirror permanent and
+leaves the primary URL relying on the fork network still.
 
 `0000000000000000000000000000000000000000` is what the pin held before that commit
 existed: a format-valid SHA no repository contains, named out loud by
