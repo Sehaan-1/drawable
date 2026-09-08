@@ -568,3 +568,47 @@ def test_a_candidate_pin_is_judged_on_the_same_two_rules(tmp_path: Path) -> None
     code, _, err = run_cli("pin", "--pin", "main", "--check")
     assert code == 1 and "PIN NOT FINALISED" in err
     assert code == 1, "a moving reference must not pass the gate CI relies on"
+
+
+# ---------------------------------------------------------------- the closure hazard
+
+
+def test_the_pinned_packages_reach_torch_one_level_down() -> None:
+    """Why the notebook freezes the image's torch instead of merely not installing it.
+
+    `requirements-colab.txt` never asks for torch, and that is precisely the problem:
+    the resolver is asked for `open-clip-torch`, `timm`, and `controlnet-aux`, and every
+    one of them requires torch, so an unconstrained install on a T4 is free to pull a
+    PyPI build that has nothing to do with the driver — 81 packages and 19
+    CUDA-flavoured wheels' worth, per the resolution documented in `ml/colab/README.md`.
+    This reads the committed lockfile's own dependency edges, so CI proves it without
+    a network or a GPU.
+    """
+    import tomllib
+
+    lock = tomllib.loads((REPO_ROOT / "ml" / "uv.lock").read_text(encoding="utf-8"))
+    edges = {
+        package["name"]: {dep["name"] for dep in package.get("dependencies", [])}
+        for package in lock["package"]
+    }
+
+    spec = repro.load_requirement_spec()
+    assert spec is not None, "the committed environment spec disappeared"
+    installable = set(spec.pins) - set(spec.runtime_only)
+    assert installable, "every pin is runtime-only, so there is nothing to install"
+
+    closure: set[str] = set()
+    pending = list(installable)
+    while pending:
+        for dependency in edges.get(pending.pop(), ()):
+            if dependency not in closure:
+                closure.add(dependency)
+                pending.append(dependency)
+
+    assert "torch" in closure, (
+        "no pinned package needs torch any more; the constraints file lost its reason"
+    )
+    assert "torch" not in installable, "the env spec started installing the thing it forbids"
+    assert {"torch", "torchvision"} == set(spec.runtime_only), (
+        "the runtime group is the guard; keep it exactly this"
+    )

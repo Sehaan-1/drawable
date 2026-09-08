@@ -118,4 +118,5 @@ gap rather than silently missing.
 | `SHA-256 mismatch ... Refusing to run on bytes that do not match the lock` | The cached file is not the pinned file | The message names the path; delete *that file*, not the directory, and re-run |
 | `the checkpoint lock has no artifacts for group ...` | A model card names a group nobody pinned (e.g. `mobileclip2_s0`) | Intended fail-closed. Pin the group in `models.lock.json` or do not select the model |
 | `MissingDependencyError` in the label stage after `AUTO_INSTALL = False` | Nothing installed, as asked | Run cell 2d |
+| `ImportError: libGL.so.1: cannot open shared object file` from `cv2` | `opennsfw2` pulls `opencv-python` (the GUI build) as a dependency, and our `opencv-python-headless` pin coexists with it rather than replacing it | Colab ships `libGL`; a slim container should `apt-get install -y libgl1` or drop the label stage. Nothing about the pinning caused it |
 | A stray `note:` about a mirror | `REPO_URL` was unreachable and the mirror served the fetch | Harmless *if* the printed HEAD equals `REPO_PIN`; it always is, or the run stopped |

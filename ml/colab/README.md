@@ -138,17 +138,47 @@ your machine would decide what a stranger's GPU session clones.
 
 ### The environment
 
-`ml/colab/requirements-colab.txt` is the only dependency list Colab installs from: 23
-runtime pins (install) plus 6 non-runtime pins (`torch`/`torchvision` come preinstalled
-in the Colab CUDA image). The distinction matters:
+`ml/colab/requirements-colab.txt` is the only dependency list Colab installs from:
+21 pins in six `# group:` sections — 19 installable, plus a `[runtime]` group of 2
+(`torch`, `torchvision`) that exists to be *compared against* and never installed. The
+distinction is the whole design:
 
-* A **runtime** package's version is *recorded*, not forced. Letting pip replace the
+* A **runtime** package's version is recorded, not forced. Letting pip replace the
   image's CUDA-enabled torch with the PyPI default build is how a free T4 quietly
-  becomes a CPU run, and `pip` cannot see the difference. The cell asserts that the
-  `+cu…` build tag survives and that torch can actually move a tensor onto the device.
-* A **non-runtime** pin is checked against `uv.lock` by `linescout-repro selfcheck`
-  (CI runs it), so the file you run in Colab and the lockfile you run at home are the
-  same version by construction, not by diligence.
+  becomes a CPU run, and `pip` cannot see the difference. Cell 2c asserts the `+cu…`
+  build tag survives and that torch can actually move a tensor onto the device.
+* Every **other** pin is checked against `uv.lock` by `linescout-repro selfcheck` (CI
+  runs it), so the file you run in Colab and the lockfile you run at home are the same
+  version by construction, not by diligence.
+
+Why the constraints file is not paranoia — resolving the 19 installable pins from a
+clean Python 3.11 environment on linux, which is worth repeating whenever the file
+changes:
+
+```bash
+cd ml && .venv/bin/python - <<'PY' > /tmp/colab-pins.txt
+from linescout_ml.colab import repro
+
+spec = repro.load_requirement_spec()
+skip = set(spec.runtime_only)
+print("\n".join(f"{name}=={version}" for name, version in spec.pins.items() if name not in skip))
+PY
+uv pip compile --python-version 3.11 /tmp/colab-pins.txt | grep -c '=='   # → 81
+```
+
+19 pins become **81 packages**, and 19 of those are CUDA-flavoured (`cuda-toolkit`,
+fourteen `nvidia-*` wheels, `triton`, `cuda-bindings`) — every one of them arriving
+`# via torch`, a package the file deliberately refuses to install. `torch==2.14.0`
+enters the closure purely transitively, through `controlnet-aux`, `open-clip-torch`,
+`timm`, and `torchvision`, which is exactly how an unpinned install ends up replacing
+a `+cu` build with 2 GB of PyPI wheels. Nothing about that is visible in the file's own
+lines; it is only visible one level down, which is why the notebook's `pip()` honours a
+constraints file rather than trusting the pins to keep out what they never mentioned.
+
+The closure has one more thing to say: `opencv-python` arrives `# via opennsfw2`, next
+to our `opencv-python-headless` pin, so choosing the headless build is a preference and
+not an exclusion — both are installed, and a container without `libGL.so.1` fails at
+`import cv2` regardless of which one the pipeline meant to use.
 
 The names are additionally a subset of the `[gpu]` extra in `ml/pyproject.toml`, which
 is the one place they all get their versions resolved, and they must each have a lock

@@ -37,6 +37,10 @@ safetensors==0.8.0
 # group: extraction
 controlnet-aux==0.0.10
 einops==0.8.2
+# The headless build is what these stages were developed against, but pinning it
+# is a preference and not an exclusion: opennsfw2 (nsfw group) requires the GUI
+# build, so `opencv-python` lands beside it and `import cv2` still needs libGL.
+# Colab ships the library; a slim container should install it or skip the labels.
 opencv-python-headless==5.0.0.93
 scikit-image==0.26.0
 scipy==1.17.1
