@@ -613,7 +613,8 @@ def test_embeddings_are_written_as_resumable_shards(
 ) -> None:
     source_tree(tmp_path / "sources", count=5, size=320)
     monkeypatch.setattr(
-        "linescout_ml.colab.runner.load_encoder", lambda key, device="cpu": StubEncoder(key)
+        "linescout_ml.colab.runner.load_encoder",
+        lambda key, device="cpu", **_: StubEncoder(key),
     )
     config = _config(tmp_path, embed=True, embedding_shard_size=2, batch_size=2)
     runner = PipelineRunner(config)
@@ -639,7 +640,7 @@ def test_embedding_resume_skips_what_is_already_stored(
     source_tree(tmp_path / "sources", count=4, size=320)
     calls: list[str] = []
 
-    def fake_loader(key: str, device: str = "cpu") -> StubEncoder:
+    def fake_loader(key: str, device: str = "cpu", **_: Any) -> StubEncoder:
         calls.append(key)
         return StubEncoder(key)
 
@@ -660,7 +661,8 @@ def test_embedding_shards_record_the_model_licence(
 ) -> None:
     source_tree(tmp_path / "sources", count=1, size=320)
     monkeypatch.setattr(
-        "linescout_ml.colab.runner.load_encoder", lambda key, device="cpu": StubEncoder(key)
+        "linescout_ml.colab.runner.load_encoder",
+        lambda key, device="cpu", **_: StubEncoder(key),
     )
     config = _config(tmp_path, embed=True)
     PipelineRunner(config).run_all()

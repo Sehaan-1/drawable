@@ -79,6 +79,17 @@ jobs:
       - name: Pytest
         working-directory: ${{ matrix.package }}
         run: .venv/bin/pytest -q
+      - name: Reproducibility audit
+        if: matrix.package == 'ml'
+        working-directory: ${{ matrix.package }}
+        run: |
+          # Notebook ↔ package ↔ environment spec ↔ checkpoint lock ↔ docs.
+          .venv/bin/linescout-repro selfcheck
+          # Fails while the Colab pin is still the placeholder, so the pin cannot
+          # be forgotten: it is bumped by a commit that this step approves.
+          .venv/bin/linescout-repro pin --check
+          .venv/bin/linescout-repro pin --json
+          .venv/bin/linescout-repro checkpoints show | tail -5
 
   synthetic-smoke:
     name: Synthetic-data smoke test

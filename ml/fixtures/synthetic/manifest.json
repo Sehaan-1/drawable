@@ -15,6 +15,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "manga_anime",
       "scopes": [
         "eye"
@@ -59,6 +60,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "western_ink",
       "scopes": [
         "eyebrow"
@@ -108,6 +110,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "realistic_academic",
       "scopes": [
         "mouth"
@@ -157,6 +160,7 @@
       "origin": "extracted_line_art",
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
+      "extraction_sha256": null,
       "primary_style": "cartoon",
       "scopes": [
         "face_head"
@@ -201,6 +205,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "gesture_sketch",
       "scopes": [
         "hair"
@@ -250,6 +255,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "manga_anime",
       "scopes": [
         "hand"
@@ -299,6 +305,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "western_ink",
       "scopes": [
         "foot"
@@ -343,6 +350,7 @@
       "origin": "extracted_line_art",
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
+      "extraction_sha256": null,
       "primary_style": "realistic_academic",
       "scopes": [
         "upper_body_clothing"
@@ -392,6 +400,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "cartoon",
       "scopes": [
         "full_body"
@@ -441,6 +450,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "gesture_sketch",
       "scopes": [
         "multi_character",
@@ -486,6 +496,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "manga_anime",
       "scopes": [
         "eye"
@@ -535,6 +546,7 @@
       "origin": "extracted_line_art",
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
+      "extraction_sha256": null,
       "primary_style": "western_ink",
       "scopes": [
         "eyebrow"
@@ -584,6 +596,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "realistic_academic",
       "scopes": [
         "mouth"
@@ -628,6 +641,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "cartoon",
       "scopes": [
         "face_head"
@@ -677,6 +691,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "gesture_sketch",
       "scopes": [
         "hair"
@@ -726,6 +741,7 @@
       "origin": "extracted_line_art",
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
+      "extraction_sha256": null,
       "primary_style": "manga_anime",
       "scopes": [
         "hand"
@@ -770,6 +786,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "western_ink",
       "scopes": [
         "foot"
@@ -819,6 +836,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "realistic_academic",
       "scopes": [
         "upper_body_clothing"
@@ -868,6 +886,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "cartoon",
       "scopes": [
         "full_body"
@@ -912,6 +931,7 @@
       "origin": "extracted_line_art",
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
+      "extraction_sha256": null,
       "primary_style": "gesture_sketch",
       "scopes": [
         "multi_character",
@@ -962,6 +982,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "manga_anime",
       "scopes": [
         "eye"
@@ -1011,6 +1032,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "western_ink",
       "scopes": [
         "eyebrow"
@@ -1055,6 +1077,7 @@
       "origin": "native_line_art",
       "extraction_model": null,
       "extraction_version": null,
+      "extraction_sha256": null,
       "primary_style": "realistic_academic",
       "scopes": [
         "mouth"
@@ -1104,6 +1127,7 @@
       "origin": "extracted_line_art",
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
+      "extraction_sha256": null,
       "primary_style": "cartoon",
       "scopes": [
         "face_head"
@@ -1140,5 +1164,6 @@
       "line_art_checksum": "c098212b039fe94c0ca7edc19ed24f63bb3930db8af50459d61e2f369f6bf6f4",
       "thumbnail_checksum": "c1a12b2985a4207be9f6c75fc1213e6786d1eb2be2692c88aeabbb1318fe2f45"
     }
-  ]
+  ],
+  "provenance": null
 }

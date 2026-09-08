@@ -22,14 +22,17 @@ enforces as an invariant, so an unsafe asset cannot be served by accident.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 from PIL import Image
 
 from linescout_ml.colab._optional import optional_module
+from linescout_ml.colab.checkpoints import CheckpointError, CheckpointVerifier
 from linescout_ml.colab.config import SfwMethod, SourceSpec
 from linescout_ml.colab.models import OpenClipEncoder
 from linescout_ml.colab.sources import AssetLabels
@@ -37,6 +40,11 @@ from linescout_ml.manifest import SfwDecision
 from linescout_ml.taxonomy import GALLERY_SCOPES, PrimaryStyle, ReviewState, ScopeLabel
 
 OPENNSFW2_HINT = "pip install opennsfw2   # needs TensorFlow, which Colab ships"
+
+
+class OpenNsfw2Error(RuntimeError):
+    """The NSFW classifier could not be loaded or verified."""
+
 
 #: Prompt sets. Several phrasings per label, averaged, because a single prompt
 #: makes CLIP-family models brittle on line art (no colour, no shading cues).
@@ -185,8 +193,16 @@ class ZeroShotLabeler:
         model: str = "MobileCLIP2-S2",
         pretrained: str = "dfndr2b",
         device: str = "cpu",
+        *,
+        verifier: CheckpointVerifier | None = None,
     ) -> ZeroShotLabeler:
-        encoder = OpenClipEncoder.load(model, device, pretrained=pretrained)
+        """Load the labeler.
+
+        ``verifier`` pins the CLIP weights and tokenizer to a repository
+        revision and a SHA-256; without it the encoder still loads, but the run
+        report says the labels came from unpinned bytes.
+        """
+        encoder = OpenClipEncoder.load(model, device, pretrained=pretrained, verifier=verifier)
         return cls(encoder, logit_scale=_read_logit_scale(encoder))
 
     @classmethod
@@ -297,24 +313,64 @@ def source_rating_sfw(confidence: float = 1.0) -> SfwDecision:
     )
 
 
-class OpenNsfw2Classifier:
-    """Optional NSFW screen. Needs TensorFlow, which Colab ships preinstalled."""
+#: Where opennsfw2 looks for its weights, and what its own download helper uses.
+WEIGHTS_FILENAME = "open_nsfw_weights.h5"
+#: The lock id of the classifier's checkpoint (``opennsfw2`` group).
+NSFW_ARTIFACT_ID = "opennsfw2/open_nsfw_weights.h5"
+NSFW_GROUP = "opennsfw2"
 
-    def __init__(self, module: Any, batch_size: int = 8) -> None:
+
+def default_weights_path() -> Path:
+    """opennsfw2's own default location, honouring ``OPENNSFW2_HOME``."""
+    home = os.environ.get("OPENNSFW2_HOME") or str(Path.home())
+    return Path(home) / ".opennsfw2" / "weights" / WEIGHTS_FILENAME
+
+
+class OpenNsfw2Classifier:
+    """Optional NSFW screen. Needs TensorFlow, which Colab ships preinstalled.
+
+    The gate decides whether an asset is quarantined, so the classifier is pinned
+    like everything else: with a verifier, the weights are downloaded through it
+    and hash-checked before Keras ever reads them.
+    """
+
+    def __init__(
+        self,
+        module: Any,
+        batch_size: int = 8,
+        weights_path: Path | None = None,
+        checkpoint: dict[str, Any] | None = None,
+    ) -> None:
         self.module = module
         self.batch_size = batch_size
+        self.weights_path = weights_path
+        self.checkpoint = checkpoint or {"pinned": False, "artifacts": []}
 
     @classmethod
-    def load(cls, batch_size: int = 8) -> OpenNsfw2Classifier:
-        return cls(optional_module("opennsfw2", OPENNSFW2_HINT), batch_size=batch_size)
+    def load(
+        cls, batch_size: int = 8, *, verifier: CheckpointVerifier | None = None
+    ) -> OpenNsfw2Classifier:
+        module = optional_module("opennsfw2", OPENNSFW2_HINT)
+        weights: Path | None = None
+        checkpoint: dict[str, Any] | None = None
+        if verifier is not None and verifier.knows(NSFW_GROUP):
+            destination = default_weights_path()
+            try:
+                verifier.ensure_at(NSFW_ARTIFACT_ID, destination)
+            except CheckpointError as error:
+                msg = f"opennsfw2: {error}"
+                raise OpenNsfw2Error(msg) from error
+            weights, checkpoint = destination, verifier.as_dict()
+        return cls(module, batch_size=batch_size, weights_path=weights, checkpoint=checkpoint)
 
     def nsfw_probabilities(self, images: Sequence[Image.Image]) -> list[float]:
         """P(NSFW) per image, in input order."""
         if not images:
             return []
-        produced = self.module.predict_images(
-            [image.convert("RGB") for image in images], batch_size=self.batch_size
-        )
+        kwargs: dict[str, Any] = {"batch_size": self.batch_size}
+        if self.weights_path is not None:
+            kwargs["weights_path"] = str(self.weights_path)
+        produced = self.module.predict_images([image.convert("RGB") for image in images], **kwargs)
         return [float(probability) for probability in produced]
 
     def decision(self, image: Image.Image, *, min_confidence: float) -> SfwDecision:

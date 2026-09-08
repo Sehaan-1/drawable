@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from linescout_ml.colab import repro
 from linescout_ml.colab.config import (
     SOURCE_PRESETS,
     PipelineConfig,
@@ -14,6 +15,7 @@ from linescout_ml.colab.config import (
     SplitFractions,
     preset_source,
     preset_table,
+    resolve_sources,
 )
 from linescout_ml.taxonomy import LineArtOrigin, PrimaryStyle, ScopeLabel
 
@@ -227,3 +229,63 @@ def test_unknown_preset_names_the_alternatives() -> None:
 def test_preset_table_is_printable() -> None:
     rows = preset_table()
     assert rows and {"key", "description", "license_note"} <= set(rows[0])
+
+
+# --------------------------------------------------- presets decide dependencies
+#
+# These read like dependency tests because the ordering is the point: presets are
+# resolved into `SourceSpec` objects *before* anything asks what to install. See
+# `test_colab_repro.py` for the installer side of the same contract.
+
+
+def _resolved(**entry: object) -> SourceSpec:
+    (spec,) = resolve_sources([dict(entry)], sources_root=Path("/tmp/linescout-sources"))
+    return spec
+
+
+def test_a_preset_opinion_survives_an_empty_form_field() -> None:
+    """Human-Art asks for the classifier; nothing in the run has to remember to.
+
+    The dataset ships no ratings, so `sfw_method` is the preset's call rather than
+    the operator's. A plan built from the raw entry would see a blank field,
+    install no gate, and then fail — or skip screening — on a T4, forty minutes in.
+    """
+    human_art = _resolved(preset="human_art", license_id="research-only")
+    assert human_art.sfw_method == "opennsfw2"
+    assert human_art.requires_nsfw and human_art.uses_extractor
+
+    plan = repro.plan_environment([human_art], spec=repro.load_requirement_spec())
+    assert "nsfw" in plan.groups, plan.groups
+    assert {"opennsfw2", "gdown"} <= set(plan.spec.pins if plan.spec else ())
+    # Everything handed to pip arrives pinned, so the gate is reproducible too.
+    assert all("==" in spec for spec in plan.pip_specs), plan.pip_specs
+
+
+def test_an_explicit_override_replaces_the_presets_opinion_completely() -> None:
+    """Two directions, because a half-implemented override is the interesting bug.
+
+    Saying "this source rates its own content" removes the dependency; saying
+    "screen this one anyway" adds it to a preset that would not have asked.
+    """
+    trust_the_source = _resolved(
+        preset="human_art", license_id="research-only", sfw_method="source_rating"
+    )
+    assert not trust_the_source.requires_nsfw
+
+    screen_anyway = _resolved(preset="quickdraw", license_id="CC0-1.0", sfw_method="opennsfw2")
+    assert screen_anyway.requires_nsfw
+
+    spec = repro.load_requirement_spec()
+    groups_without = set(repro.plan_environment([trust_the_source], spec=spec).groups)
+    groups_with = set(repro.plan_environment([screen_anyway], spec=spec).groups)
+    assert "nsfw" not in groups_without, groups_without
+    assert "nsfw" in groups_with, groups_with
+
+
+def test_overriding_one_field_does_not_strand_the_rest_of_the_preset() -> None:
+    """A spec is resolved or it is not: half an override would lose the origin."""
+    swapped = _resolved(preset="human_art", license_id="research-only", extractor="anime2sketch")
+    assert swapped.extractor == "anime2sketch"
+    assert swapped.origin is LineArtOrigin.EXTRACTED
+    assert swapped.uses_extractor and swapped.requires_nsfw
+    assert swapped.license_id == "research-only"

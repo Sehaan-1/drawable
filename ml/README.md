@@ -30,13 +30,19 @@ uv sync --frozen --extra dev --python 3.11
 # Checks (what CI runs)
 .venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy linescout_ml && .venv/bin/pytest -q
 
-# Run the pipeline headless instead of in Colab (pulls in torch + the model stack)
-uv pip install -e ".[gpu]"
-```
+# Run the pipeline headless instead of in Colab: same lockfile, plus the GPU stack
+uv sync --frozen --extra gpu --python 3.11
+
+# Audit the Colab setup without a GPU: pins, lock coverage, the notebook's imports
+.venv/bin/linescout-repro selfcheck
 
 The `dev` extra is enough for everything CI does: the pipeline's CPU stages need
 only `numpy` and `pillow`, and the GPU stages keep their imports lazy so a fresh
-clone never has to install torch to validate a manifest.
+clone never has to install torch to validate a manifest. Nothing here installs a
+GPU package implicitly: `linescout-repro selfcheck` asserts that, and it also checks
+that `colab/requirements-colab.txt` agrees with `uv.lock`, that the checkpoint lock
+covers every group the default pipeline wants, and that the notebook installs the plan
+rather than a list of bare package names.
 
 `fixtures/synthetic/` is the only dataset committed to Git. Real datasets live
 under `data/` (ignored) and are never redistributed — the Colab notebook writes

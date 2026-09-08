@@ -1,0 +1,39 @@
+{
+  "note": [
+    "What a *specific* runtime had installed, recorded with `linescout-repro",
+    "environment record`. The notebook compares against this file and prints",
+    "the difference; it never assumes the runtime matches, and never installs",
+    "torch to make the numbers agree. A CPU dev container records no torch and",
+    "no CUDA level, which is exactly why the file is a report and not a spec."
+  ],
+  "packages": {
+    "numpy": "2.4.6",
+    "pillow": "12.3.0",
+    "pydantic": "2.13.5"
+  },
+  "recorded_at": "2026-09-08",
+  "recorded_on": "unknown \u00b7 Python 3.11.2 \u00b7 Linux-x86_64",
+  "runtime": {
+    "cuda": "not queried (torch not imported in this process)",
+    "python": "3.11.2",
+    "torch": null
+  },
+  "schema_version": 1,
+  "unrecorded": [
+    "controlnet-aux",
+    "einops",
+    "huggingface-hub",
+    "matplotlib",
+    "open-clip-torch",
+    "opencv-python-headless",
+    "opennsfw2",
+    "safetensors",
+    "scikit-image",
+    "scipy",
+    "tensorflow",
+    "timm",
+    "torch",
+    "torchvision",
+    "tqdm"
+  ]
+}

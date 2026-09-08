@@ -4,7 +4,7 @@ The Milestone 2 entry point for turning raw source artwork into a validated
 LineScout gallery, on a free Colab GPU — no account, no paid tier, nothing to
 install locally.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sehaan-1/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/junosapollo/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
 
 * **`linescout_gpu_pipeline.ipynb`** — the notebook. Configuration, progress,
   previews, and the numbers that come out.
@@ -13,7 +13,7 @@ install locally.
 
 The notebook is a driver, not an implementation. Stage logic lives in the package
 so that a bug found on a T4 is fixed in a module that CI can see, and so the same
-code can be run headless on a workstation (`pip install -e ".[gpu]"`).
+code can be run headless on a workstation (`uv sync --frozen --extra gpu`).
 
 ## Quick start
 
@@ -29,14 +29,163 @@ code can be run headless on a workstation (`pip install -e ".[gpu]"`).
 3. In cell 1, set `DATASET_VERSION`, `DRIVE_ROOT`, and one `SOURCES` entry per
    dataset — each with a **`license_id` you verified yourself**. The pipeline
    refuses to write a provenance manifest with a placeholder in it. Start small:
-   `LIMIT_PER_SOURCE = 20` for a first smoke run.
-4. Run cell 2 (environment), then cell 3 (CPU sanity check on the committed
-   fixture, ~10 s) to confirm the plumbing works in your runtime.
-5. Run cells 4 → 12. Each stage prints what it did and persists before the next
-   one starts.
+   `LIMIT_PER_SOURCE = 20` for a first smoke run. `REPO_PIN` and
+   `CHECKPOINT_POLICY` are the two reproducibility knobs, and both default to the
+   values this repository was audited with.
+4. Run cells 2 → 2d, in that order: the pinned checkout, then the sources resolved,
+   then Colab's torch frozen into constraints, then the pinned installs. Cell 2 stops
+   if HEAD is not the pin and cell 2b stops if a licence is a placeholder — both
+   before anything installs, which is the whole ordering.
+5. Run cell 3 (CPU sanity check on the committed fixture, ~10 s) to confirm the
+   plumbing works in your runtime, then cells 4 → 12. Each stage prints what it did
+   and persists before the next one starts.
+6. Read the `reproducibility:` block cell 12b prints before you close the tab. It is
+   what a future rebuild needs, and `NOT RECORDED` there means this run cannot be
+   re-created no matter how good the numbers look.
 
 Prefer one cell over eleven? The `run_all` alternative is documented at the end
 of section 12. Use it after you have watched the stages once.
+
+## Reproducibility
+
+A GPU run is expensive enough that doing it twice by accident should be impossible,
+so the pipeline pins everything that could silently change underneath it. Not one of
+these is optional, and none of them are the author's machine being representative.
+
+| What | Where | How it is enforced |
+|---|---|---|
+| The code you ran | `ml/colab/linescout_gpu_pipeline.ipynb` cell 2a | `git fetch --depth 1 origin <sha>` then `git checkout --force` |
+| The environment | `ml/colab/requirements-colab.txt` | every install in the notebook is `pip(PLAN.pip_specs)`, never a bare name |
+| The weights | `ml/linescout_ml/colab/models.lock.json` | size + SHA-256 verified before a stage opens the file |
+| The runtime | `ml/colab/runtime-baseline.json` | actual versions recorded at run time, compared to the baseline |
+| All of it, per run | `run_report.json`, `manifest.json` | recorded, then hashed with the manifest |
+
+### The repository pin
+
+The notebook defaults to **`junosapollo/drawable`** at commit
+`0000000000000000000000000000000000000000`, fetched over
+`https://github.com/junosapollo/drawable.git` — the unauthenticated transport, because
+nothing that has to be reproducible should depend on a token you happen to have in a
+runtime. `REPO_URL` is a form field for the private-repo case and for a fork; the pin
+is what makes it safe to change. A tag would read better than 40 hex digits, but a tag
+can be moved and a branch can be force-pushed; a commit cannot be either, and a
+notebook that says "`main`" is a notebook that runs whatever `main` happens to be the
+day someone presses the button.
+
+The `Sehaan-1/drawable` mirror in `REPO_MIRROR_URL` is a fetch fallback only, tried
+when the canonical URL is unreachable, and it cannot change what runs: whatever arrives
+is checked out by SHA and the checkout is refused if HEAD is not the pin. Content
+addressing is what makes a mirror safe; "a second URL I trust" would not be.
+
+Those 40 hex digits are a **placeholder** until the finalized pipeline exists as a
+commit, and while it is one, CI is red by design: `linescout-repro pin --check` fails,
+and cell 2 prints the same warning. Bumping it is a small, boring, procedural change:
+
+```bash
+# 1. land the pipeline, get its commit
+git rev-parse HEAD                             # e.g. 3f9c1d2e...
+.venv/bin/linescout-repro pin --pin 3f9c1d2e...40   # judge the candidate first
+# 2. COLAB_PIN in ml/linescout_ml/colab/repro.py, REPO_PIN in the notebook cell 1 form
+git commit -am "docs: pin Colab to <sha>"
+.venv/bin/linescout-repro pin --check && .venv/bin/linescout-repro selfcheck
+# 3. prove a stranger's runtime can actually fetch it, from a scratch clone
+.venv/bin/linescout-repro checkout --dir /tmp/ls-pin --rev <sha>
+```
+
+Nothing in the code derives the pin from the current checkout. If it did, `origin` on
+your machine would decide what a stranger's GPU session clones.
+
+### The environment
+
+`ml/colab/requirements-colab.txt` is the only dependency list Colab installs from: 23
+runtime pins (install) plus 6 non-runtime pins (`torch`/`torchvision` come preinstalled
+in the Colab CUDA image). The distinction matters:
+
+* A **runtime** package's version is *recorded*, not forced. Letting pip replace the
+  image's CUDA-enabled torch with the PyPI default build is how a free T4 quietly
+  becomes a CPU run, and `pip` cannot see the difference. The cell asserts that the
+  `+cu…` build tag survives and that torch can actually move a tensor onto the device.
+* A **non-runtime** pin is checked against `uv.lock` by `linescout-repro selfcheck`
+  (CI runs it), so the file you run in Colab and the lockfile you run at home are the
+  same version by construction, not by diligence.
+
+The names are additionally a subset of the `[gpu]` extra in `ml/pyproject.toml`, which
+is the one place they all get their versions resolved, and they must each have a lock
+entry — a pin nobody can resolve is a pin nobody can install.
+
+`pip` is told only the pinned `name==version` strings; it is never asked for a name.
+The notebook installs nothing that is already present, because `pip install` of an
+already-satisfied requirement still pays for the index round trip, and the whole point
+of the preflight is that a wrong version is caught before weights download.
+
+### The weights
+
+`ml/linescout_ml/colab/models.lock.json` is a `ModelLock`: one entry per file a stage
+needs, each with `repo` + `revision` + `filename` + `sha256` + `size_bytes`. A revision
+is a 40-hex commit (`IMMUTABLE_REVISION`) for the same reason the repository pin is:
+`main` is a moving pointer, and the whole point is that nobody has to trust it.
+
+A `sha256` there is always the file's actual digest — for Hugging Face weights, the
+`lfs.oid` returned by the API (which *is* the SHA-256), not the top-level `oid` (which
+is a git blob SHA-1, and would fail every verification ever done against it). Files
+with no published digest are honest about it: `sha256: null` plus a `note` saying who
+has to look.
+
+`CheckpointPolicy` then decides what to do about it:
+
+| Policy | Behaviour |
+|---|---|
+| `record` (default) | download once, verify what arrives, record the digest into the run; a cached file whose digest disagrees with the lock still stops the run |
+| `require` | a missing digest is an error, and every entry must carry a SHA-256 — the mode for anything that will be published |
+| `off` | no verification; `run_report.json` says `"unverified"` in plain words |
+
+Nothing is ever deleted over a digest disagreement; the error names the cache path so
+you can look at what you got. Verification runs once per file per process, and an
+already-verified cache directory is a directory whose digest matched a minute ago, so
+`gated = already_verified or verifier.gated(...)` is how the label stage decides not to
+re-open it.
+
+### What a run leaves behind
+
+Every manifest and every `run_report.json` carries a `PipelineProvenance`: repository +
+commit + dirty flag, the environment pins file and its digest, the environment digest
+itself, the runtime baseline and whether it matched, the source of truth, and each
+model's resolved repo/revision/digest. `manifest.content_hash()` covers it, so a
+provenance mismatch is a different gallery — you cannot quietly re-point an old
+manifest at new weights.
+
+`compare_runtime` compares the run's environment to `runtime-baseline.json` and records
+the answer in `run_report.json` — with one gap, stated plainly there: an installed
+package with **no** recorded version is an unknown, not a mismatch. `tensorflow` and
+`opennsfw2` are exactly that, and the honest reason is that this environment had no way
+to resolve them. The `unrecorded` list in the baseline names them so nobody mistakes
+the baseline for a complete environment description.
+
+### Auditing it
+
+```bash
+cd ml
+uv sync --frozen --extra dev --python 3.11
+.venv/bin/linescout-repro selfcheck     # also run in CI
+.venv/bin/linescout-repro pin --check   # fails while the pin is still the placeholder
+.venv/bin/linescout-repro environment plan   # what this run would install, from the pins
+.venv/bin/linescout-repro environment report # what this runtime actually has
+```
+
+`selfcheck` reads files rather than importing them, so it checks the notebook you
+committed and not the notebook you meant to commit. It catches a pin that drifted from
+the lockfile, a GPU import hoisted to module level (which would make every CPU test
+either fail or silently skip), an unpinned checkpoint group, a notebook cell reordered
+to install before it resolves the source presets, and documentation that still tells you
+to install the GPU extras by hand instead of through the lockfile.
+
+### Running the GPU path
+
+See [`SMOKE_TEST.md`](SMOKE_TEST.md): the runbook for the GPU path, with the exact
+output each cell has to produce, and a plain statement of what has *not* been run —
+no GPU and no route to the weight CDNs means nobody has done a real Colab run of this
+pinning yet, and the file says so rather than implying a test report.
+
 
 ## What comes out
 
@@ -152,7 +301,7 @@ to reinstall torch, and **executes the notebook's dry-run cell** against the
 committed fixture. A refactor that breaks the notebook fails CI rather than
 failing someone's GPU session.
 
-With the GPU extras installed (`uv pip install -e ".[gpu]"`) the same
+With the GPU extras installed (`uv sync --frozen --extra gpu`) the same
 `PipelineRunner` runs headless:
 
 ```python

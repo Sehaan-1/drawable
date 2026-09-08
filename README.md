@@ -92,13 +92,20 @@ Milestone 2 under their own terms — several require an access application,
 so start those early.
 
 Ingestion runs in Google Colab on a free T4/A100 runtime, so no GPU is needed at
-home: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sehaan-1/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
+home: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/junosapollo/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
 It reads a Drive folder of raw artwork and writes a validated gallery
 (`originals/`, `line_art/`, `thumbnails/`, `manifest.json`) plus MobileCLIP2 and
 DINOv2 feature shards, which you unzip into `data/` and point the API at. Every
 stage is resumable, labels are written as provisional for the curation UI to
 correct, and the notebook refuses to run with a placeholder dataset licence.
-Details in [`ml/colab/README.md`](ml/colab/README.md).
+
+The notebook is reproducible beyond lockfiles: it clones `junosapollo/drawable` at
+one pinned commit rather than `main`, installs `requirements-colab.txt` pins instead
+of whatever pip's solver likes today, and verifies every checkpoint against a SHA-256
+before a stage touches it. A run records the commit, the environment digest, the
+model revisions and the actual runtime versions into its manifest and report, so a
+report says what happened rather than what was intended. Details in
+[`ml/colab/README.md`](ml/colab/README.md).
 
 ## Roadmap
 

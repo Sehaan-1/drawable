@@ -103,6 +103,8 @@ class Candidate(BaseModel):
     line_art_path: str | None = None
     extraction_model: str | None = None
     extraction_version: str | None = None
+    #: SHA-256 of the checkpoint the extractor loaded (see models.lock.json).
+    extraction_sha256: str | None = None
     source_checksum: str | None = None
     line_art_checksum: str | None = None
     thumbnail_checksum: str | None = None
@@ -294,6 +296,7 @@ class CandidateStore:
                         "line_art_path": existing.line_art_path,
                         "extraction_model": existing.extraction_model,
                         "extraction_version": existing.extraction_version,
+                        "extraction_sha256": existing.extraction_sha256,
                         "source_checksum": existing.source_checksum,
                         "line_art_checksum": existing.line_art_checksum,
                         "thumbnail_checksum": existing.thumbnail_checksum,

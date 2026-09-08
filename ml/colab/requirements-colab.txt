@@ -1,0 +1,65 @@
+# LineScout · Colab GPU environment (pinned)
+#
+# One place that says which *pip* packages the Milestone 2 pipeline runs on.
+# `linescout_gpu_pipeline.ipynb` installs from this file, `linescout-repro
+# environment` reads it locally, and CI (tests/test_colab_repro.py) checks that
+# every pin below still equals the version in the committed `ml/uv.lock`, so the
+# runtime a Colab user gets and the runtime CI type-checks are the same set of
+# numbers.
+#
+# torch and torchvision are *deliberately* not installable from here. Colab ships
+# a CUDA build matched to the host driver; letting pip resolve them again is the
+# classic way to end up with a CPU-only torch or a broken cuDNN. The notebook
+# freezes whatever it finds into a constraints file instead, and records the real
+# versions in the run report. The `[runtime]` group below is documentation and
+# drift-detection only — nothing in it is ever installed.
+#
+# Groups (a `# group:` header applies to every pin under it):
+#
+#   [base]        imported by every stage, CPU and GPU alike
+#   [extraction]  controlnet_aux + its image stack (RUN_EXTRACTION)
+#   [clip]        open_clip + timm for MobileCLIP2 labels/features (RUN_LABELS, RUN_EMBEDDINGS)
+#   [nsfw]        opennsfw2 for sources whose terms do not guarantee SFW content
+#   [display]     notebook progress bars and previews
+#   [runtime]     reference versions; never installed
+#
+# A run installs only the groups its toggles and resolved sources need — see
+# linescout_ml.colab.repro.plan_environment. Add a dependency by adding a line
+# under the right group; the notebook needs no edit, because it installs by group.
+
+# group: base
+pydantic==2.13.5
+numpy==2.4.6
+pillow==12.3.0
+huggingface-hub==1.30.0
+safetensors==0.8.0
+
+# group: extraction
+controlnet-aux==0.0.10
+einops==0.8.2
+opencv-python-headless==5.0.0.93
+scikit-image==0.26.0
+scipy==1.17.1
+filelock==3.32.5
+
+# group: clip
+open-clip-torch==3.3.0
+timm==1.0.29
+regex==2026.9.3
+ftfy==6.3.1
+tqdm==4.70.0
+
+# group: nsfw
+# opennsfw2 declares gdown (it fetches the weights itself) and needs a Keras at
+# runtime, which Colab ships as `tensorflow` + `tf-keras`. Neither Keras wheel is
+# pinned here because neither is *installed* here: they belong to the runtime, so
+# `linescout-repro environment report` records which ones were found instead.
+opennsfw2==0.18.0
+gdown==6.2.0
+
+# group: display
+matplotlib==3.11.1
+
+# group: runtime
+torch==2.14.0
+torchvision==0.29.0

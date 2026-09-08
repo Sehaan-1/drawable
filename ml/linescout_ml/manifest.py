@@ -14,7 +14,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -101,6 +101,9 @@ class ManifestRecord(BaseModel):
     origin: LineArtOrigin
     extraction_model: str | None = Field(default=None, max_length=64)
     extraction_version: str | None = Field(default=None, max_length=32)
+    #: SHA-256 of the checkpoint file the extractor actually loaded, so a gallery
+    #: merged across extractor revisions still says which bytes drew each line.
+    extraction_sha256: Sha256 | None = None
 
     # Labels
     primary_style: PrimaryStyle
@@ -190,6 +193,64 @@ class ManifestRecord(BaseModel):
         return self
 
 
+class CheckpointProvenance(BaseModel):
+    """One pinned model artifact, as verified by the pipeline that used it.
+
+    ``status`` is the whole point: ``verified`` means the bytes matched a
+    published digest, ``recorded`` means the digest was captured on first use
+    because the publisher exposes none, ``revision`` means only a repository
+    commit pinned it, and ``unchecked`` means verification was switched off.
+    A dataset that quietly mixed those three is the failure this file exists to
+    prevent, so the difference is written down per artifact.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: Annotated[str, StringConstraints(min_length=3, max_length=128)]
+    group: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    #: Where the bytes came from: ``repo@commit/path`` or an absolute URL.
+    locator: Annotated[str, StringConstraints(max_length=512)]
+    sha256: Sha256 | None = None
+    size_bytes: int | None = Field(default=None, ge=1)
+    status: Literal["verified", "recorded", "revision", "unchecked"]
+    pinned: bool
+
+
+class PipelineProvenance(BaseModel):
+    """Which code, environment, and weights produced this gallery.
+
+    Identity only — no timestamps, because ``Manifest.content_hash()`` keys the
+    derived indexes and must not move when nothing but the clock did.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal[1] = MANIFEST_SCHEMA_VERSION
+    pipeline_version: Annotated[str, StringConstraints(min_length=1, max_length=32)] = "colab-m2-1"
+    #: Repository that supplied ``linescout_ml``, e.g. ``junosapollo/drawable``.
+    source_repo: Annotated[str, StringConstraints(max_length=128)] | None = None
+    #: The commit HEAD was *verified* to equal — never a branch or a tag.
+    source_revision: Annotated[str | None, StringConstraints(pattern=r"^[0-9a-f]{40}$")] = None
+    #: The checkout carried local edits, so this run is not fully described by
+    #: ``source_revision`` alone. Recorded, never hidden.
+    source_dirty: bool | None = None
+    source_action: Literal["cloned", "reused", "fetched", "failed"] | None = None
+    #: SHA-256 of the pinned requirements file the run installed from.
+    environment_sha256: Sha256 | None = None
+    #: SHA-256 of ``models.lock.json`` these checkpoints were checked against.
+    model_lock_sha256: Sha256 | None = None
+    checkpoint_policy: Literal["strict", "record", "off"] = "record"
+    #: ``package -> version`` actually importable in the producing runtime.
+    runtime: dict[str, Annotated[str, StringConstraints(max_length=64)]] = Field(
+        default_factory=dict, max_length=64
+    )
+    checkpoints: list[CheckpointProvenance] = Field(default_factory=list, max_length=64)
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = self.model_dump(mode="json")
+        return payload
+
+
 class Manifest(BaseModel):
     """A versioned collection of records plus the dataset/index version stamp."""
 
@@ -200,6 +261,9 @@ class Manifest(BaseModel):
         str, StringConstraints(pattern=r"^\d{4}\.\d{2}\.\d{2}(-[a-z0-9]+)?$")
     ]
     records: list[ManifestRecord]
+    #: Optional because a manifest is also hand-written and hand-curated: the
+    #: pipeline always fills it in, and its absence says "nobody recorded".
+    provenance: PipelineProvenance | None = None
 
     @model_validator(mode="after")
     def _unique_ids_and_checksums(self) -> Self:

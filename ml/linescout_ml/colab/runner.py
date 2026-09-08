@@ -23,12 +23,13 @@ drive ``tqdm`` (or a plain counter) without this package depending on either.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, TypeVar
 
 from PIL import Image
 
+from linescout_ml.colab import repro
 from linescout_ml.colab.assets import (
     GalleryBuildError,
     asset_id_for,
@@ -44,6 +45,7 @@ from linescout_ml.colab.assets import (
     write_manifest,
     write_png,
 )
+from linescout_ml.colab.checkpoints import CheckpointVerifier
 from linescout_ml.colab.config import PipelineConfig, SourceSpec
 from linescout_ml.colab.embed import EmbeddingStore
 from linescout_ml.colab.export import (
@@ -89,7 +91,13 @@ from linescout_ml.colab.runtime import (
     torch_available,
 )
 from linescout_ml.colab.sources import Candidate, CandidateStore, Measurements, discover
-from linescout_ml.manifest import Manifest, ManifestRecord, SfwDecision
+from linescout_ml.manifest import (
+    CheckpointProvenance,
+    Manifest,
+    ManifestRecord,
+    PipelineProvenance,
+    SfwDecision,
+)
 from linescout_ml.taxonomy import LineArtOrigin
 
 #: ``hook(stage_name, completed, total)`` — called after every item.
@@ -132,6 +140,7 @@ class PipelineRunner:
         self._device: str | None = None
         self._clock = 0.0
         self._sources: dict[str, SourceSpec] = {source.name: source for source in config.sources}
+        self._checkpoints: CheckpointVerifier | None = None
 
     # ------------------------------------------------------------------ plumbing
 
@@ -141,6 +150,17 @@ class PipelineRunner:
         if self._device is None:
             self._device = resolve_device(self.config.device) if torch_available() else "cpu"
         return self._device
+
+    @property
+    def checkpoints(self) -> CheckpointVerifier:
+        """The pinned weights this run is allowed to load.
+
+        Built lazily: reading a 200-line JSON lock is cheap, but it should not
+        happen at all in a process that never touches a model.
+        """
+        if self._checkpoints is None:
+            self._checkpoints = CheckpointVerifier.for_config(self.config)
+        return self._checkpoints
 
     def source_for(self, candidate: Candidate) -> SourceSpec:
         try:
@@ -277,6 +297,8 @@ class PipelineRunner:
         candidate.line_art_path = paths.line_art
         candidate.extraction_model = model
         candidate.extraction_version = version
+        if extractor is not None and model is not None:
+            candidate.extraction_sha256 = extractor.checkpoint_sha256
         candidate.source_checksum = sha256_file(self.gallery_path(paths.original))
         candidate.line_art_checksum = sha256_file(self.gallery_path(paths.line_art))
         candidate.thumbnail_checksum = sha256_file(self.gallery_path(paths.thumbnail))
@@ -325,11 +347,21 @@ class PipelineRunner:
                 key = source.extractor if source.origin is LineArtOrigin.EXTRACTED else "none"
                 if key not in extractors:
                     extractors[key] = (
-                        None if key == "none" else LineArtExtractor.load(key, self.device)
+                        None
+                        if key == "none"
+                        else LineArtExtractor.load(key, self.device, verifier=self.checkpoints)
                     )
                     loaded = extractors[key]
                     if loaded is not None:
                         stage.notes.append(f"{key}: controlnet_aux {loaded.version}")
+                        stage.notes.append(
+                            f"{key}: weights "
+                            + (
+                                f"sha256 {loaded.checkpoint_sha256[:12]} (pinned)"
+                                if loaded.checkpoint_sha256
+                                else "unpinned"
+                            )
+                        )
                 self._extract_one(candidate, source, extractors[key])
                 if candidate.skip_reason:
                     stage.failed += 1
@@ -479,20 +511,30 @@ class PipelineRunner:
         if not targets:
             return self._finish(stage)
 
-        needs_classifier = any(
-            "opennsfw2" in self.source_for(candidate).sfw_method for candidate in targets
+        # Asked of the *resolved* source, so a preset that defaults to opennsfw2
+        # gets it without the operator having to repeat the preset's own choice.
+        needs_classifier = any(self.source_for(candidate).requires_nsfw for candidate in targets)
+        classifier = (
+            OpenNsfw2Classifier.load(self.config.batch_size, verifier=self.checkpoints)
+            if needs_classifier
+            else None
         )
-        classifier = OpenNsfw2Classifier.load(self.config.batch_size) if needs_classifier else None
         if needs_classifier:
             stage.notes.append("sfw: opennsfw2 on the original")
+            listed = self._model_label(classifier) if classifier else "n/a"
+            stage.notes.append(f"sfw weights: {listed}")
 
         labeler: ZeroShotLabeler | None = None
         try:
             if self.config.label:
                 labeler = ZeroShotLabeler.load(
-                    self.config.labeler_model, self.config.labeler_pretrained, self.device
+                    self.config.labeler_model,
+                    self.config.labeler_pretrained,
+                    self.device,
+                    verifier=self.checkpoints,
                 )
                 stage.notes.append(f"zero-shot via {labeler.encoder.card.name}")
+                stage.notes.append(f"zero-shot weights: {self._model_label(labeler.encoder)}")
             else:
                 stage.notes.append("zero-shot disabled; using source defaults")
 
@@ -577,7 +619,8 @@ class PipelineRunner:
 
             shard_size = min(self.config.batch_size, self.config.embedding_shard_size)
             embedded = 0
-            encoder = load_encoder(key, self.device)
+            encoder = load_encoder(key, self.device, verifier=self.checkpoints)
+            stage.notes.append(f"{key}: weights {self._model_label(encoder)}")
             try:
                 for chunk in _chunks(pending, shard_size):
                     ids: list[str] = []
@@ -646,7 +689,9 @@ class PipelineRunner:
         if existing:
             stage.notes.append(f"merged into {len(existing.records)} existing records")
 
-        manifest = build_manifest(merged, self.config.dataset_version)
+        manifest = build_manifest(
+            merged, self.config.dataset_version, provenance=self.manifest_provenance()
+        )
         problems = missing_files(manifest, self.config.output_root)
         if problems:
             stage.failed = len(problems)
@@ -694,6 +739,77 @@ class PipelineRunner:
         self._finish(stage)
         return outputs
 
+    # ------------------------------------------------------- reproducibility blocks
+
+    @classmethod
+    def _model_label(cls, model: object) -> str:
+        """Checkpoint note for anything a loader returned, stubs included."""
+        return cls._checkpoint_label(getattr(model, "checkpoint", None))
+
+    @staticmethod
+    def _checkpoint_label(checkpoint: Mapping[str, Any] | None) -> str:
+        """Short, honest description of what the verifier did for a model."""
+        payload = dict(checkpoint or {})
+        artifacts = [item for item in payload.get("artifacts", []) if isinstance(item, dict)]
+        if not artifacts:
+            return f"unpinned (policy={payload.get('policy', 'n/a')})"
+        listed = ", ".join(
+            f"{item.get('id', '?').split('/')[-1]}:{item.get('status', '?')}" for item in artifacts
+        )
+        return listed
+
+    def environment_block(self) -> dict[str, Any]:
+        """What the runtime actually is — versions, pins, and where they differ.
+
+        Colab ships torch, CUDA, and TensorFlow; assuming they match this
+        repository's lockfile would be exactly the mistake the report exists to
+        catch, so the recorded numbers are compared against a baseline and the
+        differences are reported instead of smoothed over.
+        """
+        report = repro.runtime_report()
+        baseline = repro.load_baseline()
+        return {
+            "spec": repro.environment_digest(),
+            "runtime": report["runtime"],
+            "python": report["python"],
+            "packages": report["packages"],
+            "cuda": report["cuda"],
+            "torch_imported": report["torch_imported"],
+            "baseline": {
+                "path": str(repro.runtime_baseline_path()),
+                "recorded_at": (baseline or {}).get("recorded_at"),
+                "recorded_on": (baseline or {}).get("recorded_on"),
+            },
+            "drift": repro.compare_runtime(report, baseline),
+        }
+
+    def manifest_provenance(self) -> PipelineProvenance:
+        """The dataset-level provenance written into ``manifest.json``."""
+        payload = self.checkpoints.as_dict()
+        checkpoints = [
+            CheckpointProvenance.model_validate(
+                {key: value for key, value in dict(item).items() if key != "path"}
+            )
+            for item in payload.get("artifacts", [])
+            if isinstance(item, dict)
+        ]
+        raw_lock = payload.get("lock")
+        lock: Mapping[str, Any] = raw_lock if isinstance(raw_lock, Mapping) else {}
+        return PipelineProvenance(
+            pipeline_version=self.config.pipeline_version,
+            source_repo=self.config.source_repo,
+            source_revision=self.config.source_revision,
+            source_dirty=self.config.source_dirty,
+            source_action=self.config.source_action,
+            environment_sha256=self.config.environment_sha256,
+            model_lock_sha256=self.config.model_lock_sha256 or lock.get("sha256"),
+            checkpoint_policy=self.config.checkpoint_policy,
+            runtime={
+                str(key): str(value) for key, value in self.environment_block()["packages"].items()
+            },
+            checkpoints=checkpoints,
+        )
+
     # ------------------------------------------------------------------ report
 
     def report(self, *, outputs: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -729,6 +845,9 @@ class PipelineRunner:
             embedders=embedders,
             outputs=outputs,
             started_at=self.started_at or utc_now(),
+            source=self.config.source_provenance(),
+            environment=self.environment_block(),
+            checkpoints=self.checkpoints.as_dict(),
         )
 
     # ------------------------------------------------------------------ all of it

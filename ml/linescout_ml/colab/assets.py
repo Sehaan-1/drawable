@@ -35,6 +35,7 @@ from linescout_ml.colab.sources import AssetLabels, Candidate, Measurements
 from linescout_ml.manifest import (
     Manifest,
     ManifestRecord,
+    PipelineProvenance,
     check_split_integrity,
     make_asset_id,
 )
@@ -164,6 +165,7 @@ def build_record(
             origin=source.origin,
             extraction_model=candidate.extraction_model if extracted else None,
             extraction_version=candidate.extraction_version if extracted else None,
+            extraction_sha256=candidate.extraction_sha256 if extracted else None,
             primary_style=labels.primary_style,
             scopes=list(labels.scopes),
             person_count=labels.person_count,
@@ -193,14 +195,28 @@ def review_for(state: ReviewState) -> dict[str, Any]:
     return {"state": state, "quality": None, "malformed_anatomy": False, "poor_extraction": False}
 
 
-def build_manifest(records: Sequence[ManifestRecord], dataset_version: str) -> Manifest:
-    """Validate records as a whole, including the one-work-one-split rule."""
+def build_manifest(
+    records: Sequence[ManifestRecord],
+    dataset_version: str,
+    *,
+    provenance: PipelineProvenance | None = None,
+) -> Manifest:
+    """Validate records as a whole, including the one-work-one-split rule.
+
+    ``provenance`` names the code, environment, and model checkpoints that
+    produced the records. It is part of the manifest rather than only the run
+    report because the report travels with one *run* while the manifest travels
+    with the *dataset*: a gallery merged over three months still has to say
+    which pins the oldest records were built from.
+    """
     problems = check_split_integrity(records)
     if problems:
         msg = "split integrity violated: " + "; ".join(problems[:5])
         raise GalleryBuildError(msg)
     try:
-        return Manifest(dataset_version=dataset_version, records=list(records))
+        return Manifest(
+            dataset_version=dataset_version, records=list(records), provenance=provenance
+        )
     except ValueError as error:
         msg = f"manifest failed validation: {error}"
         raise GalleryBuildError(msg) from error
