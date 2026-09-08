@@ -9,18 +9,22 @@ from pydantic import ValidationError
 from linescout_ml.cli import main
 from linescout_ml.manifest import (
     AllowedUses,
+    ArtifactContract,
     CropBox,
+    HumanReview,
     Manifest,
     ManifestRecord,
     SfwHumanDecision,
     SfwScreening,
     check_parent_integrity,
     check_split_integrity,
+    is_gold,
     is_servable,
     is_trainable,
     learning_split_report,
     make_asset_id,
     manifest_json_schema,
+    serving_reasons,
 )
 from linescout_ml.synthetic import write_synthetic_dataset
 from linescout_ml.taxonomy import (
@@ -37,6 +41,11 @@ from linescout_ml.taxonomy import (
 )
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "synthetic" / "manifest.json"
+
+#: Matches the generation fields carried by ``_base_record``.
+TEST_CONTRACT = ArtifactContract(
+    pipeline_version="test-1", label_version="1", processing_revision=1
+)
 
 
 def _base_record(**overrides: object) -> dict[str, object]:
@@ -229,8 +238,12 @@ def test_invalid_records_are_rejected(overrides: dict[str, object], fragment: st
 
 def test_servable_and_trainable_predicates() -> None:
     base = ManifestRecord.model_validate(_base_record())
-    assert is_servable(base)
-    assert is_trainable(base)
+    assert is_servable(base, TEST_CONTRACT)
+    assert is_trainable(base, TEST_CONTRACT)
+
+    # Without a verified generation the policy fails closed.
+    assert not is_servable(base, None)
+    assert not is_trainable(base, None)
 
     # Human SFW approval gates display: a safe automated screen is not enough.
     screening_only = base.model_copy(
@@ -241,32 +254,32 @@ def test_servable_and_trainable_predicates() -> None:
             ),
         }
     )
-    assert not is_servable(screening_only)
+    assert not is_servable(screening_only, TEST_CONTRACT)
     # … and neither is an unsure or unsafe human decision.
     unsafe_human = base.model_copy(update={"sfw_human": SfwHumanDecision(safe=False, reviewer="t")})
-    assert not is_servable(unsafe_human)
+    assert not is_servable(unsafe_human, TEST_CONTRACT)
 
     # Gallery membership is independent of the learning split.
     not_a_member = base.model_copy(update={"gallery_member": False})
-    assert not is_servable(not_a_member)
-    assert is_trainable(not_a_member)
+    assert not is_servable(not_a_member, TEST_CONTRACT)
+    assert is_trainable(not_a_member, TEST_CONTRACT)
 
     # Training requires the train assignment plus the grant.
     val_asset = base.model_copy(update={"learning_split": LearningSplit.VALIDATION})
-    assert is_servable(val_asset)
-    assert not is_trainable(val_asset)
+    assert is_servable(val_asset, TEST_CONTRACT)
+    assert not is_trainable(val_asset, TEST_CONTRACT)
     no_training_grant = base.model_copy(
         update={"allowed_uses": AllowedUses(display=True, training=False, trace=False)}
     )
-    assert is_servable(no_training_grant)
-    assert not is_trainable(no_training_grant)
+    assert is_servable(no_training_grant, TEST_CONTRACT)
+    assert not is_trainable(no_training_grant, TEST_CONTRACT)
 
     # Blockers block both uses regardless of review state.
     blocked = base.model_copy(
         update={"review": base.review.model_copy(update={"blockers": [CurationBlocker.EXTRACTION]})}
     )
-    assert not is_servable(blocked)
-    assert not is_trainable(blocked)
+    assert not is_servable(blocked, TEST_CONTRACT)
+    assert not is_trainable(blocked, TEST_CONTRACT)
 
     # An unsafe automated screen blocks training but not serving.
     unsafe_screen = base.model_copy(
@@ -276,8 +289,49 @@ def test_servable_and_trainable_predicates() -> None:
             )
         }
     )
-    assert is_servable(unsafe_screen)
-    assert not is_trainable(unsafe_screen)
+    assert is_servable(unsafe_screen, TEST_CONTRACT)
+    assert not is_trainable(unsafe_screen, TEST_CONTRACT)
+
+
+def test_quality_one_and_missing_quality_never_serve() -> None:
+    base = ManifestRecord.model_validate(_base_record())
+    quality_one = base.model_copy(update={"review": base.review.model_copy(update={"quality": 1})})
+    missing = base.model_copy(
+        update={"review": HumanReview(state=ReviewState.ACCEPTED, quality=None)}
+    )
+    for record, reason in ((quality_one, "quality_below_floor"), (missing, "quality_missing")):
+        assert not is_servable(record, TEST_CONTRACT)
+        assert reason in serving_reasons(record, TEST_CONTRACT)
+
+
+def test_unknown_permission_fails_closed_even_when_display_is_set() -> None:
+    # The record validator rejects basis=unknown + display=true, so build the
+    # in-memory contradiction directly to prove the policy ignores it.
+    base = ManifestRecord.model_validate(_base_record())
+    contradicting = base.model_copy(
+        update={
+            "permissions": base.permissions.model_copy(update={"basis": PermissionBasis.UNKNOWN})
+        }
+    )
+    assert not is_servable(contradicting, TEST_CONTRACT)
+    assert "permission_unknown" in serving_reasons(contradicting, TEST_CONTRACT)
+
+
+def test_stale_derivatives_never_serve_or_train() -> None:
+    base = ManifestRecord.model_validate(_base_record())
+    stale = base.model_copy(update={"processing_revision": 2, "label_version": "different"})
+    assert not is_servable(stale, TEST_CONTRACT)
+    assert not is_trainable(stale, TEST_CONTRACT)
+    assert "derivative_stale:label_version" in serving_reasons(stale, TEST_CONTRACT)
+    # A bump of the contract is the same thing from the other side.
+    old_contract = ArtifactContract(
+        pipeline_version="test-1", label_version="1", processing_revision=1
+    )
+    assert is_servable(base, old_contract)
+    new_contract = ArtifactContract(
+        pipeline_version="test-1", label_version="2", processing_revision=1
+    )
+    assert not is_servable(base, new_contract)
 
 
 def test_unknown_permission_grants_nothing() -> None:
@@ -288,7 +342,7 @@ def test_unknown_permission_grants_nothing() -> None:
         )
     )
     assert record.permissions.basis is PermissionBasis.UNKNOWN
-    assert not is_servable(record) and not is_trainable(record)
+    assert not is_servable(record, TEST_CONTRACT) and not is_trainable(record, TEST_CONTRACT)
 
 
 def test_manifest_rejects_duplicate_ids() -> None:
@@ -296,9 +350,15 @@ def test_manifest_rejects_duplicate_ids() -> None:
         Manifest.model_validate(
             {
                 "dataset_version": "2026.09.08",
+                "artifact_contract": TEST_CONTRACT.model_dump(),
                 "records": [_base_record(), _base_record()],
             }
         )
+
+
+def test_manifest_requires_an_artifact_contract() -> None:
+    with pytest.raises(ValidationError, match="artifact_contract"):
+        Manifest.model_validate({"dataset_version": "2026.09.08", "records": [_base_record()]})
 
 
 def test_split_integrity_flags_cross_split_works_and_leakage_groups() -> None:
@@ -330,6 +390,45 @@ def test_split_integrity_flags_cross_split_works_and_leakage_groups() -> None:
     assert any("leakage group" in problem for problem in problems)
 
 
+def test_split_integrity_flags_cross_split_artists_and_parent_chains() -> None:
+    a = ManifestRecord.model_validate(_base_record())
+    b = ManifestRecord.model_validate(
+        _base_record(
+            asset_id=make_asset_id("synthetic", "item-2"),
+            source_item_id="item-2",
+            source_work_id="work-2",
+            learning_split="test",
+        )
+    )
+    # Same artist across two works: one split only.
+    artist_a = a.model_copy(update={"artist_id": "artist-1"})
+    artist_b = b.model_copy(update={"artist_id": "artist-1"})
+    problems = check_split_integrity([artist_a, artist_b])
+    assert any("artist 'artist-1'" in problem for problem in problems)
+    # Artist with only unassigned works leaks nothing.
+    assert (
+        check_split_integrity(
+            [artist_a, artist_b.model_copy(update={"learning_split": LearningSplit.NONE})]
+        )
+        == []
+    )
+
+    # A parent and its derivative are one artwork: one split only, even when
+    # the child names a different work.
+    child = b.model_copy(
+        update={
+            "parent_asset_id": a.asset_id,
+            "source_work_id": "crop-work",
+            "artist_id": None,
+        }
+    )
+    problems = check_split_integrity([a, child])
+    assert any("parent chain" in problem for problem in problems)
+    # Same split (or none) is fine.
+    child_train = child.model_copy(update={"learning_split": LearningSplit.TRAIN})
+    assert check_split_integrity([a, child_train]) == []
+
+
 def test_manifest_rejects_dangling_parents_and_cycles() -> None:
     child = _base_record(
         asset_id=make_asset_id("synthetic", "item-2"),
@@ -339,7 +438,11 @@ def test_manifest_rejects_dangling_parents_and_cycles() -> None:
     # Dangling parent reference.
     with pytest.raises(ValidationError, match="parent_asset_id .* is not in the manifest"):
         Manifest.model_validate(
-            {"dataset_version": "2026.09.08", "records": [_base_record(), child]}
+            {
+                "dataset_version": "2026.09.08",
+                "artifact_contract": TEST_CONTRACT.model_dump(),
+                "records": [_base_record(), child],
+            }
         )
 
     # Self-referencing parent chain (cycle of two).
@@ -347,9 +450,37 @@ def test_manifest_rejects_dangling_parents_and_cycles() -> None:
     child["parent_asset_id"] = base_dict["asset_id"]
     base_dict["parent_asset_id"] = child["asset_id"]
     with pytest.raises(ValidationError, match="cycle"):
-        Manifest.model_validate({"dataset_version": "2026.09.08", "records": [base_dict, child]})
+        Manifest.model_validate(
+            {
+                "dataset_version": "2026.09.08",
+                "artifact_contract": TEST_CONTRACT.model_dump(),
+                "records": [base_dict, child],
+            }
+        )
 
     assert check_parent_integrity([]) == []
+
+
+def test_gold_requires_its_own_approval_and_quality_conditions() -> None:
+    base = ManifestRecord.model_validate(_base_record())
+    assert is_gold(base, TEST_CONTRACT)
+    # Quality 1 is not gold even though v2 allowed it.
+    quality_one = base.model_copy(update={"review": base.review.model_copy(update={"quality": 1})})
+    assert not is_gold(quality_one, TEST_CONTRACT)
+    # Automated SFW evidence alone is not gold either.
+    screening_only = base.model_copy(update={"sfw_human": None})
+    assert not is_gold(screening_only, TEST_CONTRACT)
+    # Stale derivatives invalidate gold labels.
+    stale = base.model_copy(update={"processing_revision": 9})
+    assert not is_gold(stale, TEST_CONTRACT)
+    with pytest.raises(ValidationError, match="gold_member"):
+        Manifest.model_validate(
+            {
+                "dataset_version": "2026.09.08",
+                "artifact_contract": TEST_CONTRACT.model_dump(),
+                "records": [_base_record(gold_member=True, processing_revision=9)],
+            }
+        )
 
 
 def test_learning_split_report_targets_70_15_15() -> None:
@@ -364,11 +495,14 @@ def test_learning_split_report_targets_70_15_15() -> None:
 
 def test_committed_fixture_is_valid_and_deterministic(tmp_path: Path) -> None:
     committed = Manifest.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
-    assert committed.schema_version == 2
+    assert committed.schema_version == 3
+    assert committed.artifact_contract is not None
     assert check_split_integrity(committed.records) == []
     assert any(r.review.state is ReviewState.REJECTED for r in committed.records)
     assert any(r.review.blockers for r in committed.records)
     assert any(r.gold_member for r in committed.records)
+    assert any(r.parent_asset_id is not None for r in committed.records)
+    assert any(r.artist_id is not None for r in committed.records)
     assert {r.primary_style for r in committed.servable_records} == set(PrimaryStyle)
 
     regenerated_path = write_synthetic_dataset(tmp_path, count=len(committed.records), seed=7)
@@ -434,7 +568,7 @@ def test_cli_rejects_v1_manifests_with_migration_hint(
     path = tmp_path / "v1.json"
     path.write_text(json.dumps(v1), encoding="utf-8")
     assert main(["validate", str(path)]) == 1
-    assert "migrate-v1" in capsys.readouterr().err
+    assert "--from 1 --to 3" in capsys.readouterr().err
 
 
 def test_json_schema_exposes_enums() -> None:

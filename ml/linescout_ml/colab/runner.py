@@ -36,8 +36,8 @@ from linescout_ml.colab.assets import (
     build_manifest,
     build_record,
     copy_original,
+    derivative_problems,
     merge_records,
-    missing_files,
     original_suffix_for,
     read_manifest,
     summarise,
@@ -90,7 +90,14 @@ from linescout_ml.colab.runtime import (
 )
 from linescout_ml.colab.sources import Candidate, CandidateStore, Measurements, discover
 from linescout_ml.embeddings import ArtifactStamp
-from linescout_ml.manifest import Manifest, ManifestRecord, SfwHumanDecision, SfwScreening
+from linescout_ml.manifest import (
+    ArtifactContract,
+    Manifest,
+    ManifestRecord,
+    SfwHumanDecision,
+    SfwScreening,
+    derivative_reasons,
+)
 from linescout_ml.taxonomy import LineArtOrigin, SfwScreeningMethod, SfwVerdict
 
 #: ``hook(stage_name, completed, total)`` — called after every item.
@@ -585,7 +592,7 @@ class PipelineRunner:
             # computed from the asset's *current* line art.
             artifacts = {
                 str(candidate.asset_id): ArtifactStamp(
-                    processing_revision=1,
+                    processing_revision=self.config.processing_revision,
                     line_art_checksum=str(candidate.line_art_checksum),
                 )
                 for candidate in self.store.active
@@ -617,7 +624,7 @@ class PipelineRunner:
                             ids.append(str(candidate.asset_id))
                             stamps.append(
                                 ArtifactStamp(
-                                    processing_revision=1,
+                                    processing_revision=self.config.processing_revision,
                                     line_art_checksum=str(candidate.line_art_checksum),
                                 )
                             )
@@ -679,13 +686,47 @@ class PipelineRunner:
         if existing:
             stage.notes.append(f"merged into {len(existing.records)} existing records")
 
-        manifest = build_manifest(merged, self.config.dataset_version)
-        problems = missing_files(manifest, self.config.output_root)
-        if problems:
-            stage.failed = len(problems)
+        contract = ArtifactContract(
+            pipeline_version=self.config.pipeline_version,
+            label_version=self.config.label_version,
+            processing_revision=self.config.processing_revision,
+        )
+        manifest = build_manifest(merged, self.config.dataset_version, artifact_contract=contract)
+        # One byte audit, split three ways:
+        #  * missing served/source files — hard failure (an incomplete gallery
+        #    must never be published);
+        #  * checksum mismatches — hard failure (bytes changed since the
+        #    manifest vouched for them; never a silent disable);
+        #  * generation staleness of *merged old records* — not a failure:
+        #    those records are kept for audit and disabled by policy until
+        #    they are re-processed under the current generation.
+        problems = derivative_problems(manifest, self.config.output_root)
+        missing = [problem for problem in problems if problem.startswith("missing_file")]
+        integrity = [problem for problem in problems if problem.startswith("checksum_mismatch")]
+        if missing:
+            stage.failed = len(missing)
             self._finish(stage)
-            raise PipelineError("gallery is incomplete: " + "; ".join(problems[:5]))
+            raise PipelineError("gallery is incomplete: " + "; ".join(missing[:5]))
+        if integrity:
+            stage.failed = len(integrity)
+            self._finish(stage)
+            raise PipelineError(
+                "gallery bytes disagree with the manifest: " + "; ".join(integrity[:5])
+            )
         write_manifest(manifest, self.config.manifest_path)
+        # Generation staleness is cheaper to detect than the full byte audit
+        # above: compare generations only (integrity re-hashing every record
+        # again here would be O(n) redundant file reads).
+        stale_count = sum(
+            1
+            for record in manifest.records
+            if derivative_reasons(record, manifest.artifact_contract)
+        )
+        if stale_count:
+            stage.notes.append(
+                f"{stale_count} record(s) carry stale derivatives and are disabled "
+                "until re-processed"
+            )
         stage.notes.append(f"content_hash={manifest.content_hash()[:12]}")
         self._finish(stage)
         return manifest
@@ -733,7 +774,12 @@ class PipelineRunner:
         """The run report payload, also written to ``_pipeline/run_report.json``."""
         manifest = read_manifest(self.config.manifest_path)
         summary: dict[str, Any] = (
-            dict(summarise(manifest.records))
+            dict(
+                summarise(
+                    manifest.records,
+                    artifact_contract=manifest.artifact_contract,
+                )
+            )
             if manifest
             else {"total": 0, "servable": 0, "trainable": 0}
         )

@@ -4,20 +4,27 @@ The manifest file is authoritative. At startup we validate it, refuse to start
 if it is malformed, and then (re)populate the ``assets`` cache table only when
 its content hash differs from what is already loaded.
 
-Schema v2 notes:
+Schema v3 notes:
 
-* Only manifests with ``schema_version`` 2 load. A v1 manifest fails
-  validation with an error naming the ``linescout-manifest migrate-v1``
-  command (see ``docs/contracts/migration-v1-to-v2.md``).
-* The ``enabled`` column is a *derived* cache of the manifest's
-  :func:`is_servable` predicate (gallery membership ∧ display permission ∧
-  accepted review ∧ human SFW approval ∧ no blockers). It is recomputed on
-  sync and on curation writes; it is never hand-edited and a missing file on
-  disk does not flip it — runtime availability is in-memory state only.
+* Only manifests with ``schema_version`` 3 load. A v1/v2 manifest fails
+  validation with an error naming the ``linescout-manifest convert`` command
+  (see ``docs/contracts/migration-manifest.md``).
+* The ``enabled`` column is a *derived* cache of the canonical eligibility
+  policy (gallery membership ∧ permitted display use under a known permission
+  basis ∧ accepted review with quality 2–3 ∧ human SFW approval ∧ no blockers
+  ∧ current valid derivatives). It is recomputed on sync and on curation
+  writes; it is never hand-edited.
+* Derivative validity is computed here: a record whose generation differs from
+  the manifest's ``artifact_contract`` is stale, and a record that passes every
+  other serving gate is further checked for missing files and checksum
+  mismatches against the recorded hashes. Problems are stored per row
+  (``derivative_problems_json``), the row is disabled, and the loader reports
+  the count — this is a *disable-and-report*, never a silent promotion.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -25,11 +32,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from linescout_ml.manifest import (
+    ArtifactContract,
     Manifest,
     ManifestRecord,
     check_parent_integrity,
     check_split_integrity,
+    derivative_reasons,
     is_servable,
+    serving_reasons,
 )
 from linescout_ml.taxonomy import CurationBlocker, LineArtOrigin, PrimaryStyle
 
@@ -50,6 +60,18 @@ class GalleryInfo:
     data_root: Path
     asset_count: int
     enabled_count: int
+    #: Current artifact generation declared by the manifest (None = unknown).
+    artifact_contract: ArtifactContract | None
+    #: Count of rows disabled specifically because of derivative problems.
+    derivative_problem_count: int
+
+
+@dataclass(frozen=True)
+class DerivativeCheck:
+    """Per-record derivative validity (generation + on-disk bytes)."""
+
+    current: bool
+    problems: tuple[str, ...]
 
 
 def load_manifest(path: Path) -> Manifest:
@@ -75,15 +97,20 @@ def load_manifest(path: Path) -> Manifest:
 
 
 def _v1_hint(raw: str) -> str:
-    """Name the migration command when the document is a schema v1 manifest."""
+    """Name the conversion command when the document is an old schema version."""
     try:
         version = json.loads(raw).get("schema_version")
     except json.JSONDecodeError:
         return ""
     if version == 1:
         return (
-            "schema v1 manifests are not loadable (schema_version must be 2); "
-            "run `linescout-manifest migrate-v1 <path> --out <v2-path>` first — "
+            "schema v1 manifests are not loadable (schema_version must be 3); "
+            "run `linescout-manifest convert <path> --from 1 --to 3 --out <v3-path>` first — "
+        )
+    if version == 2:
+        return (
+            "schema v2 manifests are not loadable (schema_version must be 3); "
+            "run `linescout-manifest convert <path> --from 2 --to 3 --out <v3-path>` first — "
         )
     return ""
 
@@ -144,6 +171,8 @@ _ASSET_COLUMNS = (
     "source_checksum",
     "line_art_checksum",
     "thumbnail_checksum",
+    "derivatives_current",
+    "derivative_problems_json",
     "enabled",
 )
 
@@ -153,7 +182,52 @@ _INSERT_ASSET = (
 )
 
 
-def _record_row(record: ManifestRecord) -> tuple[object, ...]:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def derivative_check(
+    record: ManifestRecord,
+    manifest: Manifest,
+    data_root: Path,
+) -> DerivativeCheck:
+    """Compute one record's derivative validity under the canonical policy.
+
+    Generation currency is checked for every record (cheap). On-disk file
+    presence and bytes are verified only for records that pass every *other*
+    serving gate — an ineligible record is disabled by policy regardless, and
+    verifying unreviewed/quarantined bytes on every startup would cost a full
+    gallery hash for no serving benefit.
+    """
+    problems: list[str] = list(derivative_reasons(record, manifest.artifact_contract))
+    other_gates = [
+        reason
+        for reason in serving_reasons(record, manifest.artifact_contract)
+        if not reason.startswith("derivative_")
+    ]
+    # Gold is a curated statement about the *current* artifact, so its bytes
+    # are also verified even when the record is not otherwise displayable.
+    if not other_gates or record.gold_member:
+        for label, relative, checksum in (
+            ("line_art", record.line_art_path, record.line_art_checksum),
+            ("thumbnail", record.thumbnail_path, record.thumbnail_checksum),
+            ("original", record.original_path, record.source_checksum),
+        ):
+            path = data_root / relative
+            if not path.is_file():
+                problems.append(f"derivative_file_missing:{label}")
+                continue
+            if _sha256(path) != checksum:
+                problems.append(f"derivative_checksum_mismatch:{label}")
+    return DerivativeCheck(current=not problems, problems=tuple(problems))
+
+
+def _record_row(record: ManifestRecord, manifest: Manifest, data_root: Path) -> tuple[object, ...]:
+    derivative = derivative_check(record, manifest, data_root)
     values = (
         record.asset_id,
         record.source_dataset,
@@ -200,31 +274,47 @@ def _record_row(record: ManifestRecord) -> tuple[object, ...]:
         json.dumps([blocker.value for blocker in record.review.blockers]),
         record.learning_split.value,
         int(record.gallery_member),
-        int(record.gold_member),
+        # The cache may only carry gold status it has verified: a gold record
+        # whose bytes are missing/tampered is conservatively downgraded here
+        # (reported via derivative_problem_count) — never silently un-golded,
+        # and never kept gold while its artifact is unverifiable.
+        int(record.gold_member and derivative.current),
         record.pipeline_version,
         record.processing_revision,
         record.label_version,
         record.source_checksum,
         record.line_art_checksum,
         record.thumbnail_checksum,
-        int(is_servable(record)),
+        int(derivative.current),
+        json.dumps(derivative.problems),
+        int(is_servable(record, manifest.artifact_contract) and derivative.current),
     )
     assert len(values) == len(_ASSET_COLUMNS), "assets row out of sync with _ASSET_COLUMNS"
     return values
 
 
 def sync_gallery(connection: sqlite3.Connection, manifest_path: Path) -> GalleryInfo:
-    """Validate ``manifest_path`` and make the ``assets`` table match it."""
+    """Validate ``manifest_path`` and make the ``assets`` table match it.
+
+    Derivative problems (stale generation, missing file, checksum mismatch)
+    never fail the load: they are recorded per row, the row is disabled, and
+    counts are returned for the health warning. Manifest *structure* problems
+    (wrong schema version, split/parent integrity) still fail loudly.
+    """
     manifest = load_manifest(manifest_path)
     manifest_hash = manifest.content_hash()
     data_root = manifest_path.parent
-    servable = manifest.servable_records
 
-    for record in servable:
-        for rel in (record.line_art_path, record.thumbnail_path):
-            if not (data_root / rel).is_file():
-                msg = f"servable asset {record.asset_id} is missing file {rel}"
-                raise GalleryLoadError(msg)
+    checks = {
+        record.asset_id: derivative_check(record, manifest, data_root)
+        for record in manifest.records
+    }
+    derivative_problem_count = sum(1 for check in checks.values() if not check.current)
+    enabled = [
+        record.asset_id
+        for record in manifest.records
+        if is_servable(record, manifest.artifact_contract) and checks[record.asset_id].current
+    ]
 
     current = connection.execute(
         "SELECT manifest_hash FROM gallery_versions WHERE id = 1"
@@ -235,15 +325,19 @@ def sync_gallery(connection: sqlite3.Connection, manifest_path: Path) -> Gallery
         )
     else:
         log.info(
-            "loading gallery %s (%d assets, %d servable)",
+            "loading gallery %s (%d assets, %d enabled, %d derivative problems)",
             manifest.dataset_version,
             len(manifest.records),
-            len(servable),
+            len(enabled),
+            derivative_problem_count,
         )
         with transaction(connection) as tx:
             tx.execute("DELETE FROM asset_scopes")
             tx.execute("DELETE FROM assets")
-            tx.executemany(_INSERT_ASSET, (_record_row(record) for record in manifest.records))
+            tx.executemany(
+                _INSERT_ASSET,
+                (_record_row(record, manifest, data_root) for record in manifest.records),
+            )
             tx.executemany(
                 "INSERT INTO asset_scopes(asset_id, scope) VALUES (?, ?)",
                 (
@@ -256,14 +350,26 @@ def sync_gallery(connection: sqlite3.Connection, manifest_path: Path) -> Gallery
             tx.execute("DELETE FROM gallery_versions")
             tx.execute(
                 "INSERT INTO gallery_versions"
-                " (id, dataset_version, manifest_hash, manifest_path, asset_count, enabled_count)"
-                " VALUES (1, ?, ?, ?, ?, ?)",
+                " (id, dataset_version, manifest_hash, manifest_path, asset_count,"
+                " enabled_count, current_pipeline_version, current_label_version,"
+                " current_processing_revision, derivative_problem_count)"
+                " VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     manifest.dataset_version,
                     manifest_hash,
                     str(manifest_path),
                     len(manifest.records),
-                    len(servable),
+                    len(enabled),
+                    manifest.artifact_contract.pipeline_version
+                    if manifest.artifact_contract
+                    else None,
+                    manifest.artifact_contract.label_version
+                    if manifest.artifact_contract
+                    else None,
+                    manifest.artifact_contract.processing_revision
+                    if manifest.artifact_contract
+                    else None,
+                    derivative_problem_count,
                 ),
             )
 
@@ -273,16 +379,21 @@ def sync_gallery(connection: sqlite3.Connection, manifest_path: Path) -> Gallery
         manifest_path=manifest_path,
         data_root=data_root,
         asset_count=len(manifest.records),
-        enabled_count=len(servable),
+        enabled_count=len(enabled),
+        artifact_contract=manifest.artifact_contract,
+        derivative_problem_count=derivative_problem_count,
     )
 
 
-#: SQL mirror of the manifest's ``is_servable`` predicate. Used to recompute
-#: the derived ``enabled`` flag after a curation write without a reload.
+#: SQL mirror of the canonical eligibility policy. Used to recompute the
+#: derived ``enabled`` flag after a curation write without a reload.
 ENABLED_SQL = (
-    "gallery_member = 1 AND allowed_display = 1 AND review_state = 'accepted'"
+    "gallery_member = 1 AND allowed_display = 1"
+    " AND permission_basis != 'unknown'"
+    " AND review_state = 'accepted'"
     " AND COALESCE(sfw_human_safe, 0) = 1 AND blockers_json = '[]'"
     " AND review_quality IN (2, 3)"
+    " AND derivatives_current = 1"
 )
 
 
@@ -301,8 +412,9 @@ def recompute_enabled(connection: sqlite3.Connection, asset_id: str) -> bool:
 def serving_blockers(connection: sqlite3.Connection, asset_id: str) -> list[str]:
     """Why the asset is not servable, as stable machine-readable reasons."""
     row = connection.execute(
-        "SELECT gallery_member, allowed_display, review_state, review_quality,"
-        " sfw_human_safe, blockers_json FROM assets WHERE asset_id = ?",
+        "SELECT gallery_member, allowed_display, permission_basis, review_state,"
+        " review_quality, sfw_human_safe, blockers_json, derivatives_current,"
+        " derivative_problems_json FROM assets WHERE asset_id = ?",
         (asset_id,),
     ).fetchone()
     if row is None:
@@ -312,9 +424,13 @@ def serving_blockers(connection: sqlite3.Connection, asset_id: str) -> list[str]
         reasons.append("not_a_gallery_member")
     if not row["allowed_display"]:
         reasons.append("display_not_permitted")
+    if row["permission_basis"] == "unknown":
+        reasons.append("permission_unknown")
     if row["review_state"] != "accepted":
         reasons.append(f"review_{row['review_state']}")
-    if row["review_quality"] is None or row["review_quality"] < 2:
+    if row["review_quality"] is None:
+        reasons.append("quality_missing")
+    elif row["review_quality"] < 2:
         reasons.append("quality_below_floor")
     if row["sfw_human_safe"] is None:
         reasons.append("sfw_human_unapproved")
@@ -325,6 +441,11 @@ def serving_blockers(connection: sqlite3.Connection, asset_id: str) -> list[str]
     except ValueError:
         blockers = []
     reasons.extend(f"blocker_{blocker.value}" for blocker in blockers)
+    try:
+        problems = json.loads(row["derivative_problems_json"] or "[]")
+    except json.JSONDecodeError:
+        problems = []
+    reasons.extend(problems)
     return reasons
 
 
@@ -341,6 +462,9 @@ class GalleryAsset:
     trace_allowed: bool
     line_art_path: str
     thumbnail_path: str
+    #: Derived-validity flag; the ranker never lets a stale asset into a
+    #: response even if it somehow reaches the in-memory list.
+    derivatives_current: bool = True
 
     @property
     def scopes(self) -> tuple[str, ...]:
@@ -348,12 +472,17 @@ class GalleryAsset:
 
 
 def enabled_assets(connection: sqlite3.Connection) -> list[GalleryAsset]:
-    """Every asset eligible to appear in a response (the derived ``enabled`` flag)."""
+    """Every asset eligible to appear in a search response (canonical policy).
+
+    Defence in depth: the query repeats the ``enabled = 1`` AND
+    ``derivatives_current = 1`` gates so an unintended edit to one column
+    cannot leak a stale or otherwise ineligible asset into search.
+    """
     rows = connection.execute(
         "SELECT asset_id, primary_style, primary_scope, secondary_scopes_json, origin,"
         " person_count, person_count_approximate, quality_score, allowed_trace,"
-        " line_art_path, thumbnail_path"
-        " FROM assets WHERE enabled = 1 ORDER BY asset_id"
+        " line_art_path, thumbnail_path, derivatives_current"
+        " FROM assets WHERE enabled = 1 AND derivatives_current = 1 ORDER BY asset_id"
     ).fetchall()
     return [
         GalleryAsset(
@@ -368,17 +497,34 @@ def enabled_assets(connection: sqlite3.Connection) -> list[GalleryAsset]:
             trace_allowed=bool(row["allowed_trace"]),
             line_art_path=row["line_art_path"],
             thumbnail_path=row["thumbnail_path"],
+            derivatives_current=bool(row["derivatives_current"]),
         )
         for row in rows
     ]
 
 
-def asset_file(connection: sqlite3.Connection, asset_id: str, kind: str) -> str | None:
-    """Relative path for a servable asset's ``thumbnail`` or ``line_art`` file, else ``None``."""
+@dataclass(frozen=True)
+class AssetFile:
+    """A servable asset's on-disk file plus the checksum it must match."""
+
+    relative_path: str
+    sha256: str
+
+
+def asset_file(connection: sqlite3.Connection, asset_id: str, kind: str) -> AssetFile | None:
+    """Relative path + recorded sha256 for a public asset file, else ``None``.
+
+    Public serving requires the full canonical policy: ``enabled = 1`` (which
+    includes current derivatives) *and* ``derivatives_current = 1`` — a stale
+    or corrupt derivative is never served through any public path.
+    """
     column = {"thumbnail": "thumbnail_path", "line_art": "line_art_path"}[kind]
+    checksum = {"thumbnail": "thumbnail_checksum", "line_art": "line_art_checksum"}[kind]
     row = connection.execute(
-        f"SELECT {column} AS path FROM assets"  # noqa: S608
-        f" WHERE asset_id = ? AND enabled = 1",
+        f"SELECT {column} AS path, {checksum} AS sha256 FROM assets"  # noqa: S608
+        " WHERE asset_id = ? AND enabled = 1 AND derivatives_current = 1",
         (asset_id,),
     ).fetchone()
-    return str(row["path"]) if row else None
+    if row is None:
+        return None
+    return AssetFile(relative_path=str(row["path"]), sha256=str(row["sha256"]))

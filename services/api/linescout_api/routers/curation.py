@@ -295,6 +295,9 @@ def _candidate_base_query(
         " parent_asset_id, artist_id, leakage_group_id",
         " FROM assets",
         " WHERE review_state = 'unreviewed'",
+        # Stale derivatives are not reviewable: a reviewer would accept or
+        # reject artifacts that no longer match the current generation.
+        " AND derivatives_current = 1",
     ]
     params: list[object] = []
     if style is not None:
@@ -582,6 +585,7 @@ def preview_asset(state: State, asset_id: str, kind: str) -> FileResponse:
         raise not_found("asset_not_found", "asset not found")
     row = state.connection.execute(
         f"SELECT {column} AS path FROM assets WHERE asset_id = ?"  # noqa: S608
+        " AND derivatives_current = 1"
         " AND (sfw_verdict IS NULL OR sfw_verdict != 'unsafe')"
         " AND (sfw_human_safe IS NULL OR sfw_human_safe = 1)",
         (asset_id,),
@@ -613,7 +617,7 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
         )
     row = state.connection.execute(
         "SELECT asset_id, review_state, review_quality, enabled, sfw_verdict,"
-        " sfw_human_safe, primary_scope, width, height"
+        " sfw_human_safe, primary_scope, width, height, derivatives_current"
         " FROM assets WHERE asset_id = ?",
         (body.asset_id,),
     ).fetchone()
@@ -626,6 +630,15 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
         raise unprocessable(
             "asset_not_sfw",
             "cannot label an SFW-unsafe asset; quarantine happens at ingestion",
+        )
+    # A label is a human decision about the *current* artifacts. Stale
+    # derivatives must be re-processed (and re-screened) before curation.
+    if not row["derivatives_current"]:
+        raise unprocessable(
+            "derivative_stale",
+            "cannot label an asset whose derived artifacts are stale or invalid; "
+            "re-run the pipeline before curating it",
+            field="asset_id",
         )
     if body.crop is not None and not _crop_fits(body.crop, int(row["width"]), int(row["height"])):
         raise unprocessable(

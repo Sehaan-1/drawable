@@ -77,6 +77,18 @@ def build_state(settings: Settings) -> AppState:
         try:
             gallery = sync_gallery(connection, settings.gallery_manifest)
             assets = enabled_assets(connection)
+            if gallery.derivative_problem_count:
+                warnings.append(
+                    f"{gallery.derivative_problem_count} asset(s) are disabled because their "
+                    "derivatives are stale or invalid; re-process them before they can be "
+                    "served or searched"
+                )
+            if gallery.artifact_contract is None:
+                warnings.append(
+                    "gallery artifact_contract is unknown; no asset is verified current and "
+                    "nothing can be served until the current generation is declared or the "
+                    "dataset is re-processed"
+                )
         except GalleryLoadError as error:
             setup_error = str(error)
             log.error("gallery load failed: %s", error)

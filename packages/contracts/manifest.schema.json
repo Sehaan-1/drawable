@@ -23,6 +23,36 @@
       "title": "AllowedUses",
       "type": "object"
     },
+    "ArtifactContract": {
+      "additionalProperties": false,
+      "description": "The dataset's *current* artifact generation (schema v3).\n\nEvery derived artifact on a :class:`ManifestRecord` (line art, thumbnail,\nautomated labels) was produced under the ``pipeline_version`` /\n``label_version`` / ``processing_revision`` stored on that record. This\ncontract declares which generation is *current* for the dataset. A record\nwhose three version fields differ from the contract has stale derivatives:\nit stays in the manifest for audit, but is excluded from public serving\nand from training until it is re-processed (see :func:`is_servable`).\n\nA v3 manifest carries the contract as ``Manifest.artifact_contract``; a\nvalue of ``None`` means \"generation unknown\" and marks **every** record's\nderivatives as unverified (stale) \u2014 conservative migration output. The\ncurrency gate is thus always enforced inside a ``Manifest``; a bare-record\npredicate call without a contract also fails closed.",
+      "properties": {
+        "label_version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Label Version",
+          "type": "string"
+        },
+        "pipeline_version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Pipeline Version",
+          "type": "string"
+        },
+        "processing_revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Processing Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pipeline_version",
+        "label_version"
+      ],
+      "title": "ArtifactContract",
+      "type": "object"
+    },
     "CropBox": {
       "additionalProperties": false,
       "description": "Crop coordinates in source-image pixel space (inclusive-exclusive).",
@@ -137,7 +167,7 @@
     },
     "ManifestRecord": {
       "additionalProperties": false,
-      "description": "One gallery or training asset (schema v2).\n\nSee ``docs/contracts/manifest-v2.md`` for the full field/invariant matrix.",
+      "description": "One gallery or training asset (schema v3).\n\nSee ``docs/contracts/manifest-v3.md`` for the full field/invariant matrix.",
       "properties": {
         "allowed_uses": {
           "$ref": "#/$defs/AllowedUses"
@@ -640,8 +670,18 @@
     }
   },
   "additionalProperties": false,
-  "description": "A versioned collection of records plus the dataset/index version stamp.",
+  "description": "A versioned collection of records plus the current artifact contract.\n\nSchema v3: the manifest declares the artifact generation that is current\n(``artifact_contract``); a record whose own generation fields differ is\nkept for audit but is not servable or trainable until re-processed.",
   "properties": {
+    "artifact_contract": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactContract"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "dataset_version": {
       "pattern": "^\\d{4}\\.\\d{2}\\.\\d{2}(-[a-z0-9]+)?$",
       "title": "Dataset Version",
@@ -655,14 +695,15 @@
       "type": "array"
     },
     "schema_version": {
-      "const": 2,
-      "default": 2,
+      "const": 3,
+      "default": 3,
       "title": "Schema Version",
       "type": "integer"
     }
   },
   "required": [
     "dataset_version",
+    "artifact_contract",
     "records"
   ],
   "title": "Manifest",

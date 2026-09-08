@@ -64,7 +64,7 @@ def v1_database(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_migration_applies_and_is_idempotent(v1_database: sqlite3.Connection) -> None:
-    assert migrate(v1_database) == ["0002_contract_v2.sql"]
+    assert migrate(v1_database) == ["0002_contract_v2.sql", "0003_eligibility_v3.sql"]
     assert migrate(v1_database) == []
 
 
@@ -154,7 +154,18 @@ def test_new_columns_deny_by_default(v1_database: sqlite3.Connection) -> None:
     # gold without acceptance is rejected.
     with pytest.raises(sqlite3.IntegrityError):
         insert(review_state="'rejected'", gold_member="1")
-    # A fully-granted, human-approved, quality-2 row is the only servable shape.
+    # A fully-granted, human-approved, quality-2 row is the only servable
+    # shape, and it must also have current derivatives (schema v3).
+    with pytest.raises(sqlite3.IntegrityError):
+        insert(
+            permission_basis="'first_party'",
+            allowed_display="1",
+            allowed_training="1",
+            allowed_trace="1",
+            sfw_human_safe="1",
+            enabled="1",
+            derivatives_current="0",
+        )
     insert(
         permission_basis="'first_party'",
         allowed_display="1",
@@ -162,4 +173,11 @@ def test_new_columns_deny_by_default(v1_database: sqlite3.Connection) -> None:
         allowed_trace="1",
         sfw_human_safe="1",
         enabled="1",
+        derivatives_current="1",
     )
+    # Gold (schema v3) needs its own conditions: unknown scope or stale
+    # derivatives are rejected even when everything serving-related holds.
+    with pytest.raises(sqlite3.IntegrityError):
+        insert(gold_member="1", primary_scope="'unknown'")
+    with pytest.raises(sqlite3.IntegrityError):
+        insert(gold_member="1", derivatives_current="0")

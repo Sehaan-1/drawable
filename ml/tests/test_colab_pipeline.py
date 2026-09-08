@@ -32,7 +32,13 @@ from linescout_ml.colab.export import zip_gallery
 from linescout_ml.colab.label import LabelScores, OpenNsfw2Classifier, ZeroShotLabeler
 from linescout_ml.colab.models import MODEL_CARDS
 from linescout_ml.colab.runner import PipelineError, PipelineRunner, candidate_summary
-from linescout_ml.manifest import Manifest, ManifestRecord, SfwScreening, is_servable
+from linescout_ml.manifest import (
+    ArtifactContract,
+    Manifest,
+    ManifestRecord,
+    SfwScreening,
+    is_servable,
+)
 from linescout_ml.taxonomy import (
     PrimaryStyle,
     ReviewState,
@@ -113,7 +119,9 @@ def test_dry_run_records_are_uncurated_and_not_servable(
     manifest = read_manifest(config.manifest_path)
     assert manifest is not None
     for record in manifest.records:
-        assert is_servable(record) is False
+        # The pipeline's own records all carry the active contract, and they
+        # still must not be servable: unreviewed, no permission, no human SFW.
+        assert is_servable(record, manifest.artifact_contract) is False
         assert record.review.state is ReviewState.UNREVIEWED
         assert record.review.quality is None
         assert record.review.blockers == []
@@ -574,7 +582,7 @@ def test_an_unsafe_source_is_quarantined_and_not_servable(
         assert record.sfw_screening is not None
         assert record.sfw_screening.verdict is SfwVerdict.UNSAFE
         assert record.sfw_screening.method is SfwScreeningMethod.OPENNSFW2
-        assert is_servable(record) is False
+        assert is_servable(record, manifest.artifact_contract) is False
         assert record.review.state is ReviewState.QUARANTINED
     assert manifest.servable_records == []
     label_stage = next(stage for stage in runner.stages if stage.name == "label")
@@ -743,7 +751,15 @@ def test_records_can_be_rebuilt_from_candidate_state(
     config, runner = dry_run
     records: list[ManifestRecord] = runner.build_records()
     assert len(records) == 6
-    assert Manifest(dataset_version=config.dataset_version, records=records).records
+    assert Manifest(
+        dataset_version=config.dataset_version,
+        artifact_contract=ArtifactContract(
+            pipeline_version=config.pipeline_version,
+            label_version=config.label_version,
+            processing_revision=config.processing_revision,
+        ),
+        records=records,
+    ).records
 
 
 def test_building_without_labels_refuses_to_empty_the_gallery(tmp_path: Path) -> None:

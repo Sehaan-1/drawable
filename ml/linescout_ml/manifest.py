@@ -1,30 +1,29 @@
-"""Provenance manifest schema (v2) for every source asset and derived crop.
+"""Provenance manifest schema (v3) for every source asset and derived crop.
 
 One :class:`ManifestRecord` exists per gallery/training item. The manifest is
 the contract between ``ml`` (which produces it) and ``services/api`` (which
 loads it into SQLite and refuses to serve anything that fails validation).
 
-Schema v2 is the *frozen* contract; the decisions and the field/invariant
-matrix are written down in ``docs/contracts/manifest-v2.md`` and the mapping
-from v1 in ``docs/contracts/migration-v1-to-v2.md``. The headline changes:
+Schema v3 is the *frozen* contract; the decisions and the field/invariant
+matrix are written down in ``docs/contracts/manifest-v3.md`` and the mappings
+from v1/v2 in ``docs/contracts/migration-manifest.md``. Version history:
 
-* **Scopes** — one explicit ``primary_scope`` plus ``secondary_scopes``
-  (``unknown`` is a legal provisional primary, never a secondary).
-* **Learning vs membership** — ``learning_split`` (train/validation/test/none)
-  is independent of ``gallery_member`` and ``gold_member``.
-* **Identity** — ``parent_asset_id``, ``artist_id``, and ``leakage_group_id``
-  join the existing source identity; unknown values are explicit ``None``,
-  never invented identifiers.
-* **Uses** — ``allowed_uses`` models display, training, and tracing
-  independently; ``permissions`` records the basis, attribution, and
-  provenance. Unknown permission grants nothing.
-* **SFW** — automated ``sfw_screening`` (tri-state verdict) is separate from
-  ``sfw_human`` approval; only the latter can gate display.
-* **Review** — ``blockers`` (anatomy/extraction) are named, use-blocking
-  defects; rejection and quarantine have explicit definitions.
-* **Artifacts** — ``processing_revision`` and ``label_version`` version the
-  derived artifacts and labels; the stored ``enabled`` flag is gone and
-  replaced by the derived :func:`is_servable` predicate.
+* **v2** — separated scopes, learning vs membership, identity, per-use
+  permissions, human SFW approval, named blockers, and artifact versioning.
+* **v3** — introduces :class:`ArtifactContract` (the dataset's *current*
+  artifact generation) and makes the public eligibility predicate one
+  canonical, shared policy: accepted human review with quality 2–3, human SFW
+  approval, permitted display use, gallery membership, no anatomy/extraction
+  blockers, and **current valid derivatives**. Records whose derived artifacts
+  (line art, thumbnail, automated labels) belong to an older generation are
+  kept in the manifest for audit but are neither servable nor trainable until
+  they are re-processed. ``permissions.basis`` is part of the predicate, so a
+  record with unknown permission fails closed even if a stale cache row claims
+  otherwise.
+
+The policy functions here (``is_servable``, ``is_trainable``, ``is_gold``,
+``derivative_reasons``) are the single source of truth; the SQLite layer and
+the API mirror them, and ``docs/contracts/`` states the mirroring rules.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -57,7 +56,7 @@ from linescout_ml.taxonomy import (
     SfwVerdict,
 )
 
-MANIFEST_SCHEMA_VERSION: Literal[2] = 2
+MANIFEST_SCHEMA_VERSION: Literal[3] = 3
 
 AssetId = Annotated[str, StringConstraints(pattern=r"^ls_[a-z0-9]{2,16}_[a-f0-9]{16}$")]
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
@@ -69,6 +68,17 @@ RelativePath = Annotated[str, StringConstraints(min_length=1, max_length=512)]
 IdentityRef = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 #: ISO-8601 timestamp (UTC, ``...Z``). ``None`` means the instant is unknown.
 Timestamp = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")]
+
+
+class SplitIdentityRecord(Protocol):
+    """The identity surface leak checks need — shared by v2/v3 frozen shapes."""
+
+    asset_id: str
+    source_work_id: str
+    learning_split: LearningSplit
+    leakage_group_id: str | None
+    artist_id: str | None
+    parent_asset_id: str | None
 
 
 class CropBox(BaseModel):
@@ -177,10 +187,38 @@ class HumanReview(BaseModel):
         return self
 
 
-class ManifestRecord(BaseModel):
-    """One gallery or training asset (schema v2).
+class ArtifactContract(BaseModel):
+    """The dataset's *current* artifact generation (schema v3).
 
-    See ``docs/contracts/manifest-v2.md`` for the full field/invariant matrix.
+    Every derived artifact on a :class:`ManifestRecord` (line art, thumbnail,
+    automated labels) was produced under the ``pipeline_version`` /
+    ``label_version`` / ``processing_revision`` stored on that record. This
+    contract declares which generation is *current* for the dataset. A record
+    whose three version fields differ from the contract has stale derivatives:
+    it stays in the manifest for audit, but is excluded from public serving
+    and from training until it is re-processed (see :func:`is_servable`).
+
+    A v3 manifest carries the contract as ``Manifest.artifact_contract``; a
+    value of ``None`` means "generation unknown" and marks **every** record's
+    derivatives as unverified (stale) — conservative migration output. The
+    currency gate is thus always enforced inside a ``Manifest``; a bare-record
+    predicate call without a contract also fails closed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    pipeline_version: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+    label_version: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+    processing_revision: int = Field(default=1, ge=1)
+
+    def describe(self) -> str:
+        return f"{self.pipeline_version}/l{self.label_version}/r{self.processing_revision}"
+
+
+class ManifestRecord(BaseModel):
+    """One gallery or training asset (schema v3).
+
+    See ``docs/contracts/manifest-v3.md`` for the full field/invariant matrix.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -352,7 +390,8 @@ class ManifestRecord(BaseModel):
             msg = "accepted assets must have a known primary_scope"
             raise ValueError(msg)
 
-        # Gold implies verified labels: accepted, graded, unblocked.
+        # Gold implies verified labels: accepted, graded 2–3, unblocked, a
+        # known (non-unknown) primary scope, and human SFW approval.
         if self.gold_member:
             if self.review.state is not ReviewState.ACCEPTED:
                 msg = "gold_member requires an accepted review"
@@ -360,8 +399,17 @@ class ManifestRecord(BaseModel):
             if self.review.quality is None:
                 msg = "gold_member requires a review quality grade"
                 raise ValueError(msg)
+            if self.review.quality < 2:
+                msg = "gold_member requires review quality 2 or 3"
+                raise ValueError(msg)
             if self.review.blockers:
                 msg = "gold_member cannot carry blockers"
+                raise ValueError(msg)
+            if self.primary_scope is ScopeLabel.UNKNOWN:
+                msg = "gold_member requires a known primary_scope"
+                raise ValueError(msg)
+            if self.sfw_human is None or not self.sfw_human.safe:
+                msg = "gold_member requires human SFW approval"
                 raise ValueError(msg)
 
         # Permission grants must be justified.
@@ -390,52 +438,167 @@ class ManifestRecord(BaseModel):
         return self
 
 
-def is_servable(record: ManifestRecord) -> bool:
-    """The frozen serving predicate (replaces the v1 stored ``enabled`` flag).
+def derivative_reasons(record: ManifestRecord, contract: ArtifactContract | None) -> list[str]:
+    """Why the record's derived artifacts are not current, as stable reasons.
+
+    Returns an empty list only when the record's generation is verified as
+    current. A ``None`` contract means "generation unknown" and fails closed
+    (``derivative_generation_unknown``). The codes are stable machine-readable
+    strings: ``derivative_generation_unknown``,
+    ``derivative_stale:pipeline_version``, ``derivative_stale:label_version``,
+    ``derivative_stale:processing_revision``.
+
+    File-level validity (missing file, checksum mismatch) is *not* a manifest
+    property — the gallery loader verifies bytes against the recorded hashes
+    and reports those as separate reasons (``derivative_file_missing`` /
+    ``derivative_checksum_mismatch``).
+    """
+    if contract is None:
+        return ["derivative_generation_unknown"]
+    reasons: list[str] = []
+    if record.pipeline_version != contract.pipeline_version:
+        reasons.append("derivative_stale:pipeline_version")
+    if record.label_version != contract.label_version:
+        reasons.append("derivative_stale:label_version")
+    if record.processing_revision != contract.processing_revision:
+        reasons.append("derivative_stale:processing_revision")
+    return reasons
+
+
+def serving_reasons(record: ManifestRecord, contract: ArtifactContract | None) -> list[str]:
+    """Every reason a record is not publicly servable, in stable order.
+
+    This is the *canonical* public eligibility policy. A record is publicly
+    servable iff this list is empty:
+
+    * ``gallery_member`` is true;
+    * ``allowed_uses.display`` is true and ``permissions.basis`` is known
+      (unknown permission grants nothing — fail closed);
+    * ``review.state`` is ``accepted``;
+    * ``review.quality`` is 2 or 3 (quality 1 or a missing grade never serves);
+    * no anatomy/extraction blockers;
+    * ``sfw_human`` exists and is ``safe`` — an automated ``safe`` screen alone
+      never publishes an asset;
+    * the derived artifacts are current under ``contract`` (stale derivatives
+      cannot be served or searched).
+    """
+    reasons: list[str] = []
+    if not record.gallery_member:
+        reasons.append("not_a_gallery_member")
+    if not record.allowed_uses.display:
+        reasons.append("display_not_permitted")
+    if record.permissions.basis is PermissionBasis.UNKNOWN:
+        reasons.append("permission_unknown")
+    if record.review.state is not ReviewState.ACCEPTED:
+        reasons.append(f"review_{record.review.state.value}")
+    if record.review.quality is None:
+        reasons.append("quality_missing")
+    elif record.review.quality < 2:
+        reasons.append("quality_below_floor")
+    for blocker in record.review.blockers:
+        reasons.append(f"blocker_{blocker.value}")
+    if record.sfw_human is None:
+        reasons.append("sfw_human_unapproved")
+    elif not record.sfw_human.safe:
+        reasons.append("sfw_human_unsafe")
+    reasons.extend(derivative_reasons(record, contract))
+    return reasons
+
+
+def is_servable(record: ManifestRecord, contract: ArtifactContract | None = None) -> bool:
+    """The canonical serving predicate (replaces the v1 stored ``enabled`` flag).
 
     An asset may appear in search results and be served through
-    ``/assets/{id}/...`` iff it is a gallery member, display use is permitted,
-    a human accepted it with at least a quality-2 grade, a human approved it
-    as SFW, and it carries no blockers. Note that an automated ``safe``
-    screening verdict is *not* sufficient — only ``sfw_human`` approval gates
-    display.
+    ``/assets/{id}/...`` iff it is a gallery member, display use is permitted
+    under a known permission basis, a human accepted it with quality 2 or 3,
+    a human approved it as SFW, it carries no blockers, and its derived
+    artifacts are current under ``contract``. An automated ``safe`` screening
+    verdict is *not* sufficient — only ``sfw_human`` approval gates display.
     """
-    return (
-        record.gallery_member
-        and record.allowed_uses.display
-        and record.review.state is ReviewState.ACCEPTED
-        and record.review.quality is not None
-        and record.review.quality >= 2
-        and not record.review.blockers
-        and record.sfw_human is not None
-        and record.sfw_human.safe
-    )
+    return not serving_reasons(record, contract)
 
 
-def is_trainable(record: ManifestRecord) -> bool:
-    """The frozen training predicate.
+def training_reasons(record: ManifestRecord, contract: ArtifactContract | None) -> list[str]:
+    """Why a record is not trainable, as stable reasons (mirror of serving)."""
+    reasons: list[str] = []
+    if not record.allowed_uses.training:
+        reasons.append("training_not_permitted")
+    if record.permissions.basis is PermissionBasis.UNKNOWN:
+        reasons.append("permission_unknown")
+    if record.learning_split is not LearningSplit.TRAIN:
+        reasons.append(f"split_{record.learning_split.value}")
+    if record.review.state is not ReviewState.ACCEPTED:
+        reasons.append(f"review_{record.review.state.value}")
+    for blocker in record.review.blockers:
+        reasons.append(f"blocker_{blocker.value}")
+    if record.sfw_screening is not None and record.sfw_screening.verdict is SfwVerdict.UNSAFE:
+        reasons.append("sfw_screen_unsafe")
+    reasons.extend(derivative_reasons(record, contract))
+    return reasons
 
-    Training requires the training grant, a ``train`` learning assignment, an
-    accepted review without blockers, and an automated SFW screen that is not
-    ``unsafe`` (a human accepted the asset; the screen just must not object).
+
+def is_trainable(record: ManifestRecord, contract: ArtifactContract | None = None) -> bool:
+    """The canonical training predicate.
+
+    Training requires the training grant under a known permission basis, a
+    ``train`` learning assignment, an accepted review without blockers, an
+    automated SFW screen that is not ``unsafe`` (a human accepted the asset;
+    the screen just must not object), and current derived artifacts.
     """
-    return (
-        record.allowed_uses.training
-        and record.learning_split is LearningSplit.TRAIN
-        and record.review.state is ReviewState.ACCEPTED
-        and not record.review.blockers
-        and (record.sfw_screening is None or record.sfw_screening.verdict is not SfwVerdict.UNSAFE)
+    return not training_reasons(record, contract)
+
+
+def gold_reasons(record: ManifestRecord, contract: ArtifactContract | None) -> list[str]:
+    """Why a record is not gold-eligible, as stable reasons.
+
+    Gold membership has its own documented approval/quality conditions: an
+    accepted human review graded 2 or 3, no blockers, a known primary scope,
+    explicit human SFW approval, and current derived artifacts (gold labels
+    are evaluated against the current generation's bytes).
+    """
+    reasons: list[str] = []
+    if record.review.state is not ReviewState.ACCEPTED:
+        reasons.append("gold_review_not_accepted")
+    if record.review.quality is None:
+        reasons.append("gold_quality_missing")
+    elif record.review.quality < 2:
+        reasons.append("gold_quality_below_floor")
+    if record.review.blockers:
+        reasons.append("gold_blockers_present")
+    if record.primary_scope is ScopeLabel.UNKNOWN:
+        reasons.append("gold_scope_unknown")
+    if record.sfw_human is None or not record.sfw_human.safe:
+        reasons.append("gold_sfw_human_unapproved")
+    reasons.extend(
+        f"gold_{reason}" if reason.startswith("derivative") else reason
+        for reason in derivative_reasons(record, contract)
     )
+    return reasons
+
+
+def is_gold(record: ManifestRecord, contract: ArtifactContract | None = None) -> bool:
+    """The canonical gold-membership predicate (schema v3 conditions)."""
+    return not gold_reasons(record, contract)
 
 
 class Manifest(BaseModel):
-    """A versioned collection of records plus the dataset/index version stamp."""
+    """A versioned collection of records plus the current artifact contract.
+
+    Schema v3: the manifest declares the artifact generation that is current
+    (``artifact_contract``); a record whose own generation fields differ is
+    kept for audit but is not servable or trainable until re-processed.
+    """
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[2] = MANIFEST_SCHEMA_VERSION
+    schema_version: Literal[3] = MANIFEST_SCHEMA_VERSION
     dataset_version: Annotated[
         str, StringConstraints(pattern=r"^\d{4}\.\d{2}\.\d{2}(-[a-z0-9]+)?$")
     ]
+    #: The current artifact generation. ``null`` means the generation is
+    #: unknown (e.g. a conservatively converted legacy manifest): no record is
+    #: verified current, so nothing servable or trainable until an operator
+    #: declares the current generation or re-processes the dataset.
+    artifact_contract: ArtifactContract | None
     records: list[ManifestRecord]
 
     @model_validator(mode="after")
@@ -454,11 +617,20 @@ class Manifest(BaseModel):
         if problems:
             msg = "; ".join(problems[:5])
             raise ValueError(msg)
+        # Gold membership must satisfy the v3 conditions against the manifest
+        # contract — a stale generation invalidates gold labels.
+        for record in self.records:
+            gold_problems = gold_reasons(record, self.artifact_contract)
+            if record.gold_member and gold_problems:
+                msg = f"gold_member {record.asset_id} violates gold eligibility: " + ", ".join(
+                    gold_problems
+                )
+                raise ValueError(msg)
         return self
 
     @property
     def servable_records(self) -> list[ManifestRecord]:
-        return [record for record in self.records if is_servable(record)]
+        return [record for record in self.records if is_servable(record, self.artifact_contract)]
 
     def content_hash(self) -> str:
         """Stable hash of the manifest content, used as the index version key."""
@@ -466,36 +638,106 @@ class Manifest(BaseModel):
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def check_split_integrity(records: Iterable[ManifestRecord]) -> list[str]:
-    """Violations of the one-group-one-split rule over works and leakage groups.
+def check_split_integrity(records: Iterable[SplitIdentityRecord]) -> list[str]:
+    """Violations of the one-group-one-split rule across every identity axis.
 
-    A violation is two *different assigned* splits (train/validation/test) on
-    the same ``source_work_id`` or the same non-null ``leakage_group_id``.
-    ``none`` never conflicts — an unassigned asset leaks nothing.
+    A violation is two *different assigned* splits (train/validation/test)
+    sharing any of these pooling keys:
+
+    * ``source_work_id`` — the artistic work (the de-facto leakage group);
+    * a non-null ``leakage_group_id`` (finest declared identity);
+    * a non-null ``artist_id`` — one artist's works never straddle splits;
+    * one parent chain — a derivative and its ancestors depict the same art
+      and must never cross splits. Every record is keyed by its chain's root
+      asset id (a root record keys by its own id), so a derivative whose
+      ``source_work_id`` disagrees with its ancestor is still caught.
+
+    ``none`` never conflicts — an unassigned asset leaks nothing. Two records
+    that are *unassigned* (``none``) may share artists/groups freely.
     """
+    record_list = list(records)
+    by_id = {record.asset_id: record for record in record_list}
     works: dict[str, set[LearningSplit]] = {}
     groups: dict[str, set[LearningSplit]] = {}
-    for record in records:
-        if record.learning_split is LearningSplit.NONE:
+    artists: dict[str, set[LearningSplit]] = {}
+    chains: dict[str, set[LearningSplit]] = {}
+
+    def record_split(record: SplitIdentityRecord) -> LearningSplit | None:
+        return None if record.learning_split is LearningSplit.NONE else record.learning_split
+
+    def split_name(splits: set[LearningSplit]) -> str:
+        return ", ".join(sorted(split.value for split in splits))
+
+    for record in record_list:
+        split = record_split(record)
+        if split is None:
             continue
-        works.setdefault(record.source_work_id, set()).add(record.learning_split)
+        works.setdefault(record.source_work_id, set()).add(split)
         if record.leakage_group_id is not None:
-            groups.setdefault(record.leakage_group_id, set()).add(record.learning_split)
+            groups.setdefault(record.leakage_group_id, set()).add(split)
+        if record.artist_id is not None:
+            artists.setdefault(record.artist_id, set()).add(split)
+        # Every record is pooled by its chain root — including a root record
+        # itself (no parent): a derivative may name a different source work
+        # than its ancestor, so the *chain* is the identity that must not
+        # straddle splits, not the work fields the two sides happen to carry.
+        root = _parent_chain_root(record, by_id)
+        chains.setdefault(root if root is not None else record.asset_id, set()).add(split)
+
     problems = [
-        f"source work {work!r} spans splits {sorted(split.value for split in splits)}"
+        f"source work {work!r} spans splits {split_name(splits)}"
         for work, splits in sorted(works.items())
         if len(splits) > 1
     ]
     problems += [
-        f"leakage group {group!r} spans splits {sorted(split.value for split in splits)}"
+        f"leakage group {group!r} spans splits {split_name(splits)}"
         for group, splits in sorted(groups.items())
+        if len(splits) > 1
+    ]
+    problems += [
+        f"artist {artist!r} spans splits {split_name(splits)}"
+        for artist, splits in sorted(artists.items())
+        if len(splits) > 1
+    ]
+    problems += [
+        f"parent chain rooted at {root[:12]} spans splits {split_name(splits)}"
+        for root, splits in sorted(chains.items())
         if len(splits) > 1
     ]
     return problems
 
 
-def check_parent_integrity(records: Iterable[ManifestRecord]) -> list[str]:
-    """Derivative-graph problems: dangling parents, self-parents, cycles."""
+def _parent_chain_root(
+    record: SplitIdentityRecord, by_id: dict[str, SplitIdentityRecord]
+) -> str | None:
+    """The root ancestor's asset id for a record's parent chain, or ``None``.
+
+    Records without a parent are not pooled (their chain is just themselves;
+    the work/artist/group keys already cover them). A record whose parent is
+    not in the map (a dangling reference) returns ``None`` here —
+    :func:`check_parent_integrity` reports that separately.
+    """
+    if record.parent_asset_id is None:
+        return None
+    seen: set[str] = set()
+    cursor = record
+    while cursor.parent_asset_id is not None:
+        if cursor.parent_asset_id in seen or cursor.parent_asset_id == cursor.asset_id:
+            break
+        seen.add(cursor.parent_asset_id)
+        parent = by_id.get(cursor.parent_asset_id)
+        if parent is None:
+            break
+        cursor = parent
+    return cursor.asset_id
+
+
+def check_parent_integrity(records: Iterable[SplitIdentityRecord]) -> list[str]:
+    """Derivative-graph problems: dangling parents, self-parents, cycles.
+
+    Accepts the shared :class:`SplitIdentityRecord` shape so the frozen v2
+    conversion shapes are checked with the same rules as v3 records.
+    """
     record_list = list(records)
     by_id = {record.asset_id: record for record in record_list}
     problems: list[str] = []

@@ -82,9 +82,16 @@ default to `live`.
 ## Assets
 
 `GET /api/v1/assets/{id}/thumbnail` and `/line-art` serve **enabled**
-(`is_servable`) assets only. A servable asset whose file went missing is
-auto-disabled (and reported via health warnings), never 404-ed from a serving
-position.
+(`is_servable`) assets only. Serving re-verifies eligibility, file existence,
+and the recorded sha256 at request time:
+
+* a missing file → `404 error.code=asset_unavailable`, and the asset is
+  dropped from the session's serving list;
+* bytes that no longer match the manifest hash → same `asset_unavailable`
+  (tampered content is never served);
+* at gallery load, any missing/checksum-mismatched/stale derivative is
+  disabled per row (`derivatives_current = 0`), reported in `derivative_problems_json`,
+  and counted in the health warning — disable-and-report, never silent.
 
 ## Curation (`curation_mode` only)
 
