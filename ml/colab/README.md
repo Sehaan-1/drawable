@@ -353,8 +353,9 @@ how innocuous the dataset looks:
 A booru's `rating` tags are the claim the gate exists to check, so they are not a
 guarantee — honouring them would make the gallery's safety screen a copy of a
 stranger's moderation queue. The only supported way to skip screening is
-`sfw_method="manual"`, which records `sfw.method="manual"`: your verdict, attributed
-to you, in every asset and in the run report. Nothing else turns it off — not
+`sfw_method="manual"`, which records **no screen at all** — it writes your verdict as a
+human `sfw_human` decision attributed to `ingestion:<pipeline_version>`, in every asset and
+in the run report, because a screen is a claim about how a machine decided. Nothing else turns it off — not
 `RUN_LABELS = False`, which skips the CLIP ranking and still loads the classifier for
 the sources that need it — and an original the pipeline cannot read fails *closed*.
 `SFW_POLICY` in `tests/test_colab_config.py` is the table, so changing a preset's
