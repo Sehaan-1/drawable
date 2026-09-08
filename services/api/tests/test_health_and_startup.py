@@ -85,7 +85,7 @@ def test_health_reports_every_spec_field(client: TestClient) -> None:
     assert body["fixture_mode"] is True
     assert body["gallery_size"] == 23  # 24 synthetic records, one disabled
     assert body["dataset_version"] == "2026.09.08-synthetic"
-    assert body["schema_version"] == 2  # the v2 contract migration
+    assert body["schema_version"] == 3  # v3: eligibility + derivative currency
     assert {model["name"] for model in body["models"]} == {
         "semantic",
         "structural",

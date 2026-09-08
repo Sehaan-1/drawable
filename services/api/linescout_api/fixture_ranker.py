@@ -141,8 +141,12 @@ def rank(
     row_order: Sequence[PrimaryStyle] = DEFAULT_STYLE_ORDER,
 ) -> tuple[SearchMode, list[ScopePrediction], list[SearchGroup]]:
     predictions = predict_scopes(stats, stroke_count)
+    # Defence in depth: the caller supplies the enabled list, but the ranker
+    # itself never ranks an asset whose derivatives are not current. A stale
+    # derivative reaching this function is a bug, not a search result.
+    eligible = [asset for asset in assets if asset.derivatives_current]
     scored = sorted(
-        ((score_asset(asset, predictions, seed), asset) for asset in assets),
+        ((score_asset(asset, predictions, seed), asset) for asset in eligible),
         key=lambda pair: (-pair[0], pair[1].asset_id),
     )
     above_floor = [(score, asset) for score, asset in scored if score >= RELEVANCE_FLOOR]

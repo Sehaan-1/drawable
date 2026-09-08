@@ -19,7 +19,12 @@ import pytest
 
 from linescout_ml import colab
 from linescout_ml.colab import checkpoints as cp
-from linescout_ml.manifest import CheckpointProvenance, Manifest, PipelineProvenance
+from linescout_ml.manifest import (
+    ArtifactContract,
+    CheckpointProvenance,
+    Manifest,
+    PipelineProvenance,
+)
 
 SHA = "a" * 40
 DIGEST = "b" * 64
@@ -562,7 +567,17 @@ def test_the_manifest_carries_the_verification_outcome(tmp_path: Path) -> None:
             )
         ],
     )
-    first = Manifest(dataset_version="2026.09.08-test", provenance=provenance, records=[])
+    # Schema v3 envelopes declare the current artifact generation; the records
+    # list is empty here, so the contract only needs to be a valid declaration.
+    contract = ArtifactContract(
+        pipeline_version="colab-m2-1", label_version="1", processing_revision=1
+    )
+    first = Manifest(
+        dataset_version="2026.09.08-test",
+        artifact_contract=contract,
+        provenance=provenance,
+        records=[],
+    )
     second = first.model_copy(
         update={
             "provenance": provenance.model_copy(

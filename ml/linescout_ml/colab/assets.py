@@ -33,15 +33,18 @@ from PIL import Image
 
 from linescout_ml.colab.config import PipelineConfig, SourceSpec
 from linescout_ml.colab.label import review_state_for
+from linescout_ml.colab.measure import sha256_file
 from linescout_ml.colab.sources import AssetLabels, Candidate, Measurements
 from linescout_ml.manifest import (
     AllowedUses,
+    ArtifactContract,
     Manifest,
     ManifestRecord,
     Permissions,
     PipelineProvenance,
     check_parent_integrity,
     check_split_integrity,
+    derivative_reasons,
     is_servable,
     is_trainable,
     make_asset_id,
@@ -210,7 +213,7 @@ def build_record(
             gallery_member=True,
             gold_member=False,
             pipeline_version=config.pipeline_version,
-            processing_revision=1,
+            processing_revision=config.processing_revision,
             label_version=config.label_version,
             source_checksum=str(candidate.source_checksum),
             line_art_checksum=str(candidate.line_art_checksum),
@@ -230,15 +233,22 @@ def build_manifest(
     records: Sequence[ManifestRecord],
     dataset_version: str,
     *,
+    artifact_contract: ArtifactContract | None = None,
     provenance: PipelineProvenance | None = None,
 ) -> Manifest:
-    """Validate records as a whole: one work one split, one parent one family.
+    """Validate records as a whole, including the one-group-one-split rule.
 
-    ``provenance`` names the code, environment, and model checkpoints that produced
-    the records. It is part of the manifest rather than only the run report because the
-    report travels with one *run* while the manifest travels with the *dataset*: a
-    gallery merged over three months still has to say which pins the oldest records
-    were built from.
+    The manifest declares the *current* artifact generation via
+    ``artifact_contract`` (required for anything to be servable). Records built
+    by this pipeline carry config's generation fields; records merged from an
+    older manifest that do not match stay in the output for audit and are
+    disabled by :func:`is_servable` until re-processed.
+
+    ``provenance`` names the code, environment, and model checkpoints that
+    produced the records. It is part of the manifest rather than only the run
+    report because the report travels with one *run* while the manifest travels
+    with the *dataset*: a gallery merged over three months still has to say
+    which pins the oldest records were built from.
     """
     problems = check_split_integrity(records) + check_parent_integrity(records)
     if problems:
@@ -246,7 +256,10 @@ def build_manifest(
         raise GalleryBuildError(msg)
     try:
         return Manifest(
-            dataset_version=dataset_version, records=list(records), provenance=provenance
+            dataset_version=dataset_version,
+            artifact_contract=artifact_contract,
+            records=list(records),
+            provenance=provenance,
         )
     except ValueError as error:
         msg = f"manifest failed validation: {error}"
@@ -295,19 +308,55 @@ def write_manifest(manifest: Manifest, path: Path) -> Path:
 
 def missing_files(manifest: Manifest, root: Path) -> list[str]:
     """Assets whose served files are absent — required for search *and* curation preview."""
+    return [
+        problem
+        for problem in derivative_problems(manifest, root)
+        if problem.startswith("missing_file")
+    ]
+
+
+def derivative_problems(manifest: Manifest, root: Path) -> list[str]:
+    """Every derivative-integrity problem, as stable ``<code> asset_id: …`` strings.
+
+    Checks per record:
+    * existence of ``line_art_path`` / ``thumbnail_path`` (served files) and
+      ``original_path`` (preserved source bytes);
+    * sha256 of each file against the recorded checksum — a mismatch means the
+      bytes on disk were modified after the manifest was written;
+    * generation currency against ``manifest.artifact_contract``.
+
+    The manifest is authoritative: a problem never rewrites the manifest, it
+    only reports what the gallery loader will disable.
+    """
     problems: list[str] = []
     for record in manifest.records:
-        for label, relative in (
-            ("line_art", record.line_art_path),
-            ("thumbnail", record.thumbnail_path),
+        for label, relative, checksum in (
+            ("line_art", record.line_art_path, record.line_art_checksum),
+            ("thumbnail", record.thumbnail_path, record.thumbnail_checksum),
+            ("original", record.original_path, record.source_checksum),
         ):
-            if not (root / relative).is_file():
-                problems.append(f"{record.asset_id}: missing {label} file {relative}")
+            path = root / relative
+            if not path.is_file():
+                problems.append(f"missing_file {record.asset_id}: {label} {relative}")
+                continue
+            if sha256_file(path) != checksum:
+                problems.append(f"checksum_mismatch {record.asset_id}: {label} {relative}")
+        for reason in derivative_reasons(record, manifest.artifact_contract):
+            problems.append(f"{reason} {record.asset_id}")
     return problems
 
 
-def summarise(records: Iterable[ManifestRecord]) -> dict[str, Any]:
-    """Counts the notebook shows as a table and the run report records."""
+def summarise(
+    records: Iterable[ManifestRecord],
+    *,
+    artifact_contract: ArtifactContract | None = None,
+) -> dict[str, Any]:
+    """Counts the notebook shows as a table and the run report records.
+
+    ``servable``/``trainable`` use the canonical eligibility policy with the
+    manifest's artifact contract, so records whose derivatives are stale are
+    counted separately and excluded.
+    """
     styles: dict[str, int] = {style.value: 0 for style in PrimaryStyle}
     scopes: dict[str, int] = {scope.value: 0 for scope in ScopeLabel if scope.value != "unknown"}
     splits: dict[str, int] = {}
@@ -316,15 +365,17 @@ def summarise(records: Iterable[ManifestRecord]) -> dict[str, Any]:
     servable = 0
     trainable = 0
     gold = 0
+    stale = 0
     approximate_counts = 0
     total = 0
     quality: list[float] = []
 
     for record in records:
         total += 1
-        servable += int(is_servable(record))
-        trainable += int(is_trainable(record))
+        servable += int(is_servable(record, artifact_contract))
+        trainable += int(is_trainable(record, artifact_contract))
         gold += int(record.gold_member)
+        stale += int(bool(derivative_reasons(record, artifact_contract)))
         approximate_counts += int(record.person_count_approximate)
         styles[record.primary_style.value] += 1
         scopes[record.primary_scope.value] = scopes.get(record.primary_scope.value, 0) + 1
@@ -341,6 +392,7 @@ def summarise(records: Iterable[ManifestRecord]) -> dict[str, Any]:
         "servable": servable,
         "trainable": trainable,
         "gold": gold,
+        "stale_derivatives": stale,
         "approximate_person_counts": approximate_counts,
         "by_style": styles,
         "by_scope": scopes,
@@ -355,6 +407,12 @@ def summarise(records: Iterable[ManifestRecord]) -> dict[str, Any]:
     }
 
 
-def dump_summary(records: Iterable[ManifestRecord]) -> str:
+def dump_summary(
+    records: Iterable[ManifestRecord],
+    *,
+    artifact_contract: ArtifactContract | None = None,
+) -> str:
     """Pretty JSON summary, handy for a notebook cell's last line."""
-    return json.dumps(summarise(records), indent=2, sort_keys=True)
+    return json.dumps(
+        summarise(records, artifact_contract=artifact_contract), indent=2, sort_keys=True
+    )

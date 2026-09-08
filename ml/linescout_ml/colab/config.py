@@ -279,6 +279,11 @@ class PipelineConfig(BaseModel):
     #: the automated labels. Bump it whenever the labeler changes; automated
     #: labels from a different version are stale, human decisions are not.
     label_version: Annotated[str, StringConstraints(min_length=1, max_length=32)] = "auto-1"
+    #: Generation counter for derived artifacts (line art, thumbnails). Bump
+    #: whenever the pipeline re-derives them; the manifest's artifact contract
+    #: must carry the current value and any record with an older revision is
+    #: stale until re-processed.
+    processing_revision: Annotated[int, Field(ge=1)] = 1
 
     # Reproducibility. Everything here is *recorded* from the runtime rather than
     # assumed: the notebook fills in the git facts after verifying HEAD, and the

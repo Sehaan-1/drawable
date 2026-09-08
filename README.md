@@ -70,14 +70,15 @@ scripts/             setup, checks, contract export, smoke test, dev runner
 data/                Local datasets, indexes, models, SQLite — never committed
 ```
 
-### Contracts (schema v2)
+### Contracts (schema v3)
 
-The dataset manifest, API wire, and their v1→v2 migration are frozen and
+The dataset manifest, API wire, and their versioned migrations are frozen and
 documented in [`docs/contracts/`](docs/contracts/):
 
-- [manifest-v2.md](docs/contracts/manifest-v2.md) — field/invariant matrix (scopes, splits, permissions, SFW, review, identity)
+- [manifest-v3.md](docs/contracts/manifest-v3.md) — field/invariant matrix (scopes, splits, permissions, SFW, review, identity, artifact contract, derivative currency)
+- [migration-manifest.md](docs/contracts/migration-manifest.md) — v1→v3 and v2→v3 mapping; no old asset gains permission or human approval; ambiguous generations fail closed
 - [api-contract.md](docs/contracts/api-contract.md) — search/events/curation wire, degradations, structured errors, pins
-- [migration-v1-to-v2.md](docs/contracts/migration-v1-to-v2.md) — full field mapping; no old asset gains permission or human approval
+- [manifest-v2.md](docs/contracts/manifest-v2.md) and [migration-v1-to-v2.md](docs/contracts/migration-v1-to-v2.md) — historical v2 freeze, kept for audit
 
 ### API surface (`/api/v1`)
 

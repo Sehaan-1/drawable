@@ -14,10 +14,18 @@ from typing import Any
 
 import pytest
 
-from linescout_ml.manifest import Manifest, is_servable, is_trainable, make_asset_id
+from linescout_ml.manifest import (
+    ArtifactContract,
+    Manifest,
+    is_servable,
+    is_trainable,
+    make_asset_id,
+)
 from linescout_ml.migrate import (
     MIGRATION_REVIEWER,
     V1Manifest,
+    V2Manifest,
+    convert_manifest,
     migrate_manifest,
     migrate_record,
 )
@@ -29,6 +37,8 @@ from linescout_ml.taxonomy import (
     SfwScreeningMethod,
     SfwVerdict,
 )
+
+V1_CONTRACT = ArtifactContract(pipeline_version="test-1", label_version="1", processing_revision=1)
 
 ALL_V1_SFW_METHODS = ("source_rating", "opennsfw2", "source_rating+opennsfw2", "manual")
 
@@ -168,8 +178,8 @@ def test_no_asset_gains_permission_or_human_approval(
     assert not record.allowed_uses.display
     assert not record.allowed_uses.training
     assert not record.allowed_uses.trace
-    assert not is_servable(record)
-    assert not is_trainable(record)
+    assert not is_servable(record, V1_CONTRACT)
+    assert not is_trainable(record, V1_CONTRACT)
 
     # Property 2: human approval only ever comes from a v1 manual decision.
     if method == "manual":
@@ -211,8 +221,10 @@ def test_migration_report_counts_serving_eligibility_loss() -> None:
     manifest, report = migrate_manifest(data)
 
     assert isinstance(manifest, Manifest)
-    assert manifest.schema_version == 2
-    assert report.records_migrated == 3
+    assert manifest.schema_version == 3
+    assert report.schema_version_from == 1
+    assert report.schema_version_to == 3
+    assert report.records_converted == 3
     assert report.sfw_human_carried == 2
     assert report.sfw_human_absent == 1
     assert report.serving_eligibility_lost == 2
@@ -220,6 +232,11 @@ def test_migration_report_counts_serving_eligibility_loss() -> None:
     assert report.human_approvals_fabricated == 0
     assert report.gold_members_created == 0
     assert report.split_mapping == {"train": 3}
+    # v1 records agree on one generation, so the contract is detected — but
+    # permission/human-approval gates still keep every record disabled.
+    assert report.contract_detected is True
+    assert report.artifact_contract is not None
+    assert manifest.servable_records == []
 
 
 def test_migration_preserves_split_integrity_and_dedup() -> None:
@@ -268,7 +285,7 @@ def test_cli_migrate_v1_round_trip(tmp_path: Path, capsys: pytest.CaptureFixture
 
     source = tmp_path / "v1.json"
     source.write_text(json.dumps(_v1_manifest([_v1_record()])), encoding="utf-8")
-    out = tmp_path / "v2.json"
+    out = tmp_path / "v3.json"
     report_path = tmp_path / "report.json"
     assert main(["migrate-v1", str(source), "--out", str(out), "--report", str(report_path)]) == 0
     captured = capsys.readouterr()
@@ -276,7 +293,42 @@ def test_cli_migrate_v1_round_trip(tmp_path: Path, capsys: pytest.CaptureFixture
     assert "NOT servable" in captured.err
 
     migrated = Manifest.model_validate_json(out.read_text(encoding="utf-8"))
-    assert migrated.schema_version == 2
+    assert migrated.schema_version == 3
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["uses_granted"] == 0
     assert report["human_approvals_fabricated"] == 0
+    assert report["schema_version_to"] == 3
+
+
+def test_convert_v1_to_v2_preserves_the_v2_guarantees(tmp_path: Path) -> None:
+    """The versioned converter's 1→2 path is the same safe legacy shape."""
+    v2, report = convert_manifest(_v1_manifest([_v1_record()]), from_version=1, to_version=2)
+    assert isinstance(v2, V2Manifest)
+    assert v2.schema_version == 2
+    assert report.schema_version_to == 2
+    assert report.uses_granted == 0
+    assert report.human_approvals_fabricated == 0
+    assert report.gold_members_created == 0
+    record = v2.records[0]
+    assert record.permissions.basis is PermissionBasis.UNKNOWN
+    assert record.sfw_human is not None  # v1 manual decision
+
+
+def test_convert_v2_to_v3_adds_the_contract_and_keeps_eligibility(tmp_path: Path) -> None:
+    """2→3 is a pure materialisation: nothing new is ever granted."""
+    v2, report = convert_manifest(_v1_manifest([_v1_record()]), from_version=1, to_version=2)
+    v3, report3 = convert_manifest(
+        v2.model_dump(), from_version=2, to_version=3, explicit_contract=V1_CONTRACT
+    )
+    assert isinstance(v3, Manifest)
+    assert v3.schema_version == 3
+    assert report3.artifact_contract == V1_CONTRACT
+    assert not v3.servable_records  # permissions still unknown
+    assert report3.uses_granted == 0
+    assert report3.human_approvals_fabricated == 0
+    v2_record = v2.records[0]
+    v3_record = v3.records[0]
+    assert v2_record.sfw_human is not None
+    assert v3_record.sfw_human is not None
+    assert v2_record.permissions.basis is PermissionBasis.UNKNOWN
+    assert v3_record.permissions.basis is PermissionBasis.UNKNOWN
