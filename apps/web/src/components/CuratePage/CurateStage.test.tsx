@@ -4,29 +4,10 @@ import { TooltipProvider } from '@radix-ui/react-tooltip'
 import type { JSX, ReactNode } from 'react'
 import { CurateStage } from './CurateStage'
 import type { CurationCandidate } from './types'
+import { makeCandidate } from '../../test/candidateFactory'
 
 function wrapWith({ children }: { children: ReactNode }): JSX.Element {
   return <TooltipProvider delayDuration={500}>{children}</TooltipProvider>
-}
-
-function makeCandidate(overrides: Partial<CurationCandidate> = {}): CurationCandidate {
-  return {
-    asset_id: 'ls_test_ac1f55b7390698a7',
-    primary_style: 'manga_anime',
-    scopes: ['eye'],
-    width: 256,
-    height: 256,
-    thumbnail_url: '/api/v1/assets/ls_test_ac1f55b7390698a7/thumbnail',
-    line_art_url: '/api/v1/assets/ls_test_ac1f55b7390698a7/line-art',
-    origin: 'native_line_art',
-    crop: null,
-    review_state: 'unreviewed',
-    quality_score: 0.85,
-    sfw_safe: true,
-    sfw_confidence: 0.99,
-    source_work_id: 'synthetic-work-000',
-    ...overrides,
-  }
 }
 
 const baseProps = {
@@ -51,7 +32,7 @@ describe('CurateStage', () => {
       { wrapper: wrapWith },
     )
     const img = screen.getByTestId('candidate-img') as HTMLImageElement
-    expect(img.getAttribute('src')).toBe('/api/v1/assets/ls_test_ac1f55b7390698a7/thumbnail')
+    expect(img.getAttribute('src')).toBe('/api/v1/assets/ls_synthetic_ac1f55b7390698a7/thumbnail')
   })
 
   it('swaps to the line-art URL when the user clicks the line-art toggle', () => {
@@ -61,7 +42,7 @@ describe('CurateStage', () => {
     )
     fireEvent.click(screen.getByLabelText('Show line art'))
     const img = screen.getByTestId('candidate-img') as HTMLImageElement
-    expect(img.getAttribute('src')).toBe('/api/v1/assets/ls_test_ac1f55b7390698a7/line-art')
+    expect(img.getAttribute('src')).toBe('/api/v1/assets/ls_synthetic_ac1f55b7390698a7/line-art')
   })
 
   it('invokes onToggleCrop when Edit crop is clicked', () => {

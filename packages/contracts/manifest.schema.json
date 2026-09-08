@@ -1,5 +1,28 @@
 {
   "$defs": {
+    "AllowedUses": {
+      "additionalProperties": false,
+      "description": "What the asset may be used for. Three independent grants, all opt-in.\n\nA use is only ``True`` when the permission basis justifies it (or a\nrecorded human permission decision does). Anything unknown stays ``False``:\nunknown permission must not imply permission.",
+      "properties": {
+        "display": {
+          "default": false,
+          "title": "Display",
+          "type": "boolean"
+        },
+        "trace": {
+          "default": false,
+          "title": "Trace",
+          "type": "boolean"
+        },
+        "training": {
+          "default": false,
+          "title": "Training",
+          "type": "boolean"
+        }
+      },
+      "title": "AllowedUses",
+      "type": "object"
+    },
     "CropBox": {
       "additionalProperties": false,
       "description": "Crop coordinates in source-image pixel space (inclusive-exclusive).",
@@ -34,24 +57,25 @@
       "title": "CropBox",
       "type": "object"
     },
-    "DatasetSplit": {
-      "description": "Split assignment. Assets derived from one source work never cross splits.",
+    "CurationBlocker": {
+      "description": "A named defect that blocks specific uses regardless of review state.\n\nBlockers are not review states; they are assertions about the asset that\noutlive individual decisions. While any blocker is present the asset is\nneither servable nor trainable (see ``is_servable`` / ``is_trainable`` in\n:mod:`linescout_ml.manifest`). The curation API refuses a ``keep`` decision\nthat carries blockers \u2014 blockers force ``reject`` or ``quarantine``.\n\nAdding a new blocker kind is a schema change: extend this enum, bump the\nmanifest schema version, and migrate the ``blockers_json`` columns.",
       "enum": [
-        "train",
-        "validation",
-        "test",
-        "gallery_only"
+        "anatomy",
+        "extraction"
       ],
-      "title": "DatasetSplit",
+      "title": "CurationBlocker",
       "type": "string"
     },
     "HumanReview": {
       "additionalProperties": false,
+      "description": "Human curation state plus named, use-blocking defects.",
       "properties": {
-        "malformed_anatomy": {
-          "default": false,
-          "title": "Malformed Anatomy",
-          "type": "boolean"
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/CurationBlocker"
+          },
+          "title": "Blockers",
+          "type": "array"
         },
         "note": {
           "anyOf": [
@@ -65,11 +89,6 @@
           ],
           "default": null,
           "title": "Note"
-        },
-        "poor_extraction": {
-          "default": false,
-          "title": "Poor Extraction",
-          "type": "boolean"
         },
         "quality": {
           "anyOf": [
@@ -96,6 +115,17 @@
       "title": "HumanReview",
       "type": "object"
     },
+    "LearningSplit": {
+      "description": "Learning assignment for an asset. Gallery/gold membership is separate.\n\n``none`` means *no training assignment*: the asset is excluded from every\nlearning population. It is not a conflict in the one-group-one-split rule\n(only two different assigned splits on the same work or leakage group\nare). The default derivation policy keeps 70/15/15 over assigned works.",
+      "enum": [
+        "train",
+        "validation",
+        "test",
+        "none"
+      ],
+      "title": "LearningSplit",
+      "type": "string"
+    },
     "LineArtOrigin": {
       "description": "Whether the visible reference is native line art or machine-extracted.",
       "enum": [
@@ -107,8 +137,25 @@
     },
     "ManifestRecord": {
       "additionalProperties": false,
-      "description": "One gallery or training asset. See the spec's \"Manifest schema\" list.",
+      "description": "One gallery or training asset (schema v2).\n\nSee ``docs/contracts/manifest-v2.md`` for the full field/invariant matrix.",
       "properties": {
+        "allowed_uses": {
+          "$ref": "#/$defs/AllowedUses"
+        },
+        "artist_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artist Id"
+        },
         "asset_id": {
           "pattern": "^ls_[a-z0-9]{2,16}_[a-f0-9]{16}$",
           "title": "Asset Id",
@@ -124,10 +171,6 @@
             }
           ],
           "default": null
-        },
-        "enabled": {
-          "title": "Enabled",
-          "type": "boolean"
         },
         "extraction_model": {
           "anyOf": [
@@ -155,6 +198,16 @@
           "default": null,
           "title": "Extraction Version"
         },
+        "gallery_member": {
+          "default": true,
+          "title": "Gallery Member",
+          "type": "boolean"
+        },
+        "gold_member": {
+          "default": false,
+          "title": "Gold Member",
+          "type": "boolean"
+        },
         "height": {
           "exclusiveMinimum": 0,
           "title": "Height",
@@ -166,11 +219,29 @@
           "title": "Ink Coverage",
           "type": "number"
         },
-        "license_id": {
-          "maxLength": 64,
+        "label_version": {
+          "default": "1",
+          "maxLength": 32,
           "minLength": 1,
-          "title": "License Id",
+          "title": "Label Version",
           "type": "string"
+        },
+        "leakage_group_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leakage Group Id"
+        },
+        "learning_split": {
+          "$ref": "#/$defs/LearningSplit"
         },
         "line_art_checksum": {
           "pattern": "^[a-f0-9]{64}$",
@@ -192,6 +263,22 @@
           "title": "Original Path",
           "type": "string"
         },
+        "parent_asset_id": {
+          "anyOf": [
+            {
+              "pattern": "^ls_[a-z0-9]{2,16}_[a-f0-9]{16}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Asset Id"
+        },
+        "permissions": {
+          "$ref": "#/$defs/Permissions"
+        },
         "person_count": {
           "anyOf": [
             {
@@ -206,6 +293,11 @@
           "default": null,
           "title": "Person Count"
         },
+        "person_count_approximate": {
+          "default": false,
+          "title": "Person Count Approximate",
+          "type": "boolean"
+        },
         "phash": {
           "pattern": "^[a-f0-9]{16}$",
           "title": "Phash",
@@ -217,8 +309,17 @@
           "title": "Pipeline Version",
           "type": "string"
         },
+        "primary_scope": {
+          "$ref": "#/$defs/ScopeLabel"
+        },
         "primary_style": {
           "$ref": "#/$defs/PrimaryStyle"
+        },
+        "processing_revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Processing Revision",
+          "type": "integer"
         },
         "quality_score": {
           "maximum": 1.0,
@@ -229,16 +330,34 @@
         "review": {
           "$ref": "#/$defs/HumanReview"
         },
-        "scopes": {
+        "secondary_scopes": {
           "items": {
             "$ref": "#/$defs/ScopeLabel"
           },
-          "minItems": 1,
-          "title": "Scopes",
+          "title": "Secondary Scopes",
           "type": "array"
         },
-        "sfw": {
-          "$ref": "#/$defs/SfwDecision"
+        "sfw_human": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SfwHumanDecision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sfw_screening": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SfwScreening"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "source_checksum": {
           "pattern": "^[a-f0-9]{64}$",
@@ -276,9 +395,6 @@
           "title": "Source Work Id",
           "type": "string"
         },
-        "split": {
-          "$ref": "#/$defs/DatasetSplit"
-        },
         "text_coverage": {
           "maximum": 1.0,
           "minimum": 0.0,
@@ -307,28 +423,90 @@
         "source_dataset",
         "source_item_id",
         "source_work_id",
-        "license_id",
+        "permissions",
         "original_path",
         "line_art_path",
         "thumbnail_path",
         "origin",
         "primary_style",
-        "scopes",
-        "sfw",
+        "primary_scope",
         "width",
         "height",
         "text_coverage",
         "ink_coverage",
         "phash",
         "quality_score",
-        "split",
-        "enabled",
+        "learning_split",
         "pipeline_version",
         "source_checksum",
         "line_art_checksum",
         "thumbnail_checksum"
       ],
       "title": "ManifestRecord",
+      "type": "object"
+    },
+    "PermissionBasis": {
+      "description": "Why the asset's allowed uses may be claimed.\n\n* ``license_terms``    \u2014 the recorded licence's terms grant the use.\n* ``public_domain``    \u2014 no rights reserved (verified dedication).\n* ``explicit_consent`` \u2014 the artist/source gave recorded permission.\n* ``first_party``      \u2014 content produced by this project itself.\n* ``unknown``          \u2014 the default. Grants *nothing*: unknown permission\n  must not imply permission.",
+      "enum": [
+        "license_terms",
+        "public_domain",
+        "explicit_consent",
+        "first_party",
+        "unknown"
+      ],
+      "title": "PermissionBasis",
+      "type": "string"
+    },
+    "Permissions": {
+      "additionalProperties": false,
+      "description": "Permission provenance for one asset.\n\n``license_id`` has no default \u2014 provenance is the point of the manifest,\nand a silent default would let an unverified licence claim ship. ``basis``\ndefaults to ``unknown``, which grants no uses at all.",
+      "properties": {
+        "attribution": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution"
+        },
+        "attribution_required": {
+          "default": false,
+          "title": "Attribution Required",
+          "type": "boolean"
+        },
+        "basis": {
+          "$ref": "#/$defs/PermissionBasis",
+          "default": "unknown"
+        },
+        "license_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "License Id",
+          "type": "string"
+        },
+        "permission_url": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Permission Url"
+        }
+      },
+      "required": [
+        "license_id"
+      ],
+      "title": "Permissions",
       "type": "object"
     },
     "PrimaryStyle": {
@@ -344,7 +522,7 @@
       "type": "string"
     },
     "ReviewState": {
-      "description": "Human curation state for an asset.",
+      "description": "Human curation state for an asset (definitions are part of the contract).\n\n* ``unreviewed`` \u2014 no human decision recorded. Not servable, not trainable.\n* ``accepted``   \u2014 a human approved the asset's labels. Servable iff the\n  other gates pass (display permission, gallery membership, human SFW\n  approval, no blockers); trainable iff training permission and split allow.\n* ``rejected``   \u2014 terminal human verdict that the asset is unsuitable.\n  Never served, never trained on as a positive example; retained for audit\n  and (only where training use is permitted) as a negative example for\n  quality models.\n* ``quarantined``\u2014 reversible hold pending investigation (SFW concern,\n  provenance concern, extraction rework). All uses blocked while held.",
       "enum": [
         "unreviewed",
         "accepted",
@@ -355,7 +533,7 @@
       "type": "string"
     },
     "ScopeLabel": {
-      "description": "What part of a character (or how many characters) an image depicts.\n\nAn asset may carry several scope labels; queries return one probability per\nlabel plus ``unknown``.",
+      "description": "What part of a character (or how many characters) an image depicts.\n\nAn asset carries exactly one ``primary_scope`` plus any number of\n``secondary_scopes``; queries return one probability per label plus\n``unknown``.\n\n``eyebrow`` and ``mouth`` are retained as first-class detail scopes, and\n``person_count`` stays nullable on the record (null = not applicable or\nnot assessed).",
       "enum": [
         "eye",
         "eyebrow",
@@ -372,23 +550,28 @@
       "title": "ScopeLabel",
       "type": "string"
     },
-    "SfwDecision": {
+    "SfwHumanDecision": {
       "additionalProperties": false,
+      "description": "A human SFW decision. The only thing that can gate display.",
       "properties": {
-        "confidence": {
-          "maximum": 1.0,
-          "minimum": 0.0,
-          "title": "Confidence",
-          "type": "number"
-        },
-        "method": {
-          "enum": [
-            "source_rating",
-            "opennsfw2",
-            "source_rating+opennsfw2",
-            "manual"
+        "decided_at": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Method",
+          "default": null,
+          "title": "Decided At"
+        },
+        "reviewer": {
+          "default": "local",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Reviewer",
           "type": "string"
         },
         "safe": {
@@ -397,12 +580,63 @@
         }
       },
       "required": [
-        "safe",
-        "confidence",
-        "method"
+        "safe"
       ],
-      "title": "SfwDecision",
+      "title": "SfwHumanDecision",
       "type": "object"
+    },
+    "SfwScreening": {
+      "additionalProperties": false,
+      "description": "An automated (machine) SFW screen. Never a substitute for approval.\n\n``None`` on the record means no screen was ever run. A screen result is\ntri-state: ``unsure`` is a concern to resolve, not a pass.",
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "method": {
+          "$ref": "#/$defs/SfwScreeningMethod",
+          "default": "none"
+        },
+        "verdict": {
+          "$ref": "#/$defs/SfwVerdict"
+        }
+      },
+      "required": [
+        "verdict"
+      ],
+      "title": "SfwScreening",
+      "type": "object"
+    },
+    "SfwScreeningMethod": {
+      "description": "How an automated SFW screen was produced.\n\n``manual`` is deliberately absent: a human SFW decision is recorded\nseparately on the manifest record (``sfw_human``), never as a screening\nmethod.",
+      "enum": [
+        "none",
+        "source_rating",
+        "opennsfw2",
+        "source_rating+opennsfw2"
+      ],
+      "title": "SfwScreeningMethod",
+      "type": "string"
+    },
+    "SfwVerdict": {
+      "description": "Tri-state result of an automated SFW screen.\n\n``unsure`` is distinct from ``unsafe``: borderline confidence is a concern\nto resolve, not a condemnation. Both ``unsafe`` and ``unsure`` keep an\nasset out of the unreviewed queue at ingestion (quarantined instead), and\nneither ever substitutes for human approval.",
+      "enum": [
+        "safe",
+        "unsafe",
+        "unsure"
+      ],
+      "title": "SfwVerdict",
+      "type": "string"
     }
   },
   "additionalProperties": false,
@@ -421,8 +655,8 @@
       "type": "array"
     },
     "schema_version": {
-      "const": 1,
-      "default": 1,
+      "const": 2,
+      "default": 2,
       "title": "Schema Version",
       "type": "integer"
     }

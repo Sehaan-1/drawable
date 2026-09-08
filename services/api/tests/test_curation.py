@@ -73,7 +73,8 @@ def curation_client(tmp_path: Path):
         state = client.app.state.linescout
         if state.gallery is not None:
             state.connection.execute(
-                "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 0"
+                "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL,"
+                " gold_member = 0, enabled = 0"
             )
             state.assets = enabled_assets(state.connection)
         yield client
@@ -113,7 +114,7 @@ def test_progress_breakdowns_match_assets_table(curation_client: TestClient) -> 
     for style in PrimaryStyle:
         row = state.connection.execute(
             "SELECT COUNT(*) AS n FROM assets"
-            " WHERE primary_style = ? AND review_state = 'unreviewed' AND sfw_safe = 1",
+            " WHERE primary_style = ? AND review_state = 'unreviewed'",
             (style.value,),
         ).fetchone()
         assert body["by_style"][style.value]["remaining"] == int(row["n"])
@@ -173,7 +174,7 @@ def test_next_scope_filter_only_returns_that_scope(curation_client: TestClient) 
         if response.status_code == 404:
             break
         body = response.json()
-        scopes = tuple(body["scopes"])
+        scopes = (body["primary_scope"], *body["secondary_scopes"])
         seen.add(scopes)
         # The candidate either declares ``eye`` or only carries ``unknown``;
         # both are valid per the queue logic in curation.py.
@@ -226,6 +227,7 @@ def _label(asset_id: str, **overrides: object) -> dict[str, object]:
         "expected_review_state": "unreviewed",
         "decision": "keep",
         "quality": 3,
+        "blockers": [],
     }
     payload.update(overrides)
     return payload
@@ -321,9 +323,72 @@ def test_label_validates_duplicate_scopes(curation_client: TestClient) -> None:
     first = curation_client.get("/api/v1/curation/next").json()
     response = curation_client.post(
         "/api/v1/curation/labels",
-        json=_label(first["asset_id"], scopes=["eye", "eye"]),
+        json=_label(
+            first["asset_id"],
+            primary_scope="eye",
+            secondary_scopes=["eye", "eye"],
+        ),
     )
     assert response.status_code == 422
+
+
+def test_label_keep_with_blockers_is_422(curation_client: TestClient) -> None:
+    """Blockers force reject or quarantine; a keep carrying them is invalid."""
+    first = curation_client.get("/api/v1/curation/next").json()
+    response = curation_client.post(
+        "/api/v1/curation/labels",
+        json=_label(first["asset_id"], blockers=["anatomy"]),
+    )
+    assert response.status_code == 422
+
+
+def test_label_keep_with_unknown_primary_scope_is_422(curation_client: TestClient) -> None:
+    first = curation_client.get("/api/v1/curation/next").json()
+    response = curation_client.post(
+        "/api/v1/curation/labels",
+        json=_label(first["asset_id"], primary_scope="unknown"),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_label_records_human_sfw_decision(curation_client: TestClient) -> None:
+    """A keep with sfw_safe=true records the human approval and can serve."""
+    first = curation_client.get("/api/v1/curation/next").json()
+    response = curation_client.post(
+        "/api/v1/curation/labels",
+        json=_label(first["asset_id"], sfw_safe=True),
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["sfw_human_approved"] is True
+    state = curation_client.app.state.linescout
+    row = state.connection.execute(
+        "SELECT sfw_human_safe, sfw_human_reviewer FROM assets WHERE asset_id = ?",
+        (first["asset_id"],),
+    ).fetchone()
+    assert row["sfw_human_safe"] == 1
+    assert row["sfw_human_reviewer"] == "local"
+
+
+def test_label_keep_without_permission_stays_disabled_with_reasons(
+    curation_client: TestClient,
+) -> None:
+    """A keep on an asset with unknown permission is accepted but not servable,
+    and the response names exactly why (no silent permission grant)."""
+    first = curation_client.get("/api/v1/curation/next").json()
+    state = curation_client.app.state.linescout
+    state.connection.execute(
+        "UPDATE assets SET allowed_display = 0, allowed_training = 0, allowed_trace = 0,"
+        " permission_basis = 'unknown' WHERE asset_id = ?",
+        (first["asset_id"],),
+    )
+    response = curation_client.post("/api/v1/curation/labels", json=_label(first["asset_id"]))
+    assert response.status_code == 201
+    body = response.json()
+    assert body["review_state"] == "accepted"
+    assert body["enabled"] is False
+    assert "display_not_permitted" in body["serving_blockers"]
 
 
 def test_label_conflict_when_review_state_changed(curation_client: TestClient) -> None:
@@ -362,22 +427,23 @@ def test_label_unknown_asset_404(curation_client: TestClient) -> None:
 
 
 def test_label_updates_assets_metadata(curation_client: TestClient) -> None:
-    """Reviewer-supplied primary_style / scopes / crop must persist on the asset.
+    """Reviewer-supplied style / scopes / crop / blockers must persist.
 
-    ``malformed_anatomy`` / ``poor_extraction`` are flag columns on the
-    ``curation_labels`` audit row — they describe the review, not the asset —
-    so we assert them against the label rather than the assets cache.
+    ``blockers`` live on both the audit row and the asset (they are named,
+    use-blocking defects); the response echoes them.
     """
     first = curation_client.get("/api/v1/curation/next").json()
     response = curation_client.post(
         "/api/v1/curation/labels",
         json=_label(
             first["asset_id"],
+            decision="reject",
+            quality=1,
             primary_style="cartoon",
-            scopes=["full_body"],
+            primary_scope="full_body",
+            secondary_scopes=["face_head"],
             crop={"x": 0, "y": 0, "width": 8, "height": 8},
-            malformed_anatomy=True,
-            poor_extraction=True,
+            blockers=["anatomy", "extraction"],
             note="head is too small",
         ),
     )
@@ -385,31 +451,33 @@ def test_label_updates_assets_metadata(curation_client: TestClient) -> None:
 
     state = curation_client.app.state.linescout
     asset_row = state.connection.execute(
-        "SELECT primary_style, scopes_json, crop_json FROM assets WHERE asset_id = ?",
+        "SELECT primary_style, primary_scope, secondary_scopes_json, crop_json,"
+        " blockers_json FROM assets WHERE asset_id = ?",
         (first["asset_id"],),
     ).fetchone()
     assert asset_row["primary_style"] == "cartoon"
-    assert json.loads(asset_row["scopes_json"]) == ["full_body"]
+    assert asset_row["primary_scope"] == "full_body"
+    assert json.loads(asset_row["secondary_scopes_json"]) == ["face_head"]
     assert json.loads(asset_row["crop_json"]) == {
         "x": 0,
         "y": 0,
         "width": 8,
         "height": 8,
     }
+    assert json.loads(asset_row["blockers_json"]) == ["anatomy", "extraction"]
     scope_rows = state.connection.execute(
         "SELECT scope FROM asset_scopes WHERE asset_id = ? ORDER BY scope",
         (first["asset_id"],),
     ).fetchall()
-    assert [row["scope"] for row in scope_rows] == ["full_body"]
+    assert [row["scope"] for row in scope_rows] == ["face_head", "full_body"]
 
     label_row = state.connection.execute(
-        "SELECT malformed_anatomy, poor_extraction, note"
+        "SELECT blockers_json, note"
         " FROM curation_labels WHERE asset_id = ?"
         " ORDER BY id DESC LIMIT 1",
         (first["asset_id"],),
     ).fetchone()
-    assert label_row["malformed_anatomy"] == 1
-    assert label_row["poor_extraction"] == 1
+    assert json.loads(label_row["blockers_json"]) == ["anatomy", "extraction"]
     assert label_row["note"] == "head is too small"
 
 
@@ -515,3 +583,71 @@ def test_snapshot_breaks_down_by_style(curation_client: TestClient) -> None:
     assert total == 2
     for style in seen_styles:
         assert body["style_breakdown"][style] == 1
+
+
+# ------------------------------------------------------- snapshot semantics
+
+
+def test_snapshots_are_full_and_latest_per_asset_with_lineage(
+    curation_client: TestClient,
+) -> None:
+    """Frozen v2 snapshot semantics.
+
+    * The snapshot captures the *latest* label per asset, rejected included.
+    * A re-decision replaces the asset's entry; the audit history keeps both.
+    * Every export is a new immutable file chained via ``previous_snapshot_id``
+      — never an incremental delta of what changed since the last one.
+    """
+    keep_id = curation_client.get("/api/v1/curation/next").json()["asset_id"]
+    assert curation_client.post("/api/v1/curation/labels", json=_label(keep_id)).status_code == 201
+
+    reject_id = curation_client.get("/api/v1/curation/next").json()["asset_id"]
+    assert (
+        curation_client.post(
+            "/api/v1/curation/labels",
+            json=_label(reject_id, decision="reject", quality=1),
+        ).status_code
+        == 201
+    )
+
+    first = curation_client.post("/api/v1/curation/snapshots").json()
+    assert first["previous_snapshot_id"] is None
+    assert first["label_count"] == 2
+
+    # The reviewer changes their mind on the rejected asset: keep it now.
+    assert (
+        curation_client.post(
+            "/api/v1/curation/labels",
+            json=_label(reject_id, expected_review_state="rejected"),
+        ).status_code
+        == 201
+    )
+
+    second = curation_client.post("/api/v1/curation/snapshots").json()
+    assert second["snapshot_id"] != first["snapshot_id"]
+    assert second["previous_snapshot_id"] == first["snapshot_id"]
+    # Full snapshot: still two assets (not one new label), and the latest
+    # decision per asset wins.
+    assert second["label_count"] == 2
+    data_dir = Path(curation_client.app.state.linescout.settings.data_dir)
+    payload = json.loads((data_dir / second["path"]).read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
+    assert payload["previous_snapshot_id"] == first["snapshot_id"]
+    by_id = {label["asset_id"]: label["decision"] for label in payload["labels"]}
+    assert by_id == {keep_id: "keep", reject_id: "keep"}
+
+    # The append-only audit history still holds every decision, including both
+    # of the flipped asset's rows.
+    state = curation_client.app.state.linescout
+    history = state.connection.execute(
+        "SELECT decision FROM curation_labels WHERE asset_id = ? ORDER BY id",
+        (reject_id,),
+    ).fetchall()
+    assert [row["decision"] for row in history] == ["reject", "keep"]
+
+    # The first snapshot file was never touched by the second export.
+    first_payload = json.loads((data_dir / first["path"]).read_text(encoding="utf-8"))
+    assert {label["asset_id"]: label["decision"] for label in first_payload["labels"]} == {
+        keep_id: "keep",
+        reject_id: "reject",
+    }

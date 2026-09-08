@@ -1,6 +1,29 @@
 {
   "components": {
     "schemas": {
+      "AllowedUses": {
+        "additionalProperties": false,
+        "description": "What the asset may be used for. Three independent grants, all opt-in.\n\nA use is only ``True`` when the permission basis justifies it (or a\nrecorded human permission decision does). Anything unknown stays ``False``:\nunknown permission must not imply permission.",
+        "properties": {
+          "display": {
+            "default": false,
+            "title": "Display",
+            "type": "boolean"
+          },
+          "trace": {
+            "default": false,
+            "title": "Trace",
+            "type": "boolean"
+          },
+          "training": {
+            "default": false,
+            "title": "Training",
+            "type": "boolean"
+          }
+        },
+        "title": "AllowedUses",
+        "type": "object"
+      },
       "Body_search_api_v1_search_post": {
         "properties": {
           "canvas_height": {
@@ -118,13 +141,43 @@
         "title": "CropBox",
         "type": "object"
       },
+      "CurationBlocker": {
+        "description": "A named defect that blocks specific uses regardless of review state.\n\nBlockers are not review states; they are assertions about the asset that\noutlive individual decisions. While any blocker is present the asset is\nneither servable nor trainable (see ``is_servable`` / ``is_trainable`` in\n:mod:`linescout_ml.manifest`). The curation API refuses a ``keep`` decision\nthat carries blockers \u2014 blockers force ``reject`` or ``quarantine``.\n\nAdding a new blocker kind is a schema change: extend this enum, bump the\nmanifest schema version, and migrate the ``blockers_json`` columns.",
+        "enum": [
+          "anatomy",
+          "extraction"
+        ],
+        "title": "CurationBlocker",
+        "type": "string"
+      },
       "CurationCandidate": {
         "additionalProperties": false,
-        "description": "One candidate asset for review.",
+        "description": "One candidate asset for review (the v2 wire shape).",
         "properties": {
+          "allowed_uses": {
+            "$ref": "#/components/schemas/AllowedUses"
+          },
+          "artist_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artist Id"
+          },
           "asset_id": {
             "title": "Asset Id",
             "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/CurationBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
           },
           "crop": {
             "anyOf": [
@@ -136,10 +189,34 @@
               }
             ]
           },
+          "gallery_member": {
+            "default": true,
+            "title": "Gallery Member",
+            "type": "boolean"
+          },
+          "gold_member": {
+            "default": false,
+            "title": "Gold Member",
+            "type": "boolean"
+          },
           "height": {
             "minimum": 1.0,
             "title": "Height",
             "type": "integer"
+          },
+          "leakage_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leakage Group Id"
+          },
+          "learning_split": {
+            "$ref": "#/components/schemas/LearningSplit"
           },
           "line_art_url": {
             "title": "Line Art Url",
@@ -152,6 +229,40 @@
             ],
             "title": "Origin",
             "type": "string"
+          },
+          "parent_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Asset Id"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/Permissions"
+          },
+          "person_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Count"
+          },
+          "person_count_approximate": {
+            "default": false,
+            "title": "Person Count Approximate",
+            "type": "boolean"
+          },
+          "primary_scope": {
+            "$ref": "#/components/schemas/ScopeLabel"
           },
           "primary_style": {
             "$ref": "#/components/schemas/PrimaryStyle"
@@ -172,22 +283,32 @@
             "title": "Review State",
             "type": "string"
           },
-          "scopes": {
+          "secondary_scopes": {
             "items": {
               "$ref": "#/components/schemas/ScopeLabel"
             },
-            "title": "Scopes",
+            "title": "Secondary Scopes",
             "type": "array"
           },
-          "sfw_confidence": {
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Sfw Confidence",
-            "type": "number"
+          "sfw_human": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SfwHumanDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "sfw_safe": {
-            "title": "Sfw Safe",
-            "type": "boolean"
+          "sfw_screening": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SfwScreening"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "source_work_id": {
             "title": "Source Work Id",
@@ -206,7 +327,7 @@
         "required": [
           "asset_id",
           "primary_style",
-          "scopes",
+          "primary_scope",
           "width",
           "height",
           "thumbnail_url",
@@ -214,8 +335,9 @@
           "origin",
           "review_state",
           "quality_score",
-          "sfw_safe",
-          "sfw_confidence",
+          "permissions",
+          "allowed_uses",
+          "learning_split",
           "source_work_id"
         ],
         "title": "CurationCandidate",
@@ -283,13 +405,52 @@
         "title": "CurationProgress",
         "type": "object"
       },
+      "Degradation": {
+        "additionalProperties": false,
+        "description": "One structured way this response is degraded relative to full quality.\n\n``degradations`` on the response is the canonical, machine-readable view;\nthe top-level ``warning`` string is a convenience join kept for older\nclients and may be removed in a future contract version.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "fixture_mode",
+              "cpu_fallback",
+              "branch_disabled",
+              "gallery_empty"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "detail"
+        ],
+        "title": "Degradation",
+        "type": "object"
+      },
       "ErrorDetail": {
         "additionalProperties": false,
+        "description": "One structured error.\n\n``code`` is a stable, machine-readable slug (never a filename or path).\n``field`` names the offending request field when one field is at fault.\n``details`` is optional, code-specific structured data (e.g. byte limits\nfor ``image_too_large``); it must never contain absolute filesystem paths,\nuser content, or secrets.",
         "properties": {
           "code": {
             "description": "Stable machine-readable error code, e.g. image_too_large.",
             "title": "Code",
             "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
           },
           "field": {
             "anyOf": [
@@ -582,6 +743,13 @@
             "title": "Asset Id",
             "type": "string"
           },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/CurationBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
           "crop": {
             "anyOf": [
               {
@@ -603,11 +771,6 @@
           "expected_review_state": {
             "$ref": "#/components/schemas/ReviewState"
           },
-          "malformed_anatomy": {
-            "default": false,
-            "title": "Malformed Anatomy",
-            "type": "boolean"
-          },
           "note": {
             "anyOf": [
               {
@@ -620,10 +783,15 @@
             ],
             "title": "Note"
           },
-          "poor_extraction": {
-            "default": false,
-            "title": "Poor Extraction",
-            "type": "boolean"
+          "primary_scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopeLabel"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "primary_style": {
             "anyOf": [
@@ -660,7 +828,7 @@
             ],
             "title": "Reviewer"
           },
-          "scopes": {
+          "secondary_scopes": {
             "anyOf": [
               {
                 "items": {
@@ -672,7 +840,18 @@
                 "type": "null"
               }
             ],
-            "title": "Scopes"
+            "title": "Secondary Scopes"
+          },
+          "sfw_safe": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfw Safe"
           }
         },
         "required": [
@@ -689,6 +868,13 @@
           "asset_id": {
             "title": "Asset Id",
             "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/CurationBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
           },
           "created_at": {
             "title": "Created At",
@@ -730,6 +916,24 @@
             ],
             "title": "Review State",
             "type": "string"
+          },
+          "serving_blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Serving Blockers",
+            "type": "array"
+          },
+          "sfw_human_approved": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfw Human Approved"
           }
         },
         "required": [
@@ -738,11 +942,23 @@
           "decision",
           "review_state",
           "review_quality",
+          "sfw_human_approved",
           "enabled",
           "created_at"
         ],
         "title": "LabelResponse",
         "type": "object"
+      },
+      "LearningSplit": {
+        "description": "Learning assignment for an asset. Gallery/gold membership is separate.\n\n``none`` means *no training assignment*: the asset is excluded from every\nlearning population. It is not a conflict in the one-group-one-split rule\n(only two different assigned splits on the same work or leakage group\nare). The default derivation policy keeps 70/15/15 over assigned works.",
+        "enum": [
+          "train",
+          "validation",
+          "test",
+          "none"
+        ],
+        "title": "LearningSplit",
+        "type": "string"
       },
       "LineArtOrigin": {
         "description": "Whether the visible reference is native line art or machine-extracted.",
@@ -786,6 +1002,68 @@
           "loaded"
         ],
         "title": "ModelVersion",
+        "type": "object"
+      },
+      "PermissionBasis": {
+        "description": "Why the asset's allowed uses may be claimed.\n\n* ``license_terms``    \u2014 the recorded licence's terms grant the use.\n* ``public_domain``    \u2014 no rights reserved (verified dedication).\n* ``explicit_consent`` \u2014 the artist/source gave recorded permission.\n* ``first_party``      \u2014 content produced by this project itself.\n* ``unknown``          \u2014 the default. Grants *nothing*: unknown permission\n  must not imply permission.",
+        "enum": [
+          "license_terms",
+          "public_domain",
+          "explicit_consent",
+          "first_party",
+          "unknown"
+        ],
+        "title": "PermissionBasis",
+        "type": "string"
+      },
+      "Permissions": {
+        "additionalProperties": false,
+        "description": "Permission provenance for one asset.\n\n``license_id`` has no default \u2014 provenance is the point of the manifest,\nand a silent default would let an unverified licence claim ship. ``basis``\ndefaults to ``unknown``, which grants no uses at all.",
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "attribution_required": {
+            "default": false,
+            "title": "Attribution Required",
+            "type": "boolean"
+          },
+          "basis": {
+            "$ref": "#/components/schemas/PermissionBasis",
+            "default": "unknown"
+          },
+          "license_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "License Id",
+            "type": "string"
+          },
+          "permission_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permission Url"
+          }
+        },
+        "required": [
+          "license_id"
+        ],
+        "title": "Permissions",
         "type": "object"
       },
       "PreferencesResponse": {
@@ -897,7 +1175,7 @@
         "type": "object"
       },
       "ReviewState": {
-        "description": "Human curation state for an asset.",
+        "description": "Human curation state for an asset (definitions are part of the contract).\n\n* ``unreviewed`` \u2014 no human decision recorded. Not servable, not trainable.\n* ``accepted``   \u2014 a human approved the asset's labels. Servable iff the\n  other gates pass (display permission, gallery membership, human SFW\n  approval, no blockers); trainable iff training permission and split allow.\n* ``rejected``   \u2014 terminal human verdict that the asset is unsuitable.\n  Never served, never trained on as a positive example; retained for audit\n  and (only where training use is permitted) as a negative example for\n  quality models.\n* ``quarantined``\u2014 reversible hold pending investigation (SFW concern,\n  provenance concern, extraction rework). All uses blocked while held.",
         "enum": [
           "unreviewed",
           "accepted",
@@ -942,7 +1220,7 @@
         "type": "object"
       },
       "ScopeLabel": {
-        "description": "What part of a character (or how many characters) an image depicts.\n\nAn asset may carry several scope labels; queries return one probability per\nlabel plus ``unknown``.",
+        "description": "What part of a character (or how many characters) an image depicts.\n\nAn asset carries exactly one ``primary_scope`` plus any number of\n``secondary_scopes``; queries return one probability per label plus\n``unknown``.\n\n``eyebrow`` and ``mouth`` are retained as first-class detail scopes, and\n``person_count`` stays nullable on the record (null = not applicable or\nnot assessed).",
         "enum": [
           "eye",
           "eyebrow",
@@ -1048,12 +1326,41 @@
       "SearchResponse": {
         "additionalProperties": false,
         "properties": {
+          "dataset_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Version"
+          },
+          "degradations": {
+            "items": {
+              "$ref": "#/components/schemas/Degradation"
+            },
+            "title": "Degradations",
+            "type": "array"
+          },
           "groups": {
             "items": {
               "$ref": "#/components/schemas/SearchGroup"
             },
             "title": "Groups",
             "type": "array"
+          },
+          "index_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Version"
           },
           "mode": {
             "$ref": "#/components/schemas/SearchMode"
@@ -1062,6 +1369,13 @@
             "description": "Echoes the request revision unchanged.",
             "minimum": 1.0,
             "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "description": "Payload contract version; bump on any breaking response change.",
+            "title": "Schema Version",
             "type": "integer"
           },
           "scope_predictions": {
@@ -1111,6 +1425,26 @@
           "origin": {
             "$ref": "#/components/schemas/LineArtOrigin"
           },
+          "person_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Count"
+          },
+          "person_count_approximate": {
+            "default": false,
+            "title": "Person Count Approximate",
+            "type": "boolean"
+          },
+          "primary_scope": {
+            "$ref": "#/components/schemas/ScopeLabel"
+          },
           "quality": {
             "maximum": 1.0,
             "minimum": 0.0,
@@ -1131,6 +1465,13 @@
             "title": "Scopes",
             "type": "array"
           },
+          "secondary_scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeLabel"
+            },
+            "title": "Secondary Scopes",
+            "type": "array"
+          },
           "style": {
             "$ref": "#/components/schemas/PrimaryStyle"
           },
@@ -1139,7 +1480,7 @@
             "type": "string"
           },
           "trace_allowed": {
-            "description": "Whether this asset may be placed on the trace layer. Native line art is allowed; extracted line art is not.",
+            "description": "Whether this asset may be placed on the trace layer. Stored per-asset permission (v2); never derived from origin on the wire.",
             "title": "Trace Allowed",
             "type": "boolean"
           }
@@ -1149,6 +1490,7 @@
           "thumbnail_url",
           "style",
           "scopes",
+          "primary_scope",
           "origin",
           "trace_allowed",
           "relevance",
@@ -1192,6 +1534,92 @@
         "title": "SearchTiming",
         "type": "object"
       },
+      "SfwHumanDecision": {
+        "additionalProperties": false,
+        "description": "A human SFW decision. The only thing that can gate display.",
+        "properties": {
+          "decided_at": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          },
+          "reviewer": {
+            "default": "local",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reviewer",
+            "type": "string"
+          },
+          "safe": {
+            "title": "Safe",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "safe"
+        ],
+        "title": "SfwHumanDecision",
+        "type": "object"
+      },
+      "SfwScreening": {
+        "additionalProperties": false,
+        "description": "An automated (machine) SFW screen. Never a substitute for approval.\n\n``None`` on the record means no screen was ever run. A screen result is\ntri-state: ``unsure`` is a concern to resolve, not a pass.",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "method": {
+            "$ref": "#/components/schemas/SfwScreeningMethod",
+            "default": "none"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/SfwVerdict"
+          }
+        },
+        "required": [
+          "verdict"
+        ],
+        "title": "SfwScreening",
+        "type": "object"
+      },
+      "SfwScreeningMethod": {
+        "description": "How an automated SFW screen was produced.\n\n``manual`` is deliberately absent: a human SFW decision is recorded\nseparately on the manifest record (``sfw_human``), never as a screening\nmethod.",
+        "enum": [
+          "none",
+          "source_rating",
+          "opennsfw2",
+          "source_rating+opennsfw2"
+        ],
+        "title": "SfwScreeningMethod",
+        "type": "string"
+      },
+      "SfwVerdict": {
+        "description": "Tri-state result of an automated SFW screen.\n\n``unsure`` is distinct from ``unsafe``: borderline confidence is a concern\nto resolve, not a condemnation. Both ``unsafe`` and ``unsure`` keep an\nasset out of the unreviewed queue at ingestion (quarantined instead), and\nneither ever substitutes for human approval.",
+        "enum": [
+          "safe",
+          "unsafe",
+          "unsure"
+        ],
+        "title": "SfwVerdict",
+        "type": "string"
+      },
       "SnapshotResponse": {
         "additionalProperties": false,
         "description": "Body of ``POST /curation/snapshots``.",
@@ -1207,6 +1635,17 @@
           "path": {
             "title": "Path",
             "type": "string"
+          },
+          "previous_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Snapshot Id"
           },
           "snapshot_id": {
             "title": "Snapshot Id",
@@ -1227,6 +1666,7 @@
           "snapshot_id",
           "path",
           "label_count",
+          "previous_snapshot_id",
           "style_breakdown",
           "created_at"
         ],
@@ -1502,7 +1942,7 @@
     },
     "/api/v1/curation/assets/{asset_id}/{kind}": {
       "get": {
-        "description": "Serve unreviewed (and other) gallery files to the curation UI only.\n\nPublic ``/api/v1/assets/{id}/...`` routes stay gated on\n``enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1``.",
+        "description": "Serve unreviewed (and other) gallery files to the curation UI only.\n\nPublic ``/api/v1/assets/{id}/...`` routes stay gated on the derived\n``enabled = 1`` flag (the full v2 serving predicate).",
         "operationId": "preview_asset_api_v1_curation_assets__asset_id___kind__get",
         "parameters": [
           {
@@ -1678,6 +2118,7 @@
     },
     "/api/v1/curation/snapshots": {
       "post": {
+        "description": "Write an immutable **full** snapshot of the current curation state.\n\nFrozen semantics (v2): the snapshot captures the *latest* keep-or-reject\nlabel per asset \u2014 rejected assets included \u2014 at the moment of the export.\nIt is a state view, not an export cursor: every POST writes a new file and\nnever mutates a previous one, and the append-only ``curation_labels``\naudit history stays complete in the database. Lineage is recorded through\n``previous_snapshot_id`` and the ``snapshots`` registry table.",
         "operationId": "export_snapshot_api_v1_curation_snapshots_post",
         "responses": {
           "201": {

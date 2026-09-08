@@ -127,20 +127,26 @@ export default function CuratePage() {
   const submit = useCallback(
     (decision: 'keep' | 'reject') => {
       if (offline || !current || !form) return
-      // Quality is required by the API on keep. We block here instead of
+      // Quality and a known primary scope are required by the API on keep,
+      // and a blocked asset can only be rejected. We block here instead of
       // letting the server bounce with 422 to keep the UX snappy.
-      if (decision === 'keep' && form.quality === null) return
+      if (decision === 'keep' && (form.quality === null || form.primaryScope === 'unknown' || form.blockers.length > 0)) {
+        return
+      }
       const payload: LabelRequest = {
         asset_id: current.asset_id,
         expected_review_state: current.review_state,
         decision,
         primary_style: form.primaryStyle === current.primary_style ? null : form.primaryStyle,
-        scopes: sameScopes(form.scopes, current.scopes) ? null : form.scopes,
+        primary_scope: form.primaryScope === current.primary_scope ? null : form.primaryScope,
+        secondary_scopes: sameScopes(form.secondaryScopes, current.secondary_scopes ?? [])
+          ? null
+          : form.secondaryScopes,
         crop: crop ? { x: crop.x, y: crop.y, width: crop.width, height: crop.height } : null,
-        malformed_anatomy: form.malformedAnatomy,
-        poor_extraction: form.poorExtraction,
+        blockers: form.blockers,
         quality: form.quality,
         note: form.note.trim() || null,
+        sfw_safe: form.sfwSafe,
       }
       writeLabel.mutate(payload, {
         onSuccess: () => {
@@ -206,7 +212,7 @@ export default function CuratePage() {
   // Visible warning when the user presses K but no quality has been
   // selected yet. The keep shortcut stays disabled client-side, but
   // previously it silently no-oped, which made the keyboard feel broken.
-  const [missingQuality, setMissingQuality] = useState(false)
+  const [keepHint, setKeepHint] = useState<string | null>(null)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -226,15 +232,25 @@ export default function CuratePage() {
         case 'K':
           fire('K', () => {
             // Re-read form via the ref to avoid stale state. The submit
-            // callback bails out cleanly if quality is missing, but we
-            // also surface a visible warning so the keyboard doesn't
-            // *feel* broken.
+            // callback bails out cleanly when the keep preconditions are
+            // not met, but we also surface a visible warning naming the
+            // missing precondition so the keyboard doesn't *feel* broken.
             const liveForm = formRef.current
-            if (liveForm && liveForm.quality !== null) {
+            const hint =
+              liveForm === null
+                ? 'nothing selected'
+                : liveForm.quality === null
+                  ? 'press 1, 2 or 3 to pick a quality'
+                  : liveForm.primaryScope === 'unknown'
+                    ? 'set a known primary scope first'
+                    : liveForm.blockers.length > 0
+                      ? 'clear the blockers or press R to reject'
+                      : null
+            if (hint === null) {
               submitRef.current('keep')
-              setMissingQuality(false)
+              setKeepHint(null)
             } else {
-              setMissingQuality(true)
+              setKeepHint(hint)
             }
           })
           break
@@ -250,13 +266,14 @@ export default function CuratePage() {
             const quality = Number(event.key) as 1 | 2 | 3
             setForm((previous) => ({
               primaryStyle: displayed.primary_style,
-              scopes: [...displayed.scopes],
+              primaryScope: displayed.primary_scope,
+              secondaryScopes: [...(displayed.secondary_scopes ?? [])],
               quality,
               note: previous?.note ?? '',
-              malformedAnatomy: previous?.malformedAnatomy ?? false,
-              poorExtraction: previous?.poorExtraction ?? false,
+              blockers: previous?.blockers ?? [],
+              sfwSafe: previous?.sfwSafe ?? null,
             }))
-            setMissingQuality(false)
+            setKeepHint(null)
           })
           break
         }
@@ -286,10 +303,10 @@ export default function CuratePage() {
     return () => window.clearTimeout(id)
   }, [lastAt, lastKey])
   useEffect(() => {
-    if (!missingQuality) return
-    const id = window.setTimeout(() => setMissingQuality(false), 2000)
+    if (keepHint === null) return
+    const id = window.setTimeout(() => setKeepHint(null), 2000)
     return () => window.clearTimeout(id)
-  }, [missingQuality])
+  }, [keepHint])
 
   // ---- progress --------------------------------------------------------
   const progressQuery = useCurationProgress({ enabled: live && curationEnabled })
@@ -471,21 +488,18 @@ export default function CuratePage() {
           </dl>
         </aside>
 
-        {missingQuality ? (
+        {keepHint ? (
           <div
             className="kbd-toast"
             role="status"
             data-testid="kbd-toast-missing-quality"
           >
             <AlertCircle size={14} />
-            <span>
-              Press <kbd>1</kbd> <kbd>2</kbd> or <kbd>3</kbd> to pick a
-              quality before keeping.
-            </span>
+            <span>Can’t keep yet — {keepHint}.</span>
             <button
               type="button"
               className="kbd-toast__close"
-              onClick={() => setMissingQuality(false)}
+              onClick={() => setKeepHint(null)}
               aria-label="Dismiss"
             >
               <X size={12} />

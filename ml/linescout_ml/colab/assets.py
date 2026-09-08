@@ -31,11 +31,17 @@ from typing import Any
 from PIL import Image
 
 from linescout_ml.colab.config import PipelineConfig, SourceSpec
+from linescout_ml.colab.label import review_state_for
 from linescout_ml.colab.sources import AssetLabels, Candidate, Measurements
 from linescout_ml.manifest import (
+    AllowedUses,
     Manifest,
     ManifestRecord,
+    Permissions,
+    check_parent_integrity,
     check_split_integrity,
+    is_servable,
+    is_trainable,
     make_asset_id,
 )
 from linescout_ml.taxonomy import LineArtOrigin, PrimaryStyle, ReviewState, ScopeLabel
@@ -147,7 +153,11 @@ def build_record(
         str(candidate.asset_id),
         original_suffix=Path(str(candidate.original_path)).suffix or ".png",
     )
-    state = review_state or (ReviewState.UNREVIEWED if labels.sfw.safe else ReviewState.QUARANTINED)
+    if labels.sfw is not None:
+        state = review_state or review_state_for(labels.sfw)
+    else:
+        # A human decision without a screen (operator-asserted source).
+        state = review_state or ReviewState.UNREVIEWED
     extracted = source.origin is LineArtOrigin.EXTRACTED
 
     try:
@@ -156,8 +166,22 @@ def build_record(
             source_dataset=source.name,
             source_item_id=candidate.item_id,
             source_work_id=candidate.work_id,
+            parent_asset_id=None,
+            artist_id=candidate.artist_id,
+            leakage_group_id=candidate.leakage_group_id,
             source_url=source.source_url(candidate.item_id),
-            license_id=source.license_id,
+            permissions=Permissions(
+                license_id=source.license_id,
+                basis=source.permission_basis,
+                permission_url=source.permission_url,
+                attribution=source.attribution,
+                attribution_required=source.attribution_required,
+            ),
+            allowed_uses=AllowedUses(
+                display=source.allowed_display,
+                training=source.allowed_training,
+                trace=source.allowed_trace,
+            ),
             original_path=paths.original,
             line_art_path=paths.line_art,
             thumbnail_path=paths.thumbnail,
@@ -165,9 +189,12 @@ def build_record(
             extraction_model=candidate.extraction_model if extracted else None,
             extraction_version=candidate.extraction_version if extracted else None,
             primary_style=labels.primary_style,
-            scopes=list(labels.scopes),
+            primary_scope=labels.primary_scope,
+            secondary_scopes=list(labels.secondary_scopes),
             person_count=labels.person_count,
-            sfw=labels.sfw,
+            person_count_approximate=labels.person_count_approximate,
+            sfw_screening=labels.sfw,
+            sfw_human=labels.sfw_human,
             width=int(candidate.width or 0),
             height=int(candidate.height or 0),
             crop=candidate.crop,
@@ -176,9 +203,12 @@ def build_record(
             phash=measurements.phash,
             quality_score=measurements.quality_score,
             review=review_for(state),
-            split=candidate.split,
-            enabled=labels.sfw.safe and state is ReviewState.ACCEPTED,
+            learning_split=candidate.split,
+            gallery_member=True,
+            gold_member=False,
             pipeline_version=config.pipeline_version,
+            processing_revision=1,
+            label_version=config.label_version,
             source_checksum=str(candidate.source_checksum),
             line_art_checksum=str(candidate.line_art_checksum),
             thumbnail_checksum=str(candidate.thumbnail_checksum),
@@ -190,12 +220,12 @@ def build_record(
 
 def review_for(state: ReviewState) -> dict[str, Any]:
     """A fresh asset has no human quality judgement yet — curation supplies it."""
-    return {"state": state, "quality": None, "malformed_anatomy": False, "poor_extraction": False}
+    return {"state": state, "quality": None, "blockers": []}
 
 
 def build_manifest(records: Sequence[ManifestRecord], dataset_version: str) -> Manifest:
-    """Validate records as a whole, including the one-work-one-split rule."""
-    problems = check_split_integrity(records)
+    """Validate records as a whole, including the one-group-one-split rule."""
+    problems = check_split_integrity(records) + check_parent_integrity(records)
     if problems:
         msg = "split integrity violated: " + "; ".join(problems[:5])
         raise GalleryBuildError(msg)
@@ -266,17 +296,24 @@ def summarise(records: Iterable[ManifestRecord]) -> dict[str, Any]:
     splits: dict[str, int] = {}
     origins: dict[str, int] = {}
     states: dict[str, int] = {}
-    enabled = 0
+    servable = 0
+    trainable = 0
+    gold = 0
+    approximate_counts = 0
     total = 0
     quality: list[float] = []
 
     for record in records:
         total += 1
-        enabled += int(record.enabled)
+        servable += int(is_servable(record))
+        trainable += int(is_trainable(record))
+        gold += int(record.gold_member)
+        approximate_counts += int(record.person_count_approximate)
         styles[record.primary_style.value] += 1
-        for scope in record.scopes:
+        scopes[record.primary_scope.value] = scopes.get(record.primary_scope.value, 0) + 1
+        for scope in record.secondary_scopes:
             scopes[scope.value] = scopes.get(scope.value, 0) + 1
-        splits[record.split.value] = splits.get(record.split.value, 0) + 1
+        splits[record.learning_split.value] = splits.get(record.learning_split.value, 0) + 1
         origins[record.origin.value] = origins.get(record.origin.value, 0) + 1
         states[record.review.state.value] = states.get(record.review.state.value, 0) + 1
         quality.append(record.quality_score)
@@ -284,10 +321,13 @@ def summarise(records: Iterable[ManifestRecord]) -> dict[str, Any]:
     ordered_quality = sorted(quality)
     return {
         "total": total,
-        "enabled": enabled,
+        "servable": servable,
+        "trainable": trainable,
+        "gold": gold,
+        "approximate_person_counts": approximate_counts,
         "by_style": styles,
         "by_scope": scopes,
-        "by_split": splits,
+        "by_learning_split": splits,
         "by_origin": origins,
         "by_review_state": states,
         "quality_min": round(ordered_quality[0], 4) if ordered_quality else None,

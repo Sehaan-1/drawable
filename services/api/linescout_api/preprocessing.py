@@ -25,10 +25,12 @@ MAX_DECOMPRESSED_BYTES = 1024 * 1024  # 1 MiB
 
 
 class SnapshotError(ValueError):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, received_bytes: int | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        #: Payload size when the failure is size-related, for error ``details``.
+        self.received_bytes = received_bytes
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,9 @@ class InkStats:
 def decode_snapshot(data: bytes, max_bytes: int) -> Image.Image:
     """Decode a PNG snapshot into a white-background 8-bit grayscale image."""
     if len(data) > max_bytes:
-        raise SnapshotError("image_too_large", f"image exceeds {max_bytes} bytes")
+        raise SnapshotError(
+            "image_too_large", f"image exceeds {max_bytes} bytes", received_bytes=len(data)
+        )
     if not data:
         raise SnapshotError("image_missing", "image field is empty")
     try:

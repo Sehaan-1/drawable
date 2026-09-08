@@ -1,14 +1,28 @@
 {
-  "schema_version": 1,
-  "dataset_version": "2026.09.06-synthetic",
+  "schema_version": 2,
+  "dataset_version": "2026.09.08-synthetic",
   "records": [
     {
       "asset_id": "ls_synthetic_ac1f55b7390698a7",
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0000",
       "source_work_id": "synthetic-work-000",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_ac1f55b7390698a7.png",
       "line_art_path": "line_art/ls_synthetic_ac1f55b7390698a7.png",
       "thumbnail_path": "thumbnails/ls_synthetic_ac1f55b7390698a7.png",
@@ -16,14 +30,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "manga_anime",
-      "scopes": [
-        "eye"
-      ],
+      "primary_scope": "eye",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -35,13 +50,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": true,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "9cba1579d58608b757c9ec1eb3f6e48cccb45c3c04f8d614b61866926fbfd48a",
       "line_art_checksum": "9cba1579d58608b757c9ec1eb3f6e48cccb45c3c04f8d614b61866926fbfd48a",
       "thumbnail_checksum": "b507054f321f3d382795a5f8630c3a4a6e25b33201df53c19444ff6ffc1607f7"
@@ -51,8 +68,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0001",
       "source_work_id": "synthetic-work-000",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_4822d3e3a4cefde7.png",
       "line_art_path": "line_art/ls_synthetic_4822d3e3a4cefde7.png",
       "thumbnail_path": "thumbnails/ls_synthetic_4822d3e3a4cefde7.png",
@@ -60,14 +91,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "western_ink",
-      "scopes": [
-        "eyebrow"
-      ],
+      "primary_scope": "eyebrow",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -84,13 +116,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "cb53ffc57aa2ca832a7da5ffb4922c3ee7e3260175671b8394a1429e0f0c4cc5",
       "line_art_checksum": "cb53ffc57aa2ca832a7da5ffb4922c3ee7e3260175671b8394a1429e0f0c4cc5",
       "thumbnail_checksum": "903012e60c662395cdc5459f9d2266d37ac617247523dff35c9714a7d8e94d46"
@@ -100,8 +134,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0002",
       "source_work_id": "synthetic-work-000",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_34579de628de2f89.png",
       "line_art_path": "line_art/ls_synthetic_34579de628de2f89.png",
       "thumbnail_path": "thumbnails/ls_synthetic_34579de628de2f89.png",
@@ -109,14 +157,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "realistic_academic",
-      "scopes": [
-        "mouth"
-      ],
+      "primary_scope": "mouth",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -133,13 +182,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "74858ba4d9caaa94c9bbc38afc2bd0eeca42c51f13f8a8c3d69a56be31522b97",
       "line_art_checksum": "74858ba4d9caaa94c9bbc38afc2bd0eeca42c51f13f8a8c3d69a56be31522b97",
       "thumbnail_checksum": "9f65fb7aed4482b3eccd9961d36d94830a10f81f79385d978d74f3eba5782341"
@@ -149,8 +200,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0003",
       "source_work_id": "synthetic-work-001",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": false
+      },
       "original_path": "originals/ls_synthetic_f1becf0b9d67dcc3.png",
       "line_art_path": "line_art/ls_synthetic_f1becf0b9d67dcc3.png",
       "thumbnail_path": "thumbnails/ls_synthetic_f1becf0b9d67dcc3.png",
@@ -158,14 +223,15 @@
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
       "primary_style": "cartoon",
-      "scopes": [
-        "face_head"
-      ],
+      "primary_scope": "face_head",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -177,13 +243,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "8f09f0f97c1f1892ce5a58e13ea0da9c71828b5b874d9a076bcf74229f8ec44d",
       "line_art_checksum": "8f09f0f97c1f1892ce5a58e13ea0da9c71828b5b874d9a076bcf74229f8ec44d",
       "thumbnail_checksum": "67591e46d5dff70dace95c93cfd11d257a1e9e0d8bee9fe3e83981148a186564"
@@ -193,8 +261,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0004",
       "source_work_id": "synthetic-work-001",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_fa19d028df6f073c.png",
       "line_art_path": "line_art/ls_synthetic_fa19d028df6f073c.png",
       "thumbnail_path": "thumbnails/ls_synthetic_fa19d028df6f073c.png",
@@ -202,14 +284,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "gesture_sketch",
-      "scopes": [
-        "hair"
-      ],
+      "primary_scope": "hair",
+      "secondary_scopes": [],
       "person_count": null,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -226,13 +309,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "a987c7ed3588633ee1eec002534acd976d286e1748bbc3085ddd57bd45cc2bbd",
       "line_art_checksum": "a987c7ed3588633ee1eec002534acd976d286e1748bbc3085ddd57bd45cc2bbd",
       "thumbnail_checksum": "4a3c268a919a8d994f9a4726537fd2dfc51e918e6ed624225451a9f219747f24"
@@ -242,8 +327,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0005",
       "source_work_id": "synthetic-work-001",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_b874f621ba9d5bbb.png",
       "line_art_path": "line_art/ls_synthetic_b874f621ba9d5bbb.png",
       "thumbnail_path": "thumbnails/ls_synthetic_b874f621ba9d5bbb.png",
@@ -251,14 +350,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "manga_anime",
-      "scopes": [
-        "hand"
-      ],
+      "primary_scope": "hand",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -275,13 +375,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "c16ef5b5835e003320f65969c11db1b399e166837aa82167f451190cb091678c",
       "line_art_checksum": "c16ef5b5835e003320f65969c11db1b399e166837aa82167f451190cb091678c",
       "thumbnail_checksum": "addb9a847c20c5364feceb7219f6bbf4c2abee8daa01262521ec79171bee1ba9"
@@ -291,8 +393,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0006",
       "source_work_id": "synthetic-work-002",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_853928686c0aeb72.png",
       "line_art_path": "line_art/ls_synthetic_853928686c0aeb72.png",
       "thumbnail_path": "thumbnails/ls_synthetic_853928686c0aeb72.png",
@@ -300,14 +416,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "western_ink",
-      "scopes": [
-        "foot"
-      ],
+      "primary_scope": "foot",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -319,13 +436,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "validation",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "validation",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "9f6b38a5cfea41edbbb8322ead94cdb25fd274306d258855df7124bb105f3995",
       "line_art_checksum": "9f6b38a5cfea41edbbb8322ead94cdb25fd274306d258855df7124bb105f3995",
       "thumbnail_checksum": "8300ef69229b7ddc8475a22f5e11f461079c55954ba545e5418b88db6039a6a5"
@@ -335,8 +454,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0007",
       "source_work_id": "synthetic-work-002",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": false
+      },
       "original_path": "originals/ls_synthetic_01e95ab9a702dde5.png",
       "line_art_path": "line_art/ls_synthetic_01e95ab9a702dde5.png",
       "thumbnail_path": "thumbnails/ls_synthetic_01e95ab9a702dde5.png",
@@ -344,14 +477,15 @@
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
       "primary_style": "realistic_academic",
-      "scopes": [
-        "upper_body_clothing"
-      ],
+      "primary_scope": "upper_body_clothing",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -368,13 +502,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "validation",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "validation",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "c608237338e3c159a2f1fb59675c8d98636f3a21d2abe0fe62084352b0274d15",
       "line_art_checksum": "c608237338e3c159a2f1fb59675c8d98636f3a21d2abe0fe62084352b0274d15",
       "thumbnail_checksum": "0af05c75f4d8822a1cf0957001b3f06af0a7205ca26454b4c6769c1c594a3535"
@@ -384,8 +520,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0008",
       "source_work_id": "synthetic-work-002",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_ee05835d4e94f4f3.png",
       "line_art_path": "line_art/ls_synthetic_ee05835d4e94f4f3.png",
       "thumbnail_path": "thumbnails/ls_synthetic_ee05835d4e94f4f3.png",
@@ -393,14 +543,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "cartoon",
-      "scopes": [
-        "full_body"
-      ],
+      "primary_scope": "full_body",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -417,13 +568,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "validation",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "validation",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "cee411586c3c3381aa909cfa1069ac67b68b5e8d57ec314d13b461bcd29fdba9",
       "line_art_checksum": "cee411586c3c3381aa909cfa1069ac67b68b5e8d57ec314d13b461bcd29fdba9",
       "thumbnail_checksum": "c734007002255958f7ef04aba86a17a2d0a7089905eb888a11568817a429f9be"
@@ -433,8 +586,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0009",
       "source_work_id": "synthetic-work-003",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_f18e00cd05e073ce.png",
       "line_art_path": "line_art/ls_synthetic_f18e00cd05e073ce.png",
       "thumbnail_path": "thumbnails/ls_synthetic_f18e00cd05e073ce.png",
@@ -442,15 +609,17 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "gesture_sketch",
-      "scopes": [
-        "multi_character",
+      "primary_scope": "multi_character",
+      "secondary_scopes": [
         "full_body"
       ],
       "person_count": 2,
-      "sfw": {
+      "person_count_approximate": true,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -462,13 +631,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "test",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "test",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "392ed83405109709702532ceec099745f539fb8f41290b1b15370999ca318f28",
       "line_art_checksum": "392ed83405109709702532ceec099745f539fb8f41290b1b15370999ca318f28",
       "thumbnail_checksum": "c6c38fb5930d681accf61db99f11fefb59efd9ce7ca135d907aecfb29d8dce51"
@@ -478,8 +649,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0010",
       "source_work_id": "synthetic-work-003",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_cf64f2f64ae8b0a9.png",
       "line_art_path": "line_art/ls_synthetic_cf64f2f64ae8b0a9.png",
       "thumbnail_path": "thumbnails/ls_synthetic_cf64f2f64ae8b0a9.png",
@@ -487,14 +672,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "manga_anime",
-      "scopes": [
-        "eye"
-      ],
+      "primary_scope": "eye",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -511,13 +697,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "test",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "test",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "0e63adccc9d1cf0672e6b00edba902b18d7b6dc11cb2421cac6bfcad1580311d",
       "line_art_checksum": "0e63adccc9d1cf0672e6b00edba902b18d7b6dc11cb2421cac6bfcad1580311d",
       "thumbnail_checksum": "7df2670dc5aad536ac86caab4c5b6c40b828c45224688597c383280ce159dcba"
@@ -527,8 +715,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0011",
       "source_work_id": "synthetic-work-003",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": false
+      },
       "original_path": "originals/ls_synthetic_f5c5e08584c16dcb.png",
       "line_art_path": "line_art/ls_synthetic_f5c5e08584c16dcb.png",
       "thumbnail_path": "thumbnails/ls_synthetic_f5c5e08584c16dcb.png",
@@ -536,14 +738,15 @@
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
       "primary_style": "western_ink",
-      "scopes": [
-        "eyebrow"
-      ],
+      "primary_scope": "eyebrow",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -560,13 +763,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "test",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "test",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "d12c603d9f95250c04c15b3059eaf6611448452075886cea6d0c9b3f496877a0",
       "line_art_checksum": "d12c603d9f95250c04c15b3059eaf6611448452075886cea6d0c9b3f496877a0",
       "thumbnail_checksum": "ba230188455bedb0da967ef17dcdd59115669684d279a8eca00b10cb608029a7"
@@ -576,8 +781,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0012",
       "source_work_id": "synthetic-work-004",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_ddb865294cadd3a9.png",
       "line_art_path": "line_art/ls_synthetic_ddb865294cadd3a9.png",
       "thumbnail_path": "thumbnails/ls_synthetic_ddb865294cadd3a9.png",
@@ -585,14 +804,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "realistic_academic",
-      "scopes": [
-        "mouth"
-      ],
+      "primary_scope": "mouth",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -604,13 +824,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "gallery_only",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "none",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "74858ba4d9caaa94c9bbc38afc2bd0eeca42c51f13f8a8c3d69a56be31522b97",
       "line_art_checksum": "74858ba4d9caaa94c9bbc38afc2bd0eeca42c51f13f8a8c3d69a56be31522b97",
       "thumbnail_checksum": "9f65fb7aed4482b3eccd9961d36d94830a10f81f79385d978d74f3eba5782341"
@@ -620,8 +842,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0013",
       "source_work_id": "synthetic-work-004",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_7f5d06e63bc7cdea.png",
       "line_art_path": "line_art/ls_synthetic_7f5d06e63bc7cdea.png",
       "thumbnail_path": "thumbnails/ls_synthetic_7f5d06e63bc7cdea.png",
@@ -629,14 +865,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "cartoon",
-      "scopes": [
-        "face_head"
-      ],
+      "primary_scope": "face_head",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -653,13 +890,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "gallery_only",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "none",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "8f09f0f97c1f1892ce5a58e13ea0da9c71828b5b874d9a076bcf74229f8ec44d",
       "line_art_checksum": "8f09f0f97c1f1892ce5a58e13ea0da9c71828b5b874d9a076bcf74229f8ec44d",
       "thumbnail_checksum": "67591e46d5dff70dace95c93cfd11d257a1e9e0d8bee9fe3e83981148a186564"
@@ -669,8 +908,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0014",
       "source_work_id": "synthetic-work-004",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_7dca6641543f4dae.png",
       "line_art_path": "line_art/ls_synthetic_7dca6641543f4dae.png",
       "thumbnail_path": "thumbnails/ls_synthetic_7dca6641543f4dae.png",
@@ -678,14 +931,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "gesture_sketch",
-      "scopes": [
-        "hair"
-      ],
+      "primary_scope": "hair",
+      "secondary_scopes": [],
       "person_count": null,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -702,13 +956,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "gallery_only",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "none",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "c608237338e3c159a2f1fb59675c8d98636f3a21d2abe0fe62084352b0274d15",
       "line_art_checksum": "c608237338e3c159a2f1fb59675c8d98636f3a21d2abe0fe62084352b0274d15",
       "thumbnail_checksum": "0af05c75f4d8822a1cf0957001b3f06af0a7205ca26454b4c6769c1c594a3535"
@@ -718,8 +974,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0015",
       "source_work_id": "synthetic-work-005",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": false
+      },
       "original_path": "originals/ls_synthetic_65e9563845bf561d.png",
       "line_art_path": "line_art/ls_synthetic_65e9563845bf561d.png",
       "thumbnail_path": "thumbnails/ls_synthetic_65e9563845bf561d.png",
@@ -727,14 +997,15 @@
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
       "primary_style": "manga_anime",
-      "scopes": [
-        "hand"
-      ],
+      "primary_scope": "hand",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -746,13 +1017,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "6b5eb81a3888f3d53929e7556f1d08fb8c3ceba55dfc5e7fb301b2e8092e6d58",
       "line_art_checksum": "6b5eb81a3888f3d53929e7556f1d08fb8c3ceba55dfc5e7fb301b2e8092e6d58",
       "thumbnail_checksum": "7c88a81221f664ee764b8a1cbe6ccb714925603d55a1a0fb5833eb5d5a111074"
@@ -762,8 +1035,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0016",
       "source_work_id": "synthetic-work-005",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_0b6f8d05af21f613.png",
       "line_art_path": "line_art/ls_synthetic_0b6f8d05af21f613.png",
       "thumbnail_path": "thumbnails/ls_synthetic_0b6f8d05af21f613.png",
@@ -771,14 +1058,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "western_ink",
-      "scopes": [
-        "foot"
-      ],
+      "primary_scope": "foot",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -795,13 +1083,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "f9098837bd9f8cb638b0bd8fbd1dd5129ffbd2983cac0ea40eec7a5cfac24026",
       "line_art_checksum": "f9098837bd9f8cb638b0bd8fbd1dd5129ffbd2983cac0ea40eec7a5cfac24026",
       "thumbnail_checksum": "a82f1e13c904e42bb3744caff1f18613d7506ae39f9aa86f894927ac08f7079b"
@@ -811,8 +1101,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0017",
       "source_work_id": "synthetic-work-005",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_51149df97901651e.png",
       "line_art_path": "line_art/ls_synthetic_51149df97901651e.png",
       "thumbnail_path": "thumbnails/ls_synthetic_51149df97901651e.png",
@@ -820,14 +1124,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "realistic_academic",
-      "scopes": [
-        "upper_body_clothing"
-      ],
+      "primary_scope": "upper_body_clothing",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -844,13 +1149,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "f7231de6fcd9f3f380427c9d304e74fc103716f479f501e3ea49836bb2999ea0",
       "line_art_checksum": "f7231de6fcd9f3f380427c9d304e74fc103716f479f501e3ea49836bb2999ea0",
       "thumbnail_checksum": "aa8bf107d82df84054507a949a0c33ea9d5e7ba2a743dc91a6b8b3ac717a91e1"
@@ -860,8 +1167,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0018",
       "source_work_id": "synthetic-work-006",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_e4c3256c86500053.png",
       "line_art_path": "line_art/ls_synthetic_e4c3256c86500053.png",
       "thumbnail_path": "thumbnails/ls_synthetic_e4c3256c86500053.png",
@@ -869,14 +1190,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "cartoon",
-      "scopes": [
-        "full_body"
-      ],
+      "primary_scope": "full_body",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -888,13 +1210,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "21f1aca1eb4a86015c7eb3b041c81d32dcd739b0d605f8316e6a1a8547ba2b9b",
       "line_art_checksum": "21f1aca1eb4a86015c7eb3b041c81d32dcd739b0d605f8316e6a1a8547ba2b9b",
       "thumbnail_checksum": "77d9813943092f6a5002565f76f75ab120bf22664a9621be53f543acc49b5453"
@@ -904,8 +1228,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0019",
       "source_work_id": "synthetic-work-006",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": false
+      },
       "original_path": "originals/ls_synthetic_d00202d823f85d87.png",
       "line_art_path": "line_art/ls_synthetic_d00202d823f85d87.png",
       "thumbnail_path": "thumbnails/ls_synthetic_d00202d823f85d87.png",
@@ -913,15 +1251,17 @@
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
       "primary_style": "gesture_sketch",
-      "scopes": [
-        "multi_character",
+      "primary_scope": "multi_character",
+      "secondary_scopes": [
         "full_body"
       ],
       "person_count": 2,
-      "sfw": {
+      "person_count_approximate": true,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -938,13 +1278,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "a218c248d801efb8d92c5fe800195be6ab63fb0309ae023e30052c5cfe5deea4",
       "line_art_checksum": "a218c248d801efb8d92c5fe800195be6ab63fb0309ae023e30052c5cfe5deea4",
       "thumbnail_checksum": "648fe2c4c1457eeeec80a3477f5e0af64f59c1df5235875cc7fc10a18be6a2bf"
@@ -954,8 +1296,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0020",
       "source_work_id": "synthetic-work-006",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_ba7658caa2cd9ff0.png",
       "line_art_path": "line_art/ls_synthetic_ba7658caa2cd9ff0.png",
       "thumbnail_path": "thumbnails/ls_synthetic_ba7658caa2cd9ff0.png",
@@ -963,14 +1319,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "manga_anime",
-      "scopes": [
-        "eye"
-      ],
+      "primary_scope": "eye",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -987,13 +1344,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "train",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "train",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "9cba1579d58608b757c9ec1eb3f6e48cccb45c3c04f8d614b61866926fbfd48a",
       "line_art_checksum": "9cba1579d58608b757c9ec1eb3f6e48cccb45c3c04f8d614b61866926fbfd48a",
       "thumbnail_checksum": "b507054f321f3d382795a5f8630c3a4a6e25b33201df53c19444ff6ffc1607f7"
@@ -1003,8 +1362,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0021",
       "source_work_id": "synthetic-work-007",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_6640d01ff5ce9e54.png",
       "line_art_path": "line_art/ls_synthetic_6640d01ff5ce9e54.png",
       "thumbnail_path": "thumbnails/ls_synthetic_6640d01ff5ce9e54.png",
@@ -1012,14 +1385,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "western_ink",
-      "scopes": [
-        "eyebrow"
-      ],
+      "primary_scope": "eyebrow",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -1031,13 +1405,15 @@
       "review": {
         "state": "accepted",
         "quality": 2,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "validation",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "validation",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "f89e964949f2a7b554c83ad6df2564210a1c4c8176683408413f464a0aa12d4f",
       "line_art_checksum": "f89e964949f2a7b554c83ad6df2564210a1c4c8176683408413f464a0aa12d4f",
       "thumbnail_checksum": "3e0449e4f303ebda5e36f1fa1be07211446cafeb13cb25c36c807f244c9fd609"
@@ -1047,8 +1423,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0022",
       "source_work_id": "synthetic-work-007",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": true
+      },
       "original_path": "originals/ls_synthetic_eab7ab098493ca7f.png",
       "line_art_path": "line_art/ls_synthetic_eab7ab098493ca7f.png",
       "thumbnail_path": "thumbnails/ls_synthetic_eab7ab098493ca7f.png",
@@ -1056,14 +1446,15 @@
       "extraction_model": null,
       "extraction_version": null,
       "primary_style": "realistic_academic",
-      "scopes": [
-        "mouth"
-      ],
+      "primary_scope": "mouth",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -1080,13 +1471,15 @@
       "review": {
         "state": "accepted",
         "quality": 3,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [],
         "note": null
       },
-      "split": "validation",
-      "enabled": true,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "validation",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "73617601558898e1197d3ec4a66a208688a63fcba4b42347682326cc95c8c058",
       "line_art_checksum": "73617601558898e1197d3ec4a66a208688a63fcba4b42347682326cc95c8c058",
       "thumbnail_checksum": "b80a75abe292b217d529b734907a141ef14898098a975d42f6e9cf91b0c3de94"
@@ -1096,8 +1489,22 @@
       "source_dataset": "synthetic",
       "source_item_id": "synthetic-item-0023",
       "source_work_id": "synthetic-work-007",
+      "parent_asset_id": null,
+      "artist_id": null,
+      "leakage_group_id": null,
       "source_url": null,
-      "license_id": "synthetic-fixture",
+      "permissions": {
+        "license_id": "synthetic-fixture",
+        "basis": "first_party",
+        "permission_url": null,
+        "attribution": "LineScout synthetic fixture",
+        "attribution_required": false
+      },
+      "allowed_uses": {
+        "display": true,
+        "training": true,
+        "trace": false
+      },
       "original_path": "originals/ls_synthetic_dd4dbf8306f50951.png",
       "line_art_path": "line_art/ls_synthetic_dd4dbf8306f50951.png",
       "thumbnail_path": "thumbnails/ls_synthetic_dd4dbf8306f50951.png",
@@ -1105,14 +1512,15 @@
       "extraction_model": "synthetic-identity",
       "extraction_version": "1",
       "primary_style": "cartoon",
-      "scopes": [
-        "face_head"
-      ],
+      "primary_scope": "face_head",
+      "secondary_scopes": [],
       "person_count": 1,
-      "sfw": {
+      "person_count_approximate": false,
+      "sfw_screening": null,
+      "sfw_human": {
         "safe": true,
-        "confidence": 0.99,
-        "method": "manual"
+        "reviewer": "synthetic",
+        "decided_at": null
       },
       "width": 256,
       "height": 256,
@@ -1129,13 +1537,17 @@
       "review": {
         "state": "rejected",
         "quality": 1,
-        "malformed_anatomy": false,
-        "poor_extraction": false,
+        "blockers": [
+          "anatomy"
+        ],
         "note": "synthetic reject"
       },
-      "split": "validation",
-      "enabled": false,
-      "pipeline_version": "synthetic-1",
+      "learning_split": "validation",
+      "gallery_member": true,
+      "gold_member": false,
+      "pipeline_version": "synthetic-2",
+      "processing_revision": 1,
+      "label_version": "synthetic-1",
       "source_checksum": "c098212b039fe94c0ca7edc19ed24f63bb3930db8af50459d61e2f369f6bf6f4",
       "line_art_checksum": "c098212b039fe94c0ca7edc19ed24f63bb3930db8af50459d61e2f369f6bf6f4",
       "thumbnail_checksum": "c1a12b2985a4207be9f6c75fc1213e6786d1eb2be2692c88aeabbb1318fe2f45"

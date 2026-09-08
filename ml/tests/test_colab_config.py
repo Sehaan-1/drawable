@@ -87,14 +87,14 @@ def test_source_name_is_a_slug() -> None:
 
 def test_split_fractions_must_sum_to_one() -> None:
     with pytest.raises(ValidationError, match="sum to 1.0"):
-        SplitFractions(train=0.5, validation=0.1, test=0.1, gallery_only=0.1)
+        SplitFractions(train=0.5, validation=0.1, test=0.1, unassigned=0.1)
 
 
 def test_default_split_fractions_are_valid() -> None:
     fractions = SplitFractions()
-    total = fractions.train + fractions.validation + fractions.test + fractions.gallery_only
+    total = fractions.train + fractions.validation + fractions.test + fractions.unassigned
     assert total == pytest.approx(1.0)
-    assert (fractions.train, fractions.validation, fractions.test, fractions.gallery_only) == (
+    assert (fractions.train, fractions.validation, fractions.test, fractions.unassigned) == (
         0.70,
         0.15,
         0.15,

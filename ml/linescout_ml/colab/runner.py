@@ -89,8 +89,9 @@ from linescout_ml.colab.runtime import (
     torch_available,
 )
 from linescout_ml.colab.sources import Candidate, CandidateStore, Measurements, discover
-from linescout_ml.manifest import Manifest, ManifestRecord, SfwDecision
-from linescout_ml.taxonomy import LineArtOrigin
+from linescout_ml.embeddings import ArtifactStamp
+from linescout_ml.manifest import Manifest, ManifestRecord, SfwHumanDecision, SfwScreening
+from linescout_ml.taxonomy import LineArtOrigin, SfwScreeningMethod, SfwVerdict
 
 #: ``hook(stage_name, completed, total)`` — called after every item.
 ProgressHook = Callable[[str, int, int], None]
@@ -441,13 +442,22 @@ class PipelineRunner:
         candidate: Candidate,
         source: SourceSpec,
         classifier: OpenNsfw2Classifier | None,
-    ) -> SfwDecision:
+    ) -> tuple[SfwScreening | None, SfwHumanDecision | None]:
+        """The automated screen and (only for ``manual`` sources) a human decision.
+
+        ``sfw_method: "manual"`` means the operator asserted the whole source
+        is SFW by hand. That is a real human decision, so it is recorded as
+        one — with the reviewer named after the pipeline rather than silently
+        laundered into a screening result.
+        """
         method = source.sfw_method
         if method == "manual":
-            # The operator asserted this source by hand; recorded as such.
-            return SfwDecision(safe=True, confidence=1.0, method="manual")
+            human = SfwHumanDecision(
+                safe=True, reviewer=f"ingestion:{self.config.pipeline_version}"
+            )
+            return None, human
         if method == "source_rating" or classifier is None:
-            return source_rating_sfw(1.0)
+            return source_rating_sfw(1.0), None
 
         relative = (
             candidate.original_path or asset_paths(self._require_asset_id(candidate)).original
@@ -457,14 +467,19 @@ class PipelineRunner:
             rgb = load_rgb(original)
         except ImageReadError:
             # Nothing to screen: fail closed rather than claim the asset is safe.
-            return SfwDecision(safe=False, confidence=0.0, method="opennsfw2")
+            return (
+                SfwScreening(
+                    verdict=SfwVerdict.UNSAFE, confidence=0.0, method=SfwScreeningMethod.OPENNSFW2
+                ),
+                None,
+            )
         try:
             verdict = classifier.decision(rgb, min_confidence=self.config.sfw_min_confidence)
         finally:
             rgb.close()
         if method == "source_rating+opennsfw2":
-            return combine_sfw(source_rating_sfw(1.0), verdict, method=method)
-        return verdict
+            return combine_sfw(source_rating_sfw(1.0), verdict, method=method), None
+        return verdict, None
 
     def run_label(self) -> StageResult:
         """Attach provisional style/scope labels and the SFW verdict."""
@@ -503,14 +518,15 @@ class PipelineRunner:
                     if candidate.skip_reason is not None:
                         continue  # labelling already gave up on this one
                     source = self.source_for(candidate)
-                    sfw = self._sfw_for(candidate, source, classifier)
+                    screening, human = self._sfw_for(candidate, source, classifier)
                     if candidate_scores is None:
-                        candidate.labels = source_default_labels(source, sfw)
+                        candidate.labels = source_default_labels(source, screening, human)
                     else:
                         candidate.labels = labels_from_scores(
                             candidate_scores,
                             source,
-                            sfw,
+                            screening,
+                            human=human,
                             scope_top_k=self.config.scope_top_k,
                             scope_min_score=self.config.scope_min_score,
                         )
@@ -565,7 +581,17 @@ class PipelineRunner:
                 msg = f"unknown embedder {key!r}; available: {sorted(MODEL_CARDS)}"
                 raise PipelineError(msg)
             store = EmbeddingStore.for_key(root, key)
-            done = set() if self.config.overwrite else store.existing_ids()
+            # Artifact stamps: an entry only counts as done when it was
+            # computed from the asset's *current* line art.
+            artifacts = {
+                str(candidate.asset_id): ArtifactStamp(
+                    processing_revision=1,
+                    line_art_checksum=str(candidate.line_art_checksum),
+                )
+                for candidate in self.store.active
+                if candidate.asset_id and candidate.line_art_checksum
+            }
+            done = set() if self.config.overwrite else store.existing_ids(artifacts)
             pending = [
                 candidate
                 for candidate in self.store.active
@@ -581,6 +607,7 @@ class PipelineRunner:
             try:
                 for chunk in _chunks(pending, shard_size):
                     ids: list[str] = []
+                    stamps: list[ArtifactStamp] = []
                     images: list[Image.Image] = []
                     for candidate in chunk:
                         try:
@@ -588,13 +615,19 @@ class PipelineRunner:
                                 load_gray(self.gallery_path(str(candidate.line_art_path)))
                             )
                             ids.append(str(candidate.asset_id))
+                            stamps.append(
+                                ArtifactStamp(
+                                    processing_revision=1,
+                                    line_art_checksum=str(candidate.line_art_checksum),
+                                )
+                            )
                         except ImageReadError as error:
                             candidate.skip_reason = f"embedding_failed: {error}"
                             stage.failed += 1
                     if not ids:
                         continue
                     features = encoder.encode_images(images)
-                    store.append(ids, features)
+                    store.append(ids, features, stamps)
                     embedded += len(ids)
                     stage.processed += len(ids)
                     for image in images:
@@ -700,7 +733,9 @@ class PipelineRunner:
         """The run report payload, also written to ``_pipeline/run_report.json``."""
         manifest = read_manifest(self.config.manifest_path)
         summary: dict[str, Any] = (
-            dict(summarise(manifest.records)) if manifest else {"total": 0, "enabled": 0}
+            dict(summarise(manifest.records))
+            if manifest
+            else {"total": 0, "servable": 0, "trainable": 0}
         )
         summary["candidates"] = candidate_summary(self.store)
 

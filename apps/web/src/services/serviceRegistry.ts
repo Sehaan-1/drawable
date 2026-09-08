@@ -9,6 +9,7 @@
 
 import { create } from 'zustand'
 import type { HealthResult } from '../lib/types'
+import { useSearchStore, type GalleryKind } from '../state/searchStore'
 import { fixtureServices, type FrontendServices } from './frontendServices'
 import { liveServices } from './liveServices'
 
@@ -34,32 +35,42 @@ function sessionId(): string {
 
 const forced = import.meta.env.VITE_LINESCOUT_SERVICES as string | undefined
 
-export const useServiceStore = create<ServiceState>((set) => ({
-  mode: forced === 'fixture' ? 'fixture' : forced === 'live' ? 'live' : 'probing',
-  health: null,
-  services: forced === 'live' ? liveServices : fixtureServices,
-  sessionId: sessionId(),
-  probe: async () => {
-    if (forced === 'fixture') {
-      set({ mode: 'fixture', services: fixtureServices, health: await fixtureServices.health.get() })
-      return
+export const useServiceStore = create<ServiceState>((set) => {
+  const activate = (mode: ServiceMode, services: FrontendServices, health: HealthResult | null) => {
+    set({ mode, services, health })
+    // Pins are namespaced per gallery kind: switching between the fixture
+    // and live galleries swaps the pin set so the two never mix.
+    if (mode === 'live' || mode === 'fixture') {
+      useSearchStore.getState().setGallery(mode as GalleryKind)
     }
-    const controller = new AbortController()
-    const timer = window.setTimeout(() => controller.abort(), 2500)
-    try {
-      const health = await liveServices.health.get(controller.signal)
-      set({ mode: 'live', services: liveServices, health })
-    } catch {
-      if (forced === 'live') {
-        set({ mode: 'live', services: liveServices, health: { mode: 'cpu', ready: false, message: 'API unreachable', live: true } })
-      } else {
-        set({ mode: 'fixture', services: fixtureServices, health: await fixtureServices.health.get() })
+  }
+  return {
+    mode: forced === 'fixture' ? 'fixture' : forced === 'live' ? 'live' : 'probing',
+    health: null,
+    services: forced === 'live' ? liveServices : fixtureServices,
+    sessionId: sessionId(),
+    probe: async () => {
+      if (forced === 'fixture') {
+        activate('fixture', fixtureServices, await fixtureServices.health.get())
+        return
       }
-    } finally {
-      window.clearTimeout(timer)
-    }
-  },
-}))
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), 2500)
+      try {
+        const health = await liveServices.health.get(controller.signal)
+        activate('live', liveServices, health)
+      } catch {
+        if (forced === 'live') {
+          activate('live', liveServices, { mode: 'cpu', ready: false, message: 'API unreachable', live: true })
+        } else {
+          activate('fixture', fixtureServices, await fixtureServices.health.get())
+        }
+      } finally {
+        window.clearTimeout(timer)
+      }
+    },
+  }
+})
 
 export function currentServices(): FrontendServices {
   return useServiceStore.getState().services

@@ -28,10 +28,12 @@ def get_asset_file(state: State, asset_id: str, kind: str) -> FileResponse:
         raise not_found("asset_not_found", "asset not found")
     path = (state.gallery.data_root / relative).resolve()
     if state.gallery.data_root.resolve() not in path.parents or not path.is_file():
-        # Corrupt/missing gallery asset: disable it so it drops out of future responses.
-        state.connection.execute("UPDATE assets SET enabled = 0 WHERE asset_id = ?", (asset_id,))
+        # Corrupt/missing gallery asset: drop it from this session's serving
+        # list only. A missing file is runtime availability, never a change to
+        # the asset's recorded permission or review state (v2 freeze: the
+        # derived ``enabled`` flag mirrors the manifest, nothing else).
         state.assets = [asset for asset in state.assets if asset.asset_id != asset_id]
-        raise not_found("asset_unavailable", "asset file is missing and has been disabled")
+        raise not_found("asset_unavailable", "asset file is missing this session")
     return FileResponse(
         path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400, immutable"}
     )

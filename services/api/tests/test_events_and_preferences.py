@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from sqlite3 import Connection
 
+import pytest
 from fastapi.testclient import TestClient
 from linescout_ml.taxonomy import DEFAULT_STYLE_ORDER, PrimaryStyle
 
 from linescout_api.config import Settings
 from linescout_api.db import connect, migrate
 from linescout_api.fixture_ranker import order_style_rows
+from linescout_api.main import create_app
 from linescout_api.preferences import compute_affinities
+from tests.conftest import make_settings
 
 DEFAULT = [style.value for style in DEFAULT_STYLE_ORDER]
 
@@ -136,7 +140,16 @@ def test_event_style_comes_from_gallery_not_client(
         connection.close()
 
 
-def test_learned_affinity_reorders_rows(client: TestClient, session_id: str) -> None:
+@pytest.fixture
+def live_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Affinity learning is a live-gallery concern; fixture events are namespaced
+    away from it, so these tests run with fixture mode off."""
+    with TestClient(create_app(make_settings(tmp_path, fixture_mode=False))) as test_client:
+        yield test_client
+
+
+def test_learned_affinity_reorders_rows(live_client: TestClient, session_id: str) -> None:
+    client = live_client
     assert _event(client, session_id, "trace", "cartoon") == 201
     assert _event(client, session_id, "pin", "cartoon") == 201
     assert _event(client, session_id, "open", "gesture_sketch") == 201
@@ -176,7 +189,8 @@ def test_events_while_learning_disabled_are_not_stored(
     assert client.get("/api/v1/preferences").json()["row_order"] == DEFAULT
 
 
-def test_explicit_style_goes_first_then_learned(client: TestClient, session_id: str) -> None:
+def test_explicit_style_goes_first_then_learned(live_client: TestClient, session_id: str) -> None:
+    client = live_client
     _event(client, session_id, "trace", "cartoon")
     body = client.put("/api/v1/preferences", json={"selected_style": "realistic_academic"}).json()
     assert body["selected_style"] == "realistic_academic"
@@ -197,7 +211,8 @@ def test_disable_learning_keeps_explicit_style_only(client: TestClient, session_
     ]
 
 
-def test_reset_and_clear(client: TestClient, session_id: str) -> None:
+def test_reset_and_clear(live_client: TestClient, session_id: str) -> None:
+    client = live_client
     _event(client, session_id, "trace", "cartoon")
     client.put("/api/v1/preferences", json={"selected_style": "cartoon"})
     body = client.put(
