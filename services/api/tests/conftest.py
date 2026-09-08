@@ -29,6 +29,9 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "device": DevicePolicy.AUTO,
         "fixture_mode": True,
         "curation_mode": False,
+        # Test-only hostname (TestClient target). Production settings leave
+        # this empty; the isolation is asserted in test_origin_policy.py.
+        "additional_allowed_hosts": ["testserver"],
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]
