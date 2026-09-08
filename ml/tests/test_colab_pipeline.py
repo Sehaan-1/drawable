@@ -846,11 +846,24 @@ def test_the_notebooks_reporting_cells_execute_against_a_real_run(
     capsys.readouterr()
 
     namespace: dict[str, Any] = {"RUNNER": runner, "CONFIG": config, "close_bars": lambda: None}
-    for title in ("8 · De-duplicate", "9 · Zero-shot labels", "11 · Manifest slice"):
+    for title in (
+        "6 · Extract",
+        "7 · Measure",
+        "8 · De-duplicate",
+        "9 · Zero-shot labels",
+        "11 · Manifest slice",
+    ):
         cell = strip_magics(cell_titled(title))
         exec(compile(cell, f"<notebook cell: {title}>", "exec"), namespace)  # noqa: S102
 
     printed = capsys.readouterr().out
+    # Cells 6 and 7 re-run against a finished store, so they report skips rather than
+    # work — and cell 7 reads its measurement fields through `getattr(item, field)`, the
+    # one place in the notebook a rename hides from every static check. It still printed
+    # them, which is the only way anyone would notice if `LineArtMeasurements` changed.
+    assert "ink_coverage" in printed
+    assert "seconds   :" in printed
+    assert printed.count("processed : ") >= 3
     # Cell 9: the label block ran, so the screen is reported through v2's tri-state verdict
     # and the human approval the gate still waits for is counted. A cell reading
     # `item.sfw.safe` or `item.scopes` dies before any of this is printed.
