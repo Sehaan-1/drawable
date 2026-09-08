@@ -242,9 +242,18 @@ describe('CuratePage', () => {
     expect(labelPayload).toMatchObject({
       asset_id: 'ls_shortcut',
       expected_review_state: 'unreviewed',
+      expected_label_version: 0,
       decision: 'keep',
       quality: 3,
+      // The session scopes the server-side skip cursor.
+      session_id: expect.any(String),
     })
+    // Crops are no longer part of the label — they are immutable derivatives.
+    expect(labelPayload).not.toHaveProperty('crop')
+    // The session id is also sent when fetching the next candidate.
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    const nextUrl = calls.map((call) => String(call[0])).find((url) => url.includes('/curation/next'))
+    expect(nextUrl).toContain('session_id=')
   })
 
   it('submits a label on the R keyboard shortcut', async () => {
@@ -402,6 +411,11 @@ describe('CuratePage', () => {
         nextCount += 1
         return Promise.resolve(mockJsonResponse(candidate(id)))
       }
+      if (url.includes('/curation/candidates/')) {
+        // Previous re-fetches the actual previous candidate by id.
+        const id = url.split('/curation/candidates/')[1]?.split('?')[0] ?? ''
+        return Promise.resolve(mockJsonResponse(candidate(id)))
+      }
       if (url.includes('/curation/progress')) {
         return Promise.resolve(
           mockJsonResponse({
@@ -454,5 +468,301 @@ describe('CuratePage', () => {
     expect(screen.queryByTestId('kbd-toast-missing-quality')).toBeNull()
     fireEvent.keyDown(window, { key: 'k' })
     expect(await screen.findByTestId('kbd-toast-missing-quality')).toBeInTheDocument()
+  })
+  it('skips the candidate without labeling it and advances the queue', async () => {
+    let nextCount = 0
+    let skipPayload: unknown = null
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/curation/queue/skip')) {
+        skipPayload = init ? JSON.parse(init.body as string) : null
+        return Promise.resolve(
+          mockJsonResponse({ session_id: 'sess', cursor_asset_id: 'ls_skip', excluded_asset_id: 'ls_skip', remaining: 1999 }),
+        )
+      }
+      if (url.includes('/curation/labels')) {
+        return Promise.reject(new Error('labels must not be called on skip'))
+      }
+      if (url.includes('/curation/next')) {
+        const id = nextCount === 0 ? 'ls_skip' : 'ls_after'
+        nextCount += 1
+        return Promise.resolve(mockJsonResponse(makeCandidate({ asset_id: id })))
+      }
+      if (url.includes('/curation/progress')) {
+        return Promise.resolve(
+          mockJsonResponse({ reviewed: 0, accepted: 0, rejected: 0, quarantined: 0, remaining: 2000, target: 2000, by_style: {}, by_scope: {} }),
+        )
+      }
+      return Promise.reject(new Error('unexpected URL ' + url))
+    }) as unknown as typeof fetch
+    const CuratePage = (await import('./CuratePage')).default
+    render(<CuratePage />, { wrapper: makeWrapper() })
+    await waitFor(() => expect(screen.getByTestId('inspector-asset-id').textContent).toBe('ls_skip'))
+    fireEvent.keyDown(window, { key: 's' })
+    await waitFor(() => expect(skipPayload).toBeTruthy())
+    expect(skipPayload).toMatchObject({ asset_id: 'ls_skip', session_id: expect.any(String) })
+    // The queue advances to the next candidate after a skip.
+    await waitFor(() => expect(screen.getByTestId('inspector-asset-id').textContent).toBe('ls_after'))
+  })
+
+  it('shows a conflict banner when the label version is stale', async () => {
+    let reloadCount = 0
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/curation/labels')) {
+        return Promise.resolve(
+          mockJsonResponse(
+            {
+              error: {
+                code: 'label_version_conflict',
+                message: 'label was updated by another reviewer',
+                details: {
+                  current_label_version: 4,
+                  current_review_state: 'accepted',
+                  latest_decision: 'keep',
+                  latest_reviewer: 'other-curator',
+                },
+              },
+            },
+            409,
+          ),
+        )
+      }
+      if (url.includes('/curation/candidates/')) {
+        reloadCount += 1
+        return Promise.resolve(
+          makeCandidate({ asset_id: 'ls_conflict', review_state: 'accepted', label_version: 4 }),
+        )
+      }
+      if (url.includes('/curation/next')) {
+        return Promise.resolve(mockJsonResponse(makeCandidate({ asset_id: 'ls_conflict' })))
+      }
+      if (url.includes('/curation/progress')) {
+        return Promise.resolve(
+          mockJsonResponse({ reviewed: 0, accepted: 0, rejected: 0, quarantined: 0, remaining: 2000, target: 2000, by_style: {}, by_scope: {} }),
+        )
+      }
+      return Promise.reject(new Error('unexpected URL ' + url))
+    }) as unknown as typeof fetch
+    const CuratePage = (await import('./CuratePage')).default
+    render(<CuratePage />, { wrapper: makeWrapper() })
+    await screen.findByTestId('inspector-asset-id')
+    fireEvent.keyDown(window, { key: '3' })
+    fireEvent.keyDown(window, { key: 'k' })
+    const banner = await screen.findByTestId('conflict-banner')
+    expect(banner.textContent).toContain('4')
+    expect(banner.textContent).toContain('accepted')
+    // Reloading re-fetches the live candidate by id.
+    fireEvent.click(screen.getByTestId('conflict-reload'))
+    await waitFor(() => expect(reloadCount).toBeGreaterThan(0))
+  })
+
+  it('reveals and adjudicates quarantined records behind the toggle', async () => {
+    let adjudicationPayload: unknown = null
+    let revealed = false
+    const heldEntry = {
+      asset_id: 'ls_held',
+      review_state: 'quarantined',
+      label_version: 2,
+      revealed: false,
+      thumbnail_url: null,
+      line_art_url: null,
+      reveal_expires_at: null,
+      parent_asset_id: null,
+      primary_style: 'manga_anime',
+      primary_scope: 'eye',
+      source_work_id: 'src_1',
+      quality_score: 0.5,
+      width: 512,
+      height: 512,
+      blockers: [],
+      derivative_processing_state: null,
+      sfw_screening: { method: 'opennsfw2', verdict: 'unsure', confidence: 0.62 },
+      sfw_human: null,
+    }
+    const revealedEntry = {
+      ...heldEntry,
+      revealed: true,
+      thumbnail_url: '/api/v1/curation/quarantine/ls_held/thumbnail',
+      reveal_expires_at: '2026-01-01T00:05:00Z',
+    }
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/curation/quarantine/ls_held/reveal')) {
+        revealed = true
+        return Promise.resolve(mockJsonResponse(revealedEntry))
+      }
+      if (url.includes('/curation/sfw/ls_held/adjudication')) {
+        adjudicationPayload = init ? JSON.parse(init.body as string) : null
+        return Promise.resolve(
+          mockJsonResponse({ id: 7, asset_id: 'ls_held', safe: true, reviewer: 'me', decided_at: 'x' }),
+        )
+      }
+      if (url.includes('/curation/quarantine')) {
+        return Promise.resolve(mockJsonResponse([revealed ? revealedEntry : heldEntry]))
+      }
+      if (url.includes('/curation/next')) {
+        return Promise.resolve(mockJsonResponse(makeCandidate({ asset_id: 'ls_queue' })))
+      }
+      if (url.includes('/curation/progress')) {
+        return Promise.resolve(
+          mockJsonResponse({ reviewed: 0, accepted: 0, rejected: 0, quarantined: 1, remaining: 2000, target: 2000, by_style: {}, by_scope: {} }),
+        )
+      }
+      return Promise.reject(new Error('unexpected URL ' + url))
+    }) as unknown as typeof fetch
+    const CuratePage = (await import('./CuratePage')).default
+    render(<CuratePage />, { wrapper: makeWrapper() })
+    await screen.findByTestId('inspector-asset-id')
+    // Nothing quarantine-related renders until the toggle is flipped.
+    expect(screen.queryByTestId('quarantine-panel')).toBeNull()
+    fireEvent.click(screen.getByTestId('quarantine-toggle'))
+    const panel = await screen.findByTestId('quarantine-panel')
+    expect(panel.textContent).toContain('ls_held')
+    // Metadata only: no preview until a deliberate reveal.
+    expect(screen.queryByTestId('quarantine-preview-ls_held')).toBeNull()
+    fireEvent.click(screen.getByTestId('quarantine-reveal-ls_held'))
+    await screen.findByTestId('quarantine-preview-ls_held')
+    // Safe adjudication carries the expected label version.
+    fireEvent.click(screen.getByTestId('quarantine-safe-ls_held'))
+    await waitFor(() => expect(adjudicationPayload).toBeTruthy())
+    expect(adjudicationPayload).toMatchObject({ safe: true, expected_label_version: 2 })
+  })
+
+  it('cuts and processes a crop derivative from the staged crop', async () => {
+    let cropPayload: unknown = null
+    const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth')
+    const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalHeight')
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get: () => 512 })
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', { configurable: true, get: () => 512 })
+    try {
+      globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url.includes('/curation/assets/ls_crop/crops')) {
+          cropPayload = init ? JSON.parse(init.body as string) : null
+          return Promise.resolve(
+            mockJsonResponse({
+              asset_id: 'ls_child',
+              created: true,
+              crop: { x: 51, y: 51, width: 410, height: 410 },
+              derivatives_current: false,
+              height: 410,
+              label_version: 0,
+              parent_asset_id: 'ls_crop',
+              processing_state: 'pending',
+              review_state: 'unreviewed',
+              width: 410,
+            }),
+          )
+        }
+        if (url.includes('/curation/assets/ls_child/process')) {
+          return Promise.resolve(
+            mockJsonResponse({
+              asset_id: 'ls_child',
+              parent_asset_id: 'ls_crop',
+              label_version: 0,
+              processing_state: 'complete',
+              derivatives_current: true,
+              attempts: 1,
+              enabled: true,
+              embedding_status: 'missing',
+              measurements: {
+                background_coverage: 0.4,
+                ink_coverage: 0.1,
+                phash: 'abc123',
+                quality_score: 0.91,
+                text_coverage: 0,
+                width: 410,
+                height: 410,
+              },
+              artifact: { kind: 'crop', path: 'derivatives/ls_child.png', sha256: 'deadbeef', created_at: 'x' },
+            }),
+          )
+        }
+        if (url.includes('/curation/next')) {
+          return Promise.resolve(mockJsonResponse(makeCandidate({ asset_id: 'ls_crop' })))
+        }
+        if (url.includes('/curation/progress')) {
+          return Promise.resolve(
+            mockJsonResponse({ reviewed: 0, accepted: 0, rejected: 0, quarantined: 0, remaining: 2000, target: 2000, by_style: {}, by_scope: {} }),
+          )
+        }
+        return Promise.reject(new Error('unexpected URL ' + url))
+      }) as unknown as typeof fetch
+      const CuratePage = (await import('./CuratePage')).default
+      render(<CuratePage />, { wrapper: makeWrapper() })
+      await screen.findByTestId('inspector-asset-id')
+      // Enter crop mode and let the stage seed the default crop rect.
+      fireEvent.click(screen.getByTestId('toggle-crop'))
+      const img = await screen.findByTestId('candidate-img')
+      fireEvent.load(img)
+      await waitFor(() =>
+        expect((screen.getByTestId('create-derivative') as HTMLButtonElement).disabled).toBe(false),
+      )
+      fireEvent.click(screen.getByTestId('create-derivative'))
+      await waitFor(() => expect(cropPayload).toBeTruthy())
+      expect(cropPayload).toMatchObject({
+        crop: { x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) },
+        expected_label_version: 0,
+      })
+      const toast = await screen.findByTestId('derivative-toast')
+      expect(toast.textContent).toContain('ls_child')
+      expect(toast.textContent).toContain('quality 0.91')
+    } finally {
+      if (widthDescriptor) Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', widthDescriptor)
+      if (heightDescriptor) Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', heightDescriptor)
+    }
+  })
+
+  it('surfaces parent-artifact problems when a crop cut fails', async () => {
+    const widthDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth')
+    const heightDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalHeight')
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get: () => 512 })
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', { configurable: true, get: () => 512 })
+    try {
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/curation/assets/ls_stale/crops')) {
+          return Promise.resolve(
+            mockJsonResponse(
+              {
+                error: {
+                  code: 'parent_artifact_invalid',
+                  message: 'parent artifacts failed verification',
+                  details: {
+                    problems: ['thumbnail checksum mismatch', 'line art missing'],
+                  },
+                },
+              },
+              422,
+            ),
+          )
+        }
+        if (url.includes('/curation/next')) {
+          return Promise.resolve(mockJsonResponse(makeCandidate({ asset_id: 'ls_stale' })))
+        }
+        if (url.includes('/curation/progress')) {
+          return Promise.resolve(
+            mockJsonResponse({ reviewed: 0, accepted: 0, rejected: 0, quarantined: 0, remaining: 2000, target: 2000, by_style: {}, by_scope: {} }),
+          )
+        }
+        return Promise.reject(new Error('unexpected URL ' + url))
+      }) as unknown as typeof fetch
+      const CuratePage = (await import('./CuratePage')).default
+      render(<CuratePage />, { wrapper: makeWrapper() })
+      await screen.findByTestId('inspector-asset-id')
+      fireEvent.click(screen.getByTestId('toggle-crop'))
+      const img = await screen.findByTestId('candidate-img')
+      fireEvent.load(img)
+      await waitFor(() =>
+        expect((screen.getByTestId('create-derivative') as HTMLButtonElement).disabled).toBe(false),
+      )
+      fireEvent.click(screen.getByTestId('create-derivative'))
+      const toast = await screen.findByTestId('derivative-toast')
+      expect(toast.textContent).toContain('was not cut')
+      expect(toast.textContent).toContain('thumbnail checksum mismatch')
+      expect(toast.textContent).toContain('line art missing')
+      expect(toast.textContent).toContain('parent was not modified')
+      // No conflict banner for a validation failure — it is not a 409.
+      expect(screen.queryByTestId('conflict-banner')).toBeNull()
+    } finally {
+      if (widthDescriptor) Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', widthDescriptor)
+      if (heightDescriptor) Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', heightDescriptor)
+    }
   })
 })

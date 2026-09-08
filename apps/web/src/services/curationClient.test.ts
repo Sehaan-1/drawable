@@ -1,9 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from './apiClient'
 import {
+  adjudicateSfw,
+  createCrop,
   exportSnapshot,
+  fetchCandidate,
   fetchCurationProgress,
   fetchNextCandidate,
+  fetchQuarantine,
+  processDerivative,
+  revealQuarantined,
+  skipCandidate,
   writeLabel,
 } from './curationClient'
 
@@ -84,6 +91,7 @@ describe('writeLabel', () => {
     await writeLabel({
       asset_id: 'a',
       expected_review_state: 'unreviewed',
+      expected_label_version: 0,
       decision: 'keep',
       primary_scope: 'eye',
       secondary_scopes: [],
@@ -95,6 +103,114 @@ describe('writeLabel', () => {
     expect(url).toBe('/api/v1/curation/labels')
     expect((init as RequestInit).method).toBe('POST')
     expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({ decision: 'keep' })
+  })
+})
+
+describe('fetchNextCandidate with a session', () => {
+  it('appends session_id to the query string', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse({ asset_id: 'a' })) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    await fetchNextCandidate({ sessionId: 'sess-1' })
+    const url = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0] as string
+    expect(url).toContain('session_id=sess-1')
+  })
+})
+
+describe('fetchCandidate', () => {
+  it('fetches one candidate by id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ asset_id: 'a', review_state: 'accepted', label_version: 2 }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    const result = await fetchCandidate('a')
+    expect(result.asset_id).toBe('a')
+    expect(
+      (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0],
+    ).toBe('/api/v1/curation/candidates/a')
+  })
+})
+
+describe('skipCandidate', () => {
+  it('POSTs the session skip', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ session_id: 's', cursor_asset_id: 'a', excluded_asset_id: 'a', remaining: 3 }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    const result = await skipCandidate({ session_id: 's', asset_id: 'a' })
+    expect(result.remaining).toBe(3)
+    const [url, init] = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] ?? []
+    expect(url).toBe('/api/v1/curation/queue/skip')
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+      session_id: 's',
+      asset_id: 'a',
+    })
+  })
+})
+
+describe('quarantine + SFW adjudication', () => {
+  it('fetches the metadata-only backlog', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJsonResponse([])) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    await fetchQuarantine()
+    expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0]).toBe(
+      '/api/v1/curation/quarantine',
+    )
+  })
+
+  it('reveals a held record', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ asset_id: 'a', revealed: true }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    const result = await revealQuarantined('a', { reviewer: 'me' })
+    expect(result.revealed).toBe(true)
+    expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0]).toBe(
+      '/api/v1/curation/quarantine/a/reveal',
+    )
+  })
+
+  it('posts an adjudication with the expected label version', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ id: 1, asset_id: 'a', safe: true }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    await adjudicateSfw('a', { safe: true, expected_label_version: 1 })
+    const [url, init] = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] ?? []
+    expect(url).toBe('/api/v1/curation/sfw/a/adjudication')
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+      safe: true,
+      expected_label_version: 1,
+    })
+  })
+})
+
+describe('crop derivatives', () => {
+  it('creates a crop derivative from the parent asset', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ asset_id: 'child', parent_asset_id: 'a', processing_state: 'pending' }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    const result = await createCrop('a', {
+      crop: { x: 0, y: 0, width: 64, height: 64 },
+      expected_label_version: 2,
+    })
+    expect(result.processing_state).toBe('pending')
+    const [url, init] = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] ?? []
+    expect(url).toBe('/api/v1/curation/assets/a/crops')
+    expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
+      expected_label_version: 2,
+    })
+  })
+
+  it('processes a derivative', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ asset_id: 'child', processing_state: 'complete' }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    await processDerivative('child')
+    expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0]?.[0]).toBe(
+      '/api/v1/curation/assets/child/process',
+    )
   })
 })
 

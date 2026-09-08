@@ -141,6 +141,122 @@
         "title": "CropBox",
         "type": "object"
       },
+      "CropRequest": {
+        "additionalProperties": false,
+        "description": "Body of ``POST /curation/assets/{asset_id}/crops``.\n\nThe crop is cut from the parent's *current, verified* line art; the child\nis created pending its own processing and review.",
+        "properties": {
+          "crop": {
+            "$ref": "#/components/schemas/CropBox"
+          },
+          "expected_label_version": {
+            "minimum": 0.0,
+            "title": "Expected Label Version",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          }
+        },
+        "required": [
+          "crop",
+          "expected_label_version"
+        ],
+        "title": "CropRequest",
+        "type": "object"
+      },
+      "CropResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "crop": {
+            "$ref": "#/components/schemas/CropBox"
+          },
+          "derivatives_current": {
+            "title": "Derivatives Current",
+            "type": "boolean"
+          },
+          "height": {
+            "minimum": 1.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "label_version": {
+            "minimum": 0.0,
+            "title": "Label Version",
+            "type": "integer"
+          },
+          "parent_asset_id": {
+            "title": "Parent Asset Id",
+            "type": "string"
+          },
+          "processing_state": {
+            "enum": [
+              "pending",
+              "complete",
+              "failed"
+            ],
+            "title": "Processing State",
+            "type": "string"
+          },
+          "review_state": {
+            "enum": [
+              "unreviewed",
+              "accepted",
+              "rejected",
+              "quarantined"
+            ],
+            "title": "Review State",
+            "type": "string"
+          },
+          "width": {
+            "minimum": 1.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_id",
+          "parent_asset_id",
+          "crop",
+          "width",
+          "height",
+          "review_state",
+          "processing_state",
+          "derivatives_current",
+          "label_version",
+          "created"
+        ],
+        "title": "CropResponse",
+        "type": "object"
+      },
       "CurationBlocker": {
         "description": "A named defect that blocks specific uses regardless of review state.\n\nBlockers are not review states; they are assertions about the asset that\noutlive individual decisions. While any blocker is present the asset is\nneither servable nor trainable (see ``is_servable`` / ``is_trainable`` in\n:mod:`linescout_ml.manifest`). The curation API refuses a ``keep`` decision\nthat carries blockers \u2014 blockers force ``reject`` or ``quarantine``.\n\nAdding a new blocker kind is a schema change: extend this enum, bump the\nmanifest schema version, and migrate the ``blockers_json`` columns.",
         "enum": [
@@ -189,6 +305,22 @@
               }
             ]
           },
+          "derivative_processing_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "complete",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivative Processing State"
+          },
           "gallery_member": {
             "default": true,
             "title": "Gallery Member",
@@ -202,6 +334,11 @@
           "height": {
             "minimum": 1.0,
             "title": "Height",
+            "type": "integer"
+          },
+          "label_version": {
+            "minimum": 0.0,
+            "title": "Label Version",
             "type": "integer"
           },
           "leakage_group_id": {
@@ -338,7 +475,8 @@
           "permissions",
           "allowed_uses",
           "learning_split",
-          "source_work_id"
+          "source_work_id",
+          "label_version"
         ],
         "title": "CurationCandidate",
         "type": "object"
@@ -372,6 +510,11 @@
             "title": "By Style",
             "type": "object"
           },
+          "quarantined": {
+            "minimum": 0.0,
+            "title": "Quarantined",
+            "type": "integer"
+          },
           "rejected": {
             "minimum": 0.0,
             "title": "Rejected",
@@ -398,6 +541,7 @@
           "reviewed",
           "accepted",
           "rejected",
+          "quarantined",
           "remaining",
           "by_style",
           "by_scope"
@@ -429,6 +573,160 @@
           "detail"
         ],
         "title": "Degradation",
+        "type": "object"
+      },
+      "DerivativeArtifactStamp": {
+        "additionalProperties": false,
+        "description": "Binds embeddings/index entries to the exact derivative bytes.\n\nMatches the frozen vector contract (``ml/linescout_ml/embeddings.py``):\nan embedding entry is only ``available`` when its recorded stamp equals\nthe asset's current stamp. A freshly processed derivative has no vectors\nyet, so its embedding status is ``missing`` until the index build.",
+        "properties": {
+          "line_art_checksum": {
+            "title": "Line Art Checksum",
+            "type": "string"
+          },
+          "processing_revision": {
+            "minimum": 1.0,
+            "title": "Processing Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "processing_revision",
+          "line_art_checksum"
+        ],
+        "title": "DerivativeArtifactStamp",
+        "type": "object"
+      },
+      "DerivativeMeasurements": {
+        "additionalProperties": false,
+        "description": "Measurements rebuilt from the derivative's own bytes.",
+        "properties": {
+          "background_coverage": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Background Coverage",
+            "type": "number"
+          },
+          "height": {
+            "minimum": 1.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "ink_coverage": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Ink Coverage",
+            "type": "number"
+          },
+          "phash": {
+            "title": "Phash",
+            "type": "string"
+          },
+          "quality_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Quality Score",
+            "type": "number"
+          },
+          "text_coverage": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Text Coverage",
+            "type": "number"
+          },
+          "width": {
+            "minimum": 1.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "ink_coverage",
+          "text_coverage",
+          "background_coverage",
+          "quality_score",
+          "phash"
+        ],
+        "title": "DerivativeMeasurements",
+        "type": "object"
+      },
+      "DerivativeProcessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact": {
+            "$ref": "#/components/schemas/DerivativeArtifactStamp"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "attempts": {
+            "minimum": 0.0,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "derivatives_current": {
+            "title": "Derivatives Current",
+            "type": "boolean"
+          },
+          "embedding_status": {
+            "const": "missing",
+            "default": "missing",
+            "title": "Embedding Status",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "label_version": {
+            "minimum": 0.0,
+            "title": "Label Version",
+            "type": "integer"
+          },
+          "measurements": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DerivativeMeasurements"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parent_asset_id": {
+            "title": "Parent Asset Id",
+            "type": "string"
+          },
+          "processing_state": {
+            "enum": [
+              "pending",
+              "complete",
+              "failed"
+            ],
+            "title": "Processing State",
+            "type": "string"
+          },
+          "serving_blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Serving Blockers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "parent_asset_id",
+          "processing_state",
+          "attempts",
+          "artifact",
+          "derivatives_current",
+          "label_version",
+          "enabled"
+        ],
+        "title": "DerivativeProcessResponse",
         "type": "object"
       },
       "ErrorDetail": {
@@ -750,16 +1048,6 @@
             "title": "Blockers",
             "type": "array"
           },
-          "crop": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CropBox"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "decision": {
             "enum": [
               "keep",
@@ -767,6 +1055,11 @@
             ],
             "title": "Decision",
             "type": "string"
+          },
+          "expected_label_version": {
+            "minimum": 0.0,
+            "title": "Expected Label Version",
+            "type": "integer"
           },
           "expected_review_state": {
             "$ref": "#/components/schemas/ReviewState"
@@ -842,6 +1135,19 @@
             ],
             "title": "Secondary Scopes"
           },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
           "sfw_safe": {
             "anyOf": [
               {
@@ -857,6 +1163,7 @@
         "required": [
           "asset_id",
           "expected_review_state",
+          "expected_label_version",
           "decision"
         ],
         "title": "LabelRequest",
@@ -894,6 +1201,10 @@
           },
           "id": {
             "title": "Id",
+            "type": "integer"
+          },
+          "label_version": {
+            "title": "Label Version",
             "type": "integer"
           },
           "review_quality": {
@@ -944,6 +1255,7 @@
           "review_quality",
           "sfw_human_approved",
           "enabled",
+          "label_version",
           "created_at"
         ],
         "title": "LabelResponse",
@@ -1161,6 +1473,162 @@
         "title": "PrimaryStyle",
         "type": "string"
       },
+      "QuarantineCandidate": {
+        "additionalProperties": false,
+        "description": "One held record in the SFW adjudication backlog (metadata only).\n\nImage URLs stay ``None`` until a deliberate reveal grant exists; the\npreview route enforces the grant independently, so the URLs are never a\nbypass.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/CurationBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "derivative_processing_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pending",
+                  "complete",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivative Processing State"
+          },
+          "height": {
+            "minimum": 1.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "label_version": {
+            "minimum": 0.0,
+            "title": "Label Version",
+            "type": "integer"
+          },
+          "line_art_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Art Url"
+          },
+          "parent_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Asset Id"
+          },
+          "primary_scope": {
+            "$ref": "#/components/schemas/ScopeLabel"
+          },
+          "primary_style": {
+            "$ref": "#/components/schemas/PrimaryStyle"
+          },
+          "quality_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Quality Score",
+            "type": "number"
+          },
+          "reveal_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reveal Expires At"
+          },
+          "revealed": {
+            "default": false,
+            "title": "Revealed",
+            "type": "boolean"
+          },
+          "review_state": {
+            "enum": [
+              "unreviewed",
+              "accepted",
+              "rejected",
+              "quarantined"
+            ],
+            "title": "Review State",
+            "type": "string"
+          },
+          "sfw_human": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SfwHumanDecision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sfw_screening": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SfwScreening"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_work_id": {
+            "title": "Source Work Id",
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "width": {
+            "minimum": 1.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_id",
+          "primary_style",
+          "primary_scope",
+          "width",
+          "height",
+          "review_state",
+          "quality_score",
+          "source_work_id",
+          "label_version"
+        ],
+        "title": "QuarantineCandidate",
+        "type": "object"
+      },
       "ReadyResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1172,6 +1640,26 @@
           }
         },
         "title": "ReadyResponse",
+        "type": "object"
+      },
+      "RevealRequest": {
+        "additionalProperties": false,
+        "description": "Body of ``POST /curation/quarantine/{asset_id}/reveal``.",
+        "properties": {
+          "reviewer": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          }
+        },
+        "title": "RevealRequest",
         "type": "object"
       },
       "ReviewState": {
@@ -1534,6 +2022,125 @@
         "title": "SearchTiming",
         "type": "object"
       },
+      "SfwAdjudicationRequest": {
+        "additionalProperties": false,
+        "description": "Body of ``POST /curation/sfw/{asset_id}/adjudication``.",
+        "properties": {
+          "expected_label_version": {
+            "minimum": 0.0,
+            "title": "Expected Label Version",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reviewer": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer"
+          },
+          "safe": {
+            "title": "Safe",
+            "type": "boolean"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "safe",
+          "expected_label_version"
+        ],
+        "title": "SfwAdjudicationRequest",
+        "type": "object"
+      },
+      "SfwAdjudicationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "label_version": {
+            "title": "Label Version",
+            "type": "integer"
+          },
+          "review_state": {
+            "enum": [
+              "unreviewed",
+              "accepted",
+              "rejected",
+              "quarantined"
+            ],
+            "title": "Review State",
+            "type": "string"
+          },
+          "safe": {
+            "title": "Safe",
+            "type": "boolean"
+          },
+          "serving_blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Serving Blockers",
+            "type": "array"
+          },
+          "sfw_human": {
+            "$ref": "#/components/schemas/SfwHumanDecision"
+          }
+        },
+        "required": [
+          "id",
+          "asset_id",
+          "safe",
+          "review_state",
+          "sfw_human",
+          "label_version",
+          "enabled",
+          "created_at"
+        ],
+        "title": "SfwAdjudicationResponse",
+        "type": "object"
+      },
       "SfwHumanDecision": {
         "additionalProperties": false,
         "description": "A human SFW decision. The only thing that can gate display.",
@@ -1620,10 +2227,68 @@
         "title": "SfwVerdict",
         "type": "string"
       },
+      "SkipRequest": {
+        "additionalProperties": false,
+        "description": "Body of ``POST /curation/queue/skip``.",
+        "properties": {
+          "asset_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "asset_id"
+        ],
+        "title": "SkipRequest",
+        "type": "object"
+      },
+      "SkipResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor_asset_id": {
+            "title": "Cursor Asset Id",
+            "type": "string"
+          },
+          "excluded_asset_id": {
+            "title": "Excluded Asset Id",
+            "type": "string"
+          },
+          "remaining": {
+            "minimum": 0.0,
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "cursor_asset_id",
+          "excluded_asset_id",
+          "remaining"
+        ],
+        "title": "SkipResponse",
+        "type": "object"
+      },
       "SnapshotResponse": {
         "additionalProperties": false,
         "description": "Body of ``POST /curation/snapshots``.",
         "properties": {
+          "content_sha256": {
+            "title": "Content Sha256",
+            "type": "string"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -1668,6 +2333,7 @@
           "label_count",
           "previous_snapshot_id",
           "style_breakdown",
+          "content_sha256",
           "created_at"
         ],
         "title": "SnapshotResponse",
@@ -1940,9 +2606,105 @@
         ]
       }
     },
+    "/api/v1/curation/assets/{asset_id}/crops": {
+      "post": {
+        "description": "Cut an immutable child derivative from this asset.\n\nThe child gets its own identity (deterministic from dataset+item+crop),\nits parent's identity links, bounded geometry, **fresh files and\nhashes**, and its own processing/review state \u2014 it is created\n``unreviewed`` with ``derivatives_current = 0`` (awaiting processing)\nand ``enabled = 0``. It can only ever be enabled after its required\nprocessing completes *and* a human accepts it with all serving gates\npassing; nothing about the parent's review/SFW/gold state is inherited.\nHeld (quarantined/uncertain/flagged) parents cannot be cropped \u2014 that\nwould launder held content into a fresh reviewable asset.",
+        "operationId": "create_crop_api_v1_curation_assets__asset_id__crops_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CropRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CropResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Crop",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/assets/{asset_id}/process": {
+      "post": {
+        "description": "Run (or re-run) a derivative's required processing.\n\nVerifies the child's files against their recorded checksums, rebuilds\nevery measurement from the child's *own* bytes, regenerates the\nthumbnail, and \u2014 only when all of that succeeds \u2014 marks the child's\nderivatives current. Index membership (the in-memory serving list) and\nthe derived ``enabled`` flag are recomputed in the same transaction, and\nthe response carries the artifact stamp any future embedding must bind\nto (per the frozen vector contract, a new derivative has no vectors yet:\n``embedding_status: \"missing\"``).",
+        "operationId": "process_derivative_api_v1_curation_assets__asset_id__process_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DerivativeProcessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Process Derivative",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
     "/api/v1/curation/assets/{asset_id}/{kind}": {
       "get": {
-        "description": "Serve unreviewed (and other) gallery files to the curation UI only.\n\nPublic ``/api/v1/assets/{id}/...`` routes stay gated on the derived\n``enabled = 1`` flag (the full v2 serving predicate).",
+        "description": "Serve gallery files to the curation UI only, behind reveal controls.\n\nPublic ``/api/v1/assets/{id}/...`` routes stay gated on the derived\n``enabled = 1`` flag (the full serving predicate) \u2014 they never serve\nquarantined/uncertain content, and reveal grants do not apply there.\nHere (curation only), *held* records additionally require a deliberate,\nunexpired reveal grant; without one the preview fails with\n``reveal_required`` instead of leaking the image.",
         "operationId": "preview_asset_api_v1_curation_assets__asset_id___kind__get",
         "parameters": [
           {
@@ -1980,6 +2742,49 @@
           }
         },
         "summary": "Preview Asset",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/candidates/{asset_id}": {
+      "get": {
+        "description": "Stable retrieval of one candidate by id, whatever its review state.\n\nThis is the read path for Previous (re-fetch the *actual* previous\ncandidate \u2014 live metadata, not a stale copy) and for conflict\nreconciliation after a 409.",
+        "operationId": "get_candidate_api_v1_curation_candidates__asset_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCandidate"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Candidate",
         "tags": [
           "curation"
         ]
@@ -2065,6 +2870,25 @@
               "description": "Filter by scope bucket",
               "title": "Scope"
             }
+          },
+          {
+            "description": "Review session id: enables the cursor/skip queue semantics",
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Review session id: enables the cursor/skip queue semantics",
+              "title": "Session Id"
+            }
           }
         ],
         "responses": {
@@ -2116,9 +2940,183 @@
         ]
       }
     },
+    "/api/v1/curation/quarantine": {
+      "get": {
+        "description": "The SFW adjudication backlog: held records, **metadata only**.\n\nQuarantined (any reason), screened unsafe/unsure, or human-flagged\nrecords. No image bytes and no preview URLs until a deliberate reveal.",
+        "operationId": "list_quarantine_api_v1_curation_quarantine_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuarantineCandidate"
+                  },
+                  "title": "Response List Quarantine Api V1 Curation Quarantine Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Quarantine",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/quarantine/{asset_id}/reveal": {
+      "post": {
+        "description": "Issue a deliberate, expiring reveal grant for one held record.\n\nThe grant is recorded (who revealed what, when, until when) and is the\n*only* way the curation preview route will serve held content. It never\napplies to the public asset routes, and it changes nothing about the\nasset itself \u2014 review state, version, and eligibility are untouched.",
+        "operationId": "reveal_quarantined_api_v1_curation_quarantine__asset_id__reveal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuarantineCandidate"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reveal Quarantined",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/queue/skip": {
+      "post": {
+        "description": "Advance the session past an asset without a label.\n\nThe asset is excluded from *this session's* queue (it is not mutated:\nits review state, version, and eligibility are untouched) and the cursor\nmoves to it, so the next serve is a different item.",
+        "operationId": "skip_candidate_api_v1_curation_queue_skip_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkipResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Skip Candidate",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/sfw/{asset_id}/adjudication": {
+      "post": {
+        "description": "Record an explicit human SFW adjudication for a held/uncertain record.\n\nEffects (one transaction, atomic conditional on ``expected_label_version``):\n\n* ``safe`` \u2014 the human decision is mirrored onto the asset and a\n  quarantined record returns to ``unreviewed`` so it can be reviewed on\n  its merits through the normal queue. Serving still requires every\n  other gate (permission, accepted review with quality, no blockers).\n* ``unsafe`` \u2014 the record is quarantined and human-flagged; it leaves\n  every serving surface until a future adjudication says otherwise.\n  The public asset routes were already closed to it and stay closed.\n\nBoth outcomes are append-only audit history in ``sfw_adjudications``.",
+        "operationId": "adjudicate_sfw_api_v1_curation_sfw__asset_id__adjudication_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SfwAdjudicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SfwAdjudicationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Adjudicate Sfw",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
     "/api/v1/curation/snapshots": {
       "post": {
-        "description": "Write an immutable **full** snapshot of the current curation state.\n\nFrozen semantics (v2): the snapshot captures the *latest* keep-or-reject\nlabel per asset \u2014 rejected assets included \u2014 at the moment of the export.\nIt is a state view, not an export cursor: every POST writes a new file and\nnever mutates a previous one, and the append-only ``curation_labels``\naudit history stays complete in the database. Lineage is recorded through\n``previous_snapshot_id`` and the ``snapshots`` registry table.",
+        "description": "Write an immutable **full** snapshot of the current curation state.\n\nFrozen semantics: the snapshot captures the *latest* keep-or-reject\nlabel per asset \u2014 rejected assets included \u2014 from a **consistent\ndatabase view**. The whole export (label read, lineage read, file\npublication, registry insert, and the exact linking of the exported\nlabel rows to the snapshot) runs inside one ``BEGIN IMMEDIATE``\ntransaction, so a concurrent label write or a concurrent export can\nnever interleave: writers serialize, the second export chains to the\nfirst via ``previous_snapshot_id``, and neither file can overwrite the\nother. Every export is a new file; snapshots are never edited and never\nincremental, and the append-only ``curation_labels`` audit history stays\ncomplete in the database. The published bytes' SHA-256 is recorded on\nthe registry row so the export stays verifiable after later edits.",
         "operationId": "export_snapshot_api_v1_curation_snapshots_post",
         "responses": {
           "201": {

@@ -372,6 +372,13 @@ def sync_gallery(connection: sqlite3.Connection, manifest_path: Path) -> Gallery
                     derivative_problem_count,
                 ),
             )
+        # The rebuild dropped every curator-created crop child with the rest
+        # of the cache; re-materialize them from the durable registry so a
+        # dataset reload neither loses derivatives nor resurrects stale
+        # parent artifacts. (Lazy import: derivatives reads this module.)
+        from linescout_api.derivatives import rehydrate_derivatives
+
+        rehydrate_derivatives(connection, manifest.artifact_contract, data_root)
 
     return GalleryInfo(
         dataset_version=manifest.dataset_version,

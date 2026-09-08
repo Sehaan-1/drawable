@@ -7,6 +7,7 @@
  */
 
 import { useMemo } from 'react'
+import { ShieldAlert } from 'lucide-react'
 import {
   PRIMARY_STYLES,
   SCOPE_LABELS,
@@ -27,9 +28,23 @@ export interface CurateSidebarProps {
   scope: ScopeFilter
   onStyle: (next: StyleFilter) => void
   onScope: (next: ScopeFilter) => void
+  /** Held-record count from the progress payload (0 when unknown). */
+  quarantined?: number
+  /** Whether the workspace is showing the SFW adjudication backlog. */
+  quarantineMode?: boolean
+  onToggleQuarantine?: () => void
 }
 
-export function CurateSidebar({ progress, style, scope, onStyle, onScope }: CurateSidebarProps) {
+export function CurateSidebar({
+  progress,
+  style,
+  scope,
+  onStyle,
+  onScope,
+  quarantined,
+  quarantineMode = false,
+  onToggleQuarantine,
+}: CurateSidebarProps) {
   const overall = useMemo(() => {
     if (!progress) {
       return { reviewed: 0, accepted: 0, rejected: 0, remaining: 0, target: 2000 }
@@ -68,6 +83,20 @@ export function CurateSidebar({ progress, style, scope, onStyle, onScope }: Cura
           </li>
         </ul>
       </div>
+
+      <button
+        type="button"
+        className={`quarantine-toggle ${quarantineMode ? 'is-active' : ''}`}
+        onClick={onToggleQuarantine}
+        data-testid="quarantine-toggle"
+        aria-pressed={quarantineMode}
+      >
+        <span>
+          <StatusDot tone={quarantined && quarantined > 0 ? 'error' : 'neutral'} />
+          <ShieldAlert size={13} /> SFW adjudication
+        </span>
+        <b>{quarantined ?? 0}</b>
+      </button>
 
       <nav className="filter-list" aria-label="Filter by primary style">
         <span className="filter-heading">Primary style</span>
@@ -134,6 +163,9 @@ export function CurateSidebar({ progress, style, scope, onStyle, onScope }: Cura
         </div>
         <div>
           <kbd>R</kbd> Reject
+        </div>
+        <div>
+          <kbd>S</kbd> Skip
         </div>
         <div>
           <kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd> Quality

@@ -64,7 +64,11 @@ def v1_database(tmp_path: Path) -> sqlite3.Connection:
 
 
 def test_migration_applies_and_is_idempotent(v1_database: sqlite3.Connection) -> None:
-    assert migrate(v1_database) == ["0002_contract_v2.sql", "0003_eligibility_v3.sql"]
+    assert migrate(v1_database) == [
+        "0002_contract_v2.sql",
+        "0003_eligibility_v3.sql",
+        "0004_curation_safety.sql",
+    ]
     assert migrate(v1_database) == []
 
 
