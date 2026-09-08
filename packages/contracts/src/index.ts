@@ -20,6 +20,7 @@ export type PrimaryStyle = Schemas['PrimaryStyle']
 export type ScopeLabel = Schemas['ScopeLabel']
 export type LineArtOrigin = Schemas['LineArtOrigin']
 export type SearchMode = Schemas['SearchMode']
+export type StrokeStatus = Schemas['StrokeStatus']
 export type InteractionEvent = Schemas['InteractionEvent']
 export type StyleSelection = Schemas['StyleSelection']
 export type CurationBlocker = Schemas['CurationBlocker']
@@ -157,6 +158,25 @@ export type EventResponse = Schemas['EventResponse']
 export type PreferencesResponse = Schemas['PreferencesResponse']
 export type PreferencesUpdate = Schemas['PreferencesUpdate']
 export type StyleAffinity = Schemas['StyleAffinity']
+
+// ---------------------------------------------------------------- pins
+//
+// Pins are durable state, never a learning signal. Live pins live in the
+// API's SQLite database (so they survive a restart) and are namespaced by
+// gallery kind, which the server stamps from its own mode — the two sets can
+// never mix.
+
+export type GalleryKind = Schemas['GalleryKind']
+export type PinnedAsset = Schemas['PinnedAsset']
+export type PinsResponse = Schemas['PinsResponse']
+export type RevokedPin = Schemas['RevokedPin']
+
+export const GALLERY_KINDS = ['fixture', 'live'] as const satisfies readonly GalleryKind[]
+const _galleryKinds: AssertSame<(typeof GALLERY_KINDS)[number], GalleryKind> = true
+void _galleryKinds
+
+/** Permission metadata for one asset; `trace_url` is null when tracing is not permitted. */
+export type AssetPermissions = Schemas['AssetPermissions']
 
 // ----------------------------------------------------------------- curation
 

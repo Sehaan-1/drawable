@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from linescout_api.deps import State
 from linescout_api.errors import service_unavailable
+from linescout_api.preprocessing import PREPROCESSING_VERSION
 from linescout_api.schemas import ErrorResponse, HealthResponse, ReadyResponse
 
 router = APIRouter(tags=["health"])
@@ -24,6 +25,7 @@ def health(state: State) -> HealthResponse:
         torch_version=state.device.torch_version,
         api_version=state.api_version,
         schema_version=state.schema_version,
+        preprocessing_version=PREPROCESSING_VERSION,
         models=state.models,
         dataset_version=state.gallery.dataset_version if state.gallery else None,
         index_version=state.gallery.manifest_hash[:16] if state.gallery else None,
@@ -42,5 +44,9 @@ def health(state: State) -> HealthResponse:
 )
 def ready(state: State) -> ReadyResponse:
     if not state.ready:
-        raise service_unavailable("not_ready", state.setup_error or "the API is not ready")
+        raise service_unavailable(
+            "not_ready",
+            state.setup_error or "the API is not ready",
+            details=state.readiness_details(),
+        )
     return ReadyResponse()

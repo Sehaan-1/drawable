@@ -31,6 +31,16 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from linescout_api.errors import json_error, resolve_request_id
 
 
+def _size_details(max_bytes: int, received: int) -> dict[str, int]:
+    """Machine-readable byte accounting for the 413 ``request_too_large`` body.
+
+    ``received_bytes`` is the declared ``Content-Length`` (early rejection) or
+    the running receive-channel total (authoritative count). Both are plain
+    integers — never echoed request content.
+    """
+    return {"max_bytes": max_bytes, "received_bytes": received}
+
+
 def _multipart_boundary(content_type: str | None) -> bytes | None:
     """Extract the boundary parameter from a ``multipart/form-data`` content type.
 
@@ -94,6 +104,7 @@ class RequestBodyLimitMiddleware:
                 413,
                 "request_too_large",
                 f"request body exceeds the {self.max_body_bytes}-byte limit",
+                details=_size_details(self.max_body_bytes, declared),
             )
             return
 
@@ -116,6 +127,7 @@ class RequestBodyLimitMiddleware:
                     413,
                     "request_too_large",
                     f"request body exceeds the {self.max_body_bytes}-byte limit",
+                    details=_size_details(self.max_body_bytes, len(body)),
                 )
                 return
 
@@ -128,6 +140,7 @@ class RequestBodyLimitMiddleware:
                 413,
                 "too_many_parts",
                 f"multipart body exceeds the {self.max_multipart_parts}-part limit",
+                details={"max_parts": self.max_multipart_parts},
             )
             return
 
@@ -169,13 +182,22 @@ class RequestBodyLimitMiddleware:
         except ValueError:
             return "malformed"
 
-    async def _reject(self, scope: Scope, send: Send, status: int, code: str, message: str) -> None:
+    async def _reject(
+        self,
+        scope: Scope,
+        send: Send,
+        status: int,
+        code: str,
+        message: str,
+        details: dict[str, int] | None = None,
+    ) -> None:
         response = json_error(
             status,
             code,
             message,
             request_id=resolve_request_id(Request(scope)),
             retryable=False,
+            details=details,
             # The unread remainder of the body is dropped; close rather than
             # leave the connection half-consumed.
             headers={"Connection": "close"},

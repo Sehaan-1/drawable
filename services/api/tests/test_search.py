@@ -317,7 +317,11 @@ def test_no_result_below_relevance_floor(client: TestClient, session_id: str) ->
 def test_search_is_deterministic(client: TestClient, session_id: str) -> None:
     a = post_search(client, session_id, png_bytes(draw_figure), stroke_count=14, point_count=900)[1]
     b = post_search(client, session_id, png_bytes(draw_figure), stroke_count=14, point_count=900)[1]
-    a.pop("timing"), b.pop("timing")
+    # Timing and the per-request request_id are inherently non-deterministic;
+    # everything else (results, identity, versions) must be stable.
+    for payload in (a, b):
+        payload.pop("timing")
+        payload.pop("request_id")
     assert a == b
 
 
@@ -373,6 +377,106 @@ def test_zip_bomb_strokes_are_413(client: TestClient, session_id: str) -> None:
     bomb = gzip.compress(b"\x00" * (2 * 1024 * 1024))
     status, body = post_search(client, session_id, png_bytes(draw_figure), strokes=bomb)
     assert status == 413 and body["error"]["code"] == "strokes_too_large"
+
+
+# ---------------------------------------------------------------- identity & bounds
+
+
+def test_success_echoes_identity_and_versions(client: TestClient, session_id: str) -> None:
+    status, body = post_search(
+        client, session_id, png_bytes(draw_figure), stroke_count=14, point_count=900
+    )
+    assert status == 200
+    UUID(str(body["request_id"]))
+    assert isinstance(body["api_version"], str) and body["api_version"]
+    assert body["canvas_width"] == 2048 and body["canvas_height"] == 2048
+    assert isinstance(body["preprocessing_version"], str) and body["preprocessing_version"]
+    assert body["dataset_version"]  # fixture gallery is loaded
+    assert isinstance(body["index_version"], str) and body["index_version"]
+
+
+def test_counts_and_stroke_status_report_exact_when_vector_payload_matches(
+    client: TestClient, session_id: str
+) -> None:
+    status, body = post_search(
+        client,
+        session_id,
+        png_bytes(draw_figure),
+        strokes=_stroke_payload(3),
+        stroke_count=3,
+        point_count=6,  # exactly the delivered vector point total (2 points/stroke)
+    )
+    assert status == 200
+    assert body["stroke_status"] == "present"
+    assert body["counts_approximate"] is False
+
+
+def test_raster_only_query_reports_approximate_counts(client: TestClient, session_id: str) -> None:
+    status, body = post_search(
+        client, session_id, png_bytes(draw_figure), stroke_count=0, point_count=0
+    )
+    assert status == 200
+    assert body["stroke_status"] == "absent"
+    assert body["counts_approximate"] is True
+
+
+def test_point_count_discrepancy_is_flagged_not_trusted(
+    client: TestClient, session_id: str
+) -> None:
+    # The reported point_count disagrees with the delivered vector payload; the
+    # query is still searchable but the discrepancy is surfaced, never silently
+    # trusted as exact.
+    status, body = post_search(
+        client,
+        session_id,
+        png_bytes(draw_figure),
+        strokes=_stroke_payload(3),
+        stroke_count=3,
+        point_count=100,
+    )
+    assert status == 200
+    assert body["stroke_status"] == "present"
+    assert body["counts_approximate"] is True
+
+
+def test_huge_integers_are_structured_422s(client: TestClient, session_id: str) -> None:
+    for field, value in (
+        ("revision", 10**12),
+        ("stroke_count", 10**12),
+        ("point_count", 10**12),
+        ("canvas_width", 10**12),
+        ("canvas_height", 10**12),
+    ):
+        status, body = post_search(client, session_id, png_bytes(draw_figure), **{field: value})
+        assert status == 422, field
+        assert body["schema_version"] == 1
+        assert "error" in body
+        UUID(str(body["request_id"]))
+        assert (
+            "errors" in (body.get("error", {}).get("details") or {})
+            or body["error"].get("details") is None
+        )
+
+
+def test_not_ready_details_are_structured(tmp_path: Path, session_id: str) -> None:
+    settings = make_settings(tmp_path, gallery_manifest=tmp_path / "missing.json")
+    with TestClient(create_app(settings)) as client:
+        status, body = post_search(
+            client, session_id, png_bytes(draw_figure), stroke_count=14, point_count=900
+        )
+        assert status == 503
+        assert body["error"]["code"] == "not_ready"
+        assert body["retryable"] is True
+        details = body["error"]["details"]
+        assert details is not None
+        assert details["warmup"] in ("pending", "complete", "skipped")
+        assert details["gallery_loaded"] is False
+        assert details["setup_error"] is not None
+        # Readiness is a 503; blank input still short-circuits to 200 insufficient.
+        status, body = post_search(
+            client, session_id, png_bytes(None), stroke_count=0, point_count=0
+        )
+        assert status == 200 and body["mode"] == "insufficient"
 
 
 # ---------------------------------------------------------------- assets

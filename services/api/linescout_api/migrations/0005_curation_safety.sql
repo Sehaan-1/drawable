@@ -1,5 +1,5 @@
--- 0004_curation_safety.sql
--- Schema v4: safe end-to-end curation.
+-- 0005_curation_safety.sql
+-- Schema v5: safe end-to-end curation.
 --
 -- Safety properties (see docs/contracts/api-contract.md, "Curation"):
 --   * Every human curation write is guarded by a per-asset optimistic
@@ -118,5 +118,5 @@ CREATE INDEX curation_exclusions_session_idx ON curation_exclusions (session_id)
 ALTER TABLE snapshots ADD COLUMN content_sha256 TEXT;
 
 INSERT INTO migration_reports (version, name, notes_json)
-VALUES (4, '0004_curation_safety.sql',
+VALUES (5, '0005_curation_safety.sql',
  '{"summary":"curation concurrency versions, durable crop-derivative registry, SFW adjudication with reveal grants, session queue cursors","detail":"assets gains curation_label_version (optimistic concurrency, default 0); curation_derivatives/sfw_adjudications/sfw_reveals/curation_sessions/curation_exclusions are new; snapshots gain content_sha256; user data is preserved verbatim and no source bytes are touched"}');

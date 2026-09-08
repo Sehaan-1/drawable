@@ -16,6 +16,7 @@ Explicit policy (see ``LoopbackSecurityMiddleware``):
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from uuid import UUID
 
@@ -104,10 +105,12 @@ def test_cors_origins_are_normalized_and_deduplicated() -> None:
 
 def _event_body(session_id: str) -> dict[str, object]:
     return {
+        # A fresh idempotency key per attempt: the origin matrix is about the
+        # security middleware, not about replay behaviour.
+        "event_uuid": str(uuid.uuid4()),
         "session_id": session_id,
         "asset_id": "ls_synthetic_f1becf0b9d67dcc3",
         "event": "open",
-        "style": "cartoon",
         "query_revision": 1,
     }
 

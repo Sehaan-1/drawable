@@ -22,12 +22,24 @@ on every endpoint.
 `image` (PNG snapshot, ≤ 4 MiB), optional `strokes` (gzipped stroke sequence,
 ≤ 2 MiB), optional `text_hint` (≤ 120 chars), optional `selected_style`.
 
+Request integers are bounded before any arithmetic or SQLite storage:
+`revision` ≤ 2,000,000,000, `stroke_count` ≤ 1,000,000, `point_count`
+≤ 10,000,000. Anything larger — or a non-2048 `canvas_width`/`canvas_height` —
+is a structured `422` (`validation_error` / `canvas_dimensions`), never an
+uncaught exception or an overflow.
+
 Response (`schema_version: 2`):
 
 | Field | Type | Notes |
 |---|---|---|
 | `schema_version` | `2` | bump on any breaking response change |
+| `request_id` | UUID | echoes the request identity (`X-Request-Id`); matches the error envelope |
+| `api_version` | str | server build/release identifier for this response |
 | `revision` | int | echo |
+| `canvas_width` / `canvas_height` | int | logical canvas the query was validated against (always 2048) |
+| `stroke_status` | `present` \| `absent` | whether a vector `strokes` payload accompanied this query |
+| `counts_approximate` | bool | exact-verification flag, see below |
+| `preprocessing_version` | str | snapshot-preprocessing pipeline identity |
 | `mode` | `insufficient` \| `provisional` \| `confident` | blank/early input → `200` with `mode=insufficient`, never an error |
 | `scope_predictions` | `[{label, confidence}]` | early-scope reading; `unknown` label = no confident scope yet |
 | `groups` | `[{kind, id?, title, style?, scope?, results}]` | `best_match`, `style`, or `provisional_scope` |
@@ -36,6 +48,23 @@ Response (`schema_version: 2`):
 | `degradations` | `[{kind, detail}]` | **canonical** quality view; `[]` = full quality. kinds: `fixture_mode`, `cpu_fallback`, `branch_disabled`, `gallery_empty` |
 | `warning` | str \| null | `"; ".join(detail)` of `degradations`; kept for older clients, may be removed later |
 | `dataset_version` / `index_version` | str \| null | provenance of the results |
+
+**Count cross-checks are never silently trusted.** When a `strokes` payload
+is present its `canvas_width`/`canvas_height` and stroke array are the ground
+truth: a non-2048 vector canvas is a `422 canvas_dimensions` and a
+`stroke_count` that does not equal the number of delivered strokes is a `422
+stroke_count_mismatch`. `point_count` is *not* structural (the delivered
+points may be an exact or resampled view of the ink), so a disagreement is
+never an error — it is disclosed: `stroke_status` is `absent` for raster-only
+queries, and `counts_approximate` is `true` whenever no vector payload was
+delivered or the reported `point_count` differs from the delivered vector
+point total. `counts_approximate` is `false` only when a `strokes` payload was
+present and every reported count agreed exactly.
+
+`dataset_version`/`index_version`/`preprocessing_version`/`api_version` are
+*provenance identifiers*: each is whatever actually produced this response,
+and an unavailable one (e.g. no gallery loaded) is an explicit `null` on the
+wire, never a fabricated value.
 
 Vector payloads: retrieval branches whose per-(asset, embedder) embedding
 status is `missing`, `unsupported`, or `stale` simply do not contribute to
@@ -52,10 +81,12 @@ Every error is `{schema_version, request_id, retryable, error: {code, message, f
 |---|---|---|
 | 403 | `invalid_host` | — (loopback Host enforcement) |
 | 403 | `cross_origin_mutation_forbidden` | — |
-| 413 | `payload_too_large` | `{max_bytes, received_bytes}` |
+| 413 | `request_too_large` / `too_many_parts` | `request_too_large`: `{max_bytes, received_bytes}`; `too_many_parts`: `{max_parts}` |
 | 422 | `validation_error` | `{errors: [{field, message, type}]}` |
-| 503 | `not_ready` | readiness warnings, incl. the v1-manifest case naming `linescout-manifest migrate-v1` |
+| 503 | `not_ready` | `{setup_error, warmup, device_ready, fixture_mode, gallery_loaded, warnings}` — readiness warnings, incl. the v1-manifest case naming `linescout-manifest migrate-v1` |
 | 404 | `queue_empty` / `gallery_unavailable` / `asset_not_found` | — |
+| 409 | `event_uuid_conflict` | — (`field: event_uuid`; the id was already used for a *different* interaction) |
+| 403 | `trace_not_permitted` | — (`field: asset_id`; the source does not permit tracing) |
 
 `retryable` is true for 429/503. A v1 manifest loaded against a v2 API makes
 the app permanently unready (503) with the migrate command in the message —
@@ -63,21 +94,80 @@ it is never partially interpreted.
 
 ## Events & preferences (gallery namespacing)
 
-`POST /api/v1/events` records `pin` / `open` / `trace` interactions. The
-server stamps every event with `gallery_kind`: `"fixture"` iff the API runs in
-fixture mode, else `"live"` — clients cannot assert it. Legacy (v1-era) rows
-default to `live`.
+`POST /api/v1/events` records `open` / `trace` / `pin` / `unpin` interactions.
+
+**Identity and idempotency.** The client generates an `event_uuid` (v4) per
+interaction and reuses it verbatim on retries. The column is unique, and the
+write is a single atomic statement:
+
+- a replay with the **same** uuid and the same payload returns the original
+  row (`id`, `created_at`) with `replayed: true` — nothing is inserted, no
+  timestamp is refreshed, no weight is added;
+- the same uuid with a **different** payload is a client bug, not a retry:
+  `409 event_uuid_conflict` (`field: event_uuid`, `retryable: false`);
+- `open` and `trace` additionally coalesce on
+  `(session_id, asset_id, event, query_revision, gallery_kind)`, so a
+  double-click or a second client-side attempt with a fresh uuid still
+  resolves to the first row and its original timestamp. `pin` / `unpin` are
+  append-only because their order is what carries meaning;
+- rows written before schema version 4 have no payload hash, so their
+  backfilled uuids can never match a replay — reusing one is a conflict.
+
+**Server-derived fields.** `gallery_kind` is `"fixture"` iff the API runs in
+fixture mode, else `"live"` — clients cannot assert it (legacy rows default to
+`live`). `style` is likewise **not** a client input: it is read from the
+enabled gallery row for `asset_id` (unknown/disabled asset → `404
+asset_not_found`), so a client can neither invent a style nor train a profile
+for an asset it cannot see. The payload hash covers session, asset, event,
+revision, and gallery kind only — never the derived style.
+
+**Permission.** `event: "trace"` on an asset whose source permissions forbid
+tracing is rejected with `403 trace_not_permitted` (`field: asset_id`), after
+the eligibility check. Origin (`native_line_art` / `extracted_line_art`) is
+*not* consulted: permission is the recorded source metadata, so a native asset
+may be untraceable and an extracted one traceable. A forged event cannot buy
+the permission the gallery row does not grant.
+
+**Learning toggle.** With `learning_enabled = false` no row is written at all
+(the response is `{id: 0, recorded: false, replayed: false}`) and the uuid
+stays usable for a later real write. Pin and unpin still change durable pin
+state — pins work while learning is off.
 
 - `GET/PUT /api/v1/preferences` computes style affinities from **live** events
   only: fixture-mode interactions never leak into the learned profile
   (Laplace smoothing, 30-day half-life; explicit row order wins, learned
-  affinities reorder the rest).
-- **Pins are not events.** Pinning is durable *local application state*,
-  stored client-side under `drawable-pins:<kind>:<version>`
-  (`kind ∈ {fixture, live}`, currently version `1`). Switching galleries
-  (`setGallery(kind)`) reloads the pin set for that namespace; the two never
-  mix. The pre-v2 un-namespaced key migrates into the **fixture** namespace
-  exactly once.
+  affinities reorder the rest). Weights are `open 1`, `pin 3`, `trace 4`,
+  `unpin 0`. Resetting affinities ignores everything recorded before the
+  reset; it does **not** touch pins.
+- **Pins are durable state, not a learning signal.** `unpin` contributes zero
+  weight — it is recorded so the pin history can be replayed, and it ends the
+  active pin run so the asset's pin contribution stops (the earlier `pin`
+  keeps its own weight and original timestamp; unpinning is never a negative
+  vote).
+
+### Pins
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /api/v1/pins` | the whole pin set for the server's gallery kind |
+| `PUT /api/v1/pins/{asset_id}` | idempotent; re-pinning keeps the original `pinned_at`; `404 asset_not_found` unless the asset is currently servable |
+| `DELETE /api/v1/pins/{asset_id}` | idempotent, always `200` |
+
+All three return the same `PinsResponse{schema_version, gallery_kind, pins,
+revoked}`, so a client replaces its view atomically instead of guessing what
+changed. Every read **revalidates**: a pin whose asset became ineligible
+(disabled, display no longer permitted, missing derivative…) is dropped from
+storage and reported in `revoked[]` with its blocker reasons, never returned
+as a pin. `PinnedAsset.trace_allowed` carries the current permission; there is
+no `trace_url` — a client derives it only when tracing is permitted.
+
+Pins are namespaced by gallery kind and stored separately: **live** pins are
+rows in the API database (they survive a page reload *and* an API restart),
+**fixture** pins are offline browser state under
+`drawable-pins:fixture:<version>` (currently version `1`). Neither namespace
+ever reads the other's assets; the pre-v2 un-namespaced key
+`drawable-fixture-pins` migrates into the **fixture** namespace exactly once,
+dropping entries that fail validation or look like live gallery ids.
 
 ## Assets
 
@@ -92,6 +182,16 @@ and the recorded sha256 at request time:
 * at gallery load, any missing/checksum-mismatched/stale derivative is
   disabled per row (`derivatives_current = 0`), reported in `derivative_problems_json`,
   and counted in the health warning — disable-and-report, never silent.
+
+`GET /api/v1/assets/{id}/permissions` is the authoritative answer to "may this
+be used?": `allowed_display`, `allowed_trace`, `permission_basis`,
+`attribution`(`_required`), `origin`, and a `trace_url` that is populated
+**only** when tracing is permitted. Clients call it when reopening a saved
+document, so a trace layer written before a permission was revoked cannot be
+resurrected from local storage. `/line-art` itself is not gated on
+`allowed_trace` — display permission already governs full-size display, and
+trace permission is enforced where tracing is actually claimed (this endpoint,
+the `trace_allowed` projections, and `POST /events`).
 
 ## Curation (`curation_mode` only)
 

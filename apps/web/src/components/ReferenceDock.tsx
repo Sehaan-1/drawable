@@ -19,19 +19,46 @@ import { useSearchStore } from '../state/searchStore'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import { useServiceStore } from '../services/serviceRegistry'
-import { UI_STYLE_TO_API } from '../services/liveServices'
 import type { InteractionEvent } from '@drawable/contracts'
+import { UI_STYLE_TO_API } from '../services/liveServices'
+import { traceSource } from '../lib/trace'
 import type { ReferenceAsset, ReferenceGroup } from '../lib/types'
 
 const styleOptions = ['Manga / anime', 'Western ink', 'Realistic', 'Cartoon', 'Gesture']
 
-/** Fire-and-forget interaction logging; failures never interrupt the artist. */
+/**
+ * Fire-and-forget interaction logging; failures never interrupt the artist.
+ *
+ * Each attempt carries its own `event_uuid`, so a retry (or a double-click
+ * that produces the same interaction) is idempotent server-side and can never
+ * inflate the learned profile. Style is *not* sent: the server derives it
+ * from the gallery row.
+ */
 function recordInteraction(asset: ReferenceAsset, event: InteractionEvent) {
   const { services, sessionId } = useServiceStore.getState()
   const revision = useSearchStore.getState().response?.revision ?? 0
-  const style = UI_STYLE_TO_API[asset.style]
-  if (!style) return
-  void services.events.record({ session_id: sessionId, asset_id: asset.id, event, style, query_revision: revision }).catch(() => undefined)
+  void services.events
+    .record({ event_uuid: crypto.randomUUID(), session_id: sessionId, asset_id: asset.id, event, query_revision: revision })
+    .catch(() => undefined)
+}
+
+/**
+ * Place a reference on the trace layer, if its source permissions allow it.
+ *
+ * Both entry points go through here, so the permission check cannot be
+ * forgotten in one of them.
+ */
+function useTraceAction(asset: ReferenceAsset) {
+  const setTrace = useDocumentStore((state) => state.setTrace)
+  const source = traceSource(asset)
+  return {
+    allowed: source !== null,
+    trace: () => {
+      if (source === null) return
+      setTrace(asset.id, source)
+      recordInteraction(asset, 'trace')
+    },
+  }
 }
 
 function ServiceBadge() {
@@ -50,10 +77,11 @@ function ReferenceCard({ asset }: { asset: ReferenceAsset }) {
   const pinned = useSearchStore((state) => state.pinned.some((item) => item.id === asset.id))
   const setSelectedAsset = useSearchStore((state) => state.setSelectedAsset)
   const togglePin = useSearchStore((state) => state.togglePin)
-  const setTrace = useDocumentStore((state) => state.setTrace)
+  const { allowed: canTrace, trace } = useTraceAction(asset)
   const open = () => { setSelectedAsset(asset); recordInteraction(asset, 'open') }
-  const pin = () => { togglePin(asset); recordInteraction(asset, pinned ? 'unpin' : 'pin') }
-  const trace = () => { setTrace(asset.id, asset.fullImageUrl ?? asset.imageUrl); recordInteraction(asset, 'trace') }
+  // Pin state is durable and changes first; the learning event only follows a
+  // state change that actually happened.
+  const pin = () => { void togglePin(asset).then((isPinned) => recordInteraction(asset, isPinned ? 'pin' : 'unpin')) }
 
   return (
     <article className={`reference-card ${selected ? 'is-selected' : ''}`}>
@@ -70,7 +98,12 @@ function ReferenceCard({ asset }: { asset: ReferenceAsset }) {
         <IconButton label={pinned ? 'Unpin reference' : 'Pin reference'} size="small" onClick={pin}>
           {pinned ? <PinOff size={14} /> : <Pin size={14} />}
         </IconButton>
-        <IconButton label="Place on trace layer" size="small" disabled={!asset.traceAllowed} onClick={trace}>
+        <IconButton
+          label={canTrace ? 'Place on trace layer' : 'Tracing is not permitted for this reference'}
+          size="small"
+          disabled={!canTrace}
+          onClick={trace}
+        >
           <Layers3 size={14} />
         </IconButton>
       </div>
@@ -99,7 +132,7 @@ function ReferenceDetail({ asset }: { asset: ReferenceAsset }) {
   const setSelectedAsset = useSearchStore((state) => state.setSelectedAsset)
   const pinned = useSearchStore((state) => state.pinned.some((item) => item.id === asset.id))
   const togglePin = useSearchStore((state) => state.togglePin)
-  const setTrace = useDocumentStore((state) => state.setTrace)
+  const { allowed: canTrace, trace } = useTraceAction(asset)
   return (
     <section className="reference-detail">
       <header>
@@ -113,10 +146,11 @@ function ReferenceDetail({ asset }: { asset: ReferenceAsset }) {
         <div><dt>Scope</dt><dd>{asset.scope}</dd></div>
         <div><dt>Source</dt><dd>{asset.source}</dd></div>
         <div><dt>Artwork</dt><dd>{asset.native ? 'Native line art' : 'Extracted line art'}</dd></div>
+        <div><dt>Tracing</dt><dd>{canTrace ? 'Permitted by the source' : 'Not permitted by the source'}</dd></div>
       </dl>
       <div className="reference-detail__actions">
-        <button className="button" onClick={() => { togglePin(asset); recordInteraction(asset, pinned ? 'unpin' : 'pin') }}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}{pinned ? 'Unpin' : 'Pin'}</button>
-        <button className="button button--primary" disabled={!asset.traceAllowed} onClick={() => { setTrace(asset.id, asset.fullImageUrl ?? asset.imageUrl); recordInteraction(asset, 'trace') }}><Layers3 size={15} />Trace</button>
+        <button className="button" onClick={() => { void togglePin(asset).then((isPinned) => recordInteraction(asset, isPinned ? 'pin' : 'unpin')) }}>{pinned ? <PinOff size={15} /> : <Pin size={15} />}{pinned ? 'Unpin' : 'Pin'}</button>
+        <button className="button button--primary" disabled={!canTrace} onClick={trace}><Layers3 size={15} />Trace</button>
         <a className="button" href={asset.fullImageUrl ?? asset.imageUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Open</a>
       </div>
     </section>
@@ -137,6 +171,9 @@ export function ReferenceDock() {
   const setSelectedStyle = useSearchStore((state) => state.setSelectedStyle)
   const selectedAsset = useSearchStore((state) => state.selectedAsset)
   const pinned = useSearchStore((state) => state.pinned)
+  const revokedPins = useSearchStore((state) => state.revokedPins)
+  const dismissRevokedPins = useSearchStore((state) => state.dismissRevokedPins)
+  const pinError = useSearchStore((state) => state.pinError)
   const invalidate = useSearchStore((state) => state.invalidate)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -187,6 +224,20 @@ export function ReferenceDock() {
         <ServiceBadge />
       </div>
       {response?.warning && !error ? <p className="reference-warning" role="note">{response.warning}</p> : null}
+      {revokedPins.length ? (
+        <p className="reference-warning" role="note" data-testid="revoked-pins">
+          {revokedPins.length === 1 ? '1 pinned reference is' : `${revokedPins.length} pinned references are`} no longer available and were removed.
+          <button className="link-button" onClick={dismissRevokedPins}>Dismiss</button>
+        </p>
+      ) : null}
+      {pinError ? <p className="reference-warning" role="note" data-testid="pin-error">{pinError}</p> : null}
+      {response?.countsApproximate && !error && response.mode !== 'insufficient' ? (
+        <p className="reference-warning" role="note" data-testid="approx-counts">
+          {response.strokeStatus === 'absent'
+            ? 'Searching a raster snapshot — no exact vector counts'
+            : 'Vector counts are approximate'}
+        </p>
+      ) : null}
       {selectedAsset ? <ReferenceDetail asset={selectedAsset} /> : null}
       <div className="reference-scroll" ref={scrollRef}>
         {error ? (

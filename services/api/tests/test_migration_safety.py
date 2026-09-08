@@ -67,7 +67,8 @@ def test_migration_applies_and_is_idempotent(v1_database: sqlite3.Connection) ->
     assert migrate(v1_database) == [
         "0002_contract_v2.sql",
         "0003_eligibility_v3.sql",
-        "0004_curation_safety.sql",
+        "0004_interaction_identity.sql",
+        "0005_curation_safety.sql",
     ]
     assert migrate(v1_database) == []
 
@@ -185,3 +186,92 @@ def test_new_columns_deny_by_default(v1_database: sqlite3.Connection) -> None:
         insert(gold_member="1", primary_scope="'unknown'")
     with pytest.raises(sqlite3.IntegrityError):
         insert(gold_member="1", derivatives_current="0")
+
+
+# ---------------------------------------------------------- 0004 interaction identity
+
+
+@pytest.fixture
+def v3_database(tmp_path: Path) -> sqlite3.Connection:
+    """A database at schema v3 (pre-identity), with duplicate open rows."""
+    connection = connect(tmp_path / "v3.sqlite3")
+    package = importlib.resources.files("linescout_api") / "migrations"
+    applied_versions(connection)
+    for version, name in (
+        (1, "0001_initial.sql"),
+        (2, "0002_contract_v2.sql"),
+        (3, "0003_eligibility_v3.sql"),
+    ):
+        sql = (package / name).read_text(encoding="utf-8")
+        connection.execute("BEGIN")
+        for statement in split_statements(sql):
+            connection.execute(statement)
+        connection.execute(
+            "INSERT INTO schema_migrations(version, name) VALUES (?, ?)", (version, name)
+        )
+        connection.execute("COMMIT")
+    for stamp in ("2026-01-01T00:00:00.000Z", "2026-02-01T00:00:00.000Z"):
+        connection.execute(
+            "INSERT INTO events(session_id, asset_id, event, style, query_revision, created_at)"
+            " VALUES ('s','ls_x_0000000000000001','open','cartoon',1,?)",
+            (stamp,),
+        )
+    connection.execute(
+        "INSERT INTO events(session_id, asset_id, event, style, query_revision, created_at)"
+        " VALUES ('s','ls_x_0000000000000001','pin','cartoon',1,'2026-01-05T00:00:00.000Z')"
+    )
+    connection.execute(
+        "INSERT INTO events(session_id, asset_id, event, style, query_revision, created_at)"
+        " VALUES ('s','ls_x_0000000000000001','unpin','cartoon',1,'2026-01-06T00:00:00.000Z')"
+    )
+    return connection
+
+
+def test_legacy_events_gain_unique_identities_and_keep_their_data(
+    v3_database: sqlite3.Connection,
+) -> None:
+    migrate(v3_database)
+    rows = v3_database.execute(
+        "SELECT event, event_uuid, payload_hash, created_at FROM events ORDER BY id"
+    ).fetchall()
+    # The duplicate open collapsed onto the earliest row; pin/unpin (a toggle
+    # sequence, not a coalescing contribution) are both preserved.
+    assert [row["event"] for row in rows] == ["open", "pin", "unpin"]
+    assert rows[0]["created_at"] == "2026-01-01T00:00:00.000Z"
+    identities = {row["event_uuid"] for row in rows}
+    assert len(identities) == len(rows) and all(identities)
+    # Legacy rows have no recorded payload, so their identity can never be
+    # "replayed" into a new result.
+    assert all(row["payload_hash"] is None for row in rows)
+
+
+def test_identity_and_coalescing_indexes_are_enforced(v3_database: sqlite3.Connection) -> None:
+    migrate(v3_database)
+    with pytest.raises(sqlite3.IntegrityError):
+        v3_database.execute(
+            "INSERT INTO events(event_uuid, session_id, asset_id, event, style, query_revision)"
+            " VALUES ((SELECT event_uuid FROM events LIMIT 1),'other','a','open','cartoon',9)"
+        )
+    with pytest.raises(sqlite3.IntegrityError):
+        v3_database.execute(
+            "INSERT INTO events(event_uuid, session_id, asset_id, event, style, query_revision,"
+            " created_at) VALUES ('11111111-1111-4111-8111-111111111111','s',"
+            "'ls_x_0000000000000001','open','cartoon',1,'2026-03-01T00:00:00.000Z')"
+        )
+    # Pin/unpin stay append-only: the toggle must be able to repeat.
+    v3_database.execute(
+        "INSERT INTO events(event_uuid, session_id, asset_id, event, style, query_revision)"
+        " VALUES ('22222222-2222-4222-8222-222222222222','s','ls_x_0000000000000001','pin',"
+        "'cartoon',1)"
+    )
+
+
+def test_pins_table_starts_empty_and_is_namespaced(v3_database: sqlite3.Connection) -> None:
+    migrate(v3_database)
+    assert v3_database.execute("SELECT COUNT(*) FROM pins").fetchone()[0] == 0
+    v3_database.execute("INSERT INTO pins(gallery_kind, asset_id) VALUES ('live','a')")
+    v3_database.execute("INSERT INTO pins(gallery_kind, asset_id) VALUES ('fixture','a')")
+    with pytest.raises(sqlite3.IntegrityError):
+        v3_database.execute("INSERT INTO pins(gallery_kind, asset_id) VALUES ('live','a')")
+    with pytest.raises(sqlite3.IntegrityError):
+        v3_database.execute("INSERT INTO pins(gallery_kind, asset_id) VALUES ('other','a')")

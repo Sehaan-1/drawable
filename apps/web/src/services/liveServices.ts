@@ -10,6 +10,8 @@ import {
   SCOPE_TITLES,
   STYLE_TITLES,
   type HealthResponse,
+  type PinnedAsset,
+  type PinsResponse,
   type PrimaryStyle,
   type SearchGroup,
   type SearchResponse as ApiSearchResponse,
@@ -18,9 +20,9 @@ import {
 } from '@drawable/contracts'
 import type { HealthResult, ReferenceAsset, ReferenceGroup, SearchRequest, SearchResponse } from '../lib/types'
 import { LOGICAL_SIZE } from '../lib/types'
-import { api } from './apiClient'
-import { fixtureAssets } from './fixtures'
-import type { FrontendServices } from './frontendServices'
+import { ApiError, api } from './apiClient'
+import type { FrontendServices, PinSnapshot } from './frontendServices'
+import { takeLegacyLivePinIds } from './pinStorage'
 
 export const UI_STYLE_TO_API: Record<string, PrimaryStyle> = {
   'Manga / anime': 'manga_anime',
@@ -44,20 +46,55 @@ export function matchLabel(relevance: number): ReferenceAsset['match'] {
   return 'Related'
 }
 
+function describe(assetId: string, scopes: SearchResult['scopes']): { title: string; scope: string } {
+  const scope = scopes.map((label) => SCOPE_TITLES[label]).join(' · ') || 'Reference'
+  return { title: `${scope} ${assetId.slice(-4)}`, scope }
+}
+
 export function toReferenceAsset(result: SearchResult): ReferenceAsset {
-  const scope = result.scopes.map((label) => SCOPE_TITLES[label]).join(' · ') || 'Reference'
+  const { title, scope } = describe(result.asset_id, result.scopes)
   return {
     id: result.asset_id,
-    title: `${scope} ${result.asset_id.slice(-4)}`,
+    title,
     imageUrl: result.thumbnail_url,
     fullImageUrl: result.asset_url,
     style: API_STYLE_TO_UI[result.style],
     scope,
     source: 'Local gallery',
+    // Presentation only: origin never decides what the asset may be used for.
     native: result.origin === 'native_line_art',
     match: matchLabel(result.relevance),
     relevance: result.relevance,
+    // Permission comes from the stored source metadata, and the trace source
+    // exists only when that permission does.
     traceAllowed: result.trace_allowed,
+    traceUrl: result.trace_allowed ? result.asset_url : null,
+  }
+}
+
+/** Same projection for a pinned asset, which the server revalidates on read. */
+export function toPinnedReferenceAsset(pin: PinnedAsset): ReferenceAsset {
+  const { title, scope } = describe(pin.asset_id, pin.scopes)
+  return {
+    id: pin.asset_id,
+    title,
+    imageUrl: pin.thumbnail_url,
+    fullImageUrl: pin.asset_url,
+    style: API_STYLE_TO_UI[pin.style],
+    scope,
+    source: 'Local gallery',
+    native: pin.origin === 'native_line_art',
+    match: 'Related',
+    traceAllowed: pin.trace_allowed,
+    traceUrl: pin.trace_allowed ? pin.asset_url : null,
+    pinnedAt: pin.pinned_at,
+  }
+}
+
+export function toPinSnapshot(response: PinsResponse): PinSnapshot {
+  return {
+    pins: response.pins.map(toPinnedReferenceAsset),
+    revoked: (response.revoked ?? []).map((item) => ({ assetId: item.asset_id, reasons: item.reasons })),
   }
 }
 
@@ -86,6 +123,12 @@ export function toSearchResponse(response: ApiSearchResponse, request: SearchReq
     groups: response.groups.map(toReferenceGroup),
     warning: response.warning ?? null,
     timing: response.timing,
+    // Provenance echoed from the server so the dock can disclose approximate
+    // counts and the preprocessing/build that produced this result.
+    countsApproximate: response.counts_approximate,
+    strokeStatus: response.stroke_status,
+    preprocessingVersion: response.preprocessing_version,
+    apiVersion: response.api_version,
   }
 }
 
@@ -131,11 +174,17 @@ export const liveServices: FrontendServices = {
     },
   },
   assets: {
-    async resolveTrace(assetId: string) {
-      const fixture = fixtureAssets.find((asset) => asset.id === assetId)
-      if (fixture) return fixture.imageUrl
-      if (assetId.startsWith('ls_')) return `/api/v1/assets/${assetId}/line-art`
-      return null
+    async resolveTrace(assetId: string, signal?: AbortSignal) {
+      // Ask the server, never guess a URL: a saved document must not be able
+      // to resurrect an asset whose trace permission (or eligibility) was
+      // revoked since it was written.
+      try {
+        const permissions = await api.assetPermissions(assetId, signal)
+        return permissions.allowed_trace ? (permissions.trace_url ?? null) : null
+      } catch (error) {
+        if (error instanceof ApiError) return null
+        throw error
+      }
     },
   },
   events: {
@@ -144,5 +193,26 @@ export const liveServices: FrontendServices = {
   preferences: {
     get: () => api.getPreferences(),
     update: (update) => api.updatePreferences(update),
+  },
+  pins: {
+    async list() {
+      // Older builds cached live pins in localStorage. Hand those ids to the
+      // API once so they become durable server state; ineligible ones are
+      // simply dropped by the same revalidation every other pin gets.
+      for (const assetId of takeLegacyLivePinIds()) {
+        try {
+          await api.pinAsset(assetId)
+        } catch (error) {
+          if (!(error instanceof ApiError)) throw error
+        }
+      }
+      return toPinSnapshot(await api.getPins())
+    },
+    async pin(asset) {
+      return toPinSnapshot(await api.pinAsset(asset.id))
+    },
+    async unpin(assetId) {
+      return toPinSnapshot(await api.unpinAsset(assetId))
+    },
   },
 }

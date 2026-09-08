@@ -16,7 +16,12 @@ describe('fixture reference search', () => {
     const assets = confident.groups.flatMap((group) => group.results)
     expect(assets.some((asset) => asset.traceAllowed)).toBe(true)
     expect(assets.some((asset) => !asset.traceAllowed)).toBe(true)
-    expect(assets.every((asset) => asset.traceAllowed === asset.native)).toBe(true)
+    // Permission is never inferred from native/extracted origin: the fixture
+    // gallery contains both mismatched combinations, and a forbidden asset
+    // never carries a trace source.
+    expect(assets.some((asset) => asset.native && !asset.traceAllowed)).toBe(true)
+    expect(assets.some((asset) => !asset.native && asset.traceAllowed)).toBe(true)
+    expect(assets.every((asset) => (asset.traceUrl === null) === !asset.traceAllowed)).toBe(true)
   })
 
   it('honors request cancellation', async () => {

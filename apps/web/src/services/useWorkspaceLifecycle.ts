@@ -18,6 +18,7 @@ export function useWorkspaceLifecycle() {
   const replaceDocument = useDocumentStore((state) => state.replaceDocument)
   const activeLayerId = useDocumentStore((state) => state.activeLayerId)
   const setResolvedTraceImage = useDocumentStore((state) => state.setResolvedTraceImage)
+  const clearTrace = useDocumentStore((state) => state.clearTrace)
   const generation = useSearchStore((state) => state.generation)
   const drawing = useSearchStore((state) => state.drawing)
   const textHint = useSearchStore((state) => state.textHint)
@@ -47,7 +48,14 @@ export function useWorkspaceLifecycle() {
 
   const activateDocument = async (loaded: LoadedDocument) => {
     const activation = ++activationVersion.current
-    let next = loaded
+    // A restored document has to re-earn its trace layer: the cached image URL
+    // is dropped so the effect below revalidates the asset against the current
+    // gallery. A trace permission revoked since the save must not survive a
+    // reload just because the URL was written into local storage.
+    let next: LoadedDocument = {
+      ...loaded,
+      document: { ...loaded.document, trace: { ...loaded.document.trace, imageUrl: null } },
+    }
     let nextLease = await acquireDocumentLease(next.document.id)
     if (activation !== activationVersion.current) {
       nextLease.release()
@@ -125,11 +133,17 @@ export function useWorkspaceLifecycle() {
     const controller = new AbortController()
     const assetClient = services.assets ?? fixtureServices.assets
     assetClient.resolveTrace(document.trace.assetId, controller.signal).then((imageUrl) => {
-      if (imageUrl) setResolvedTraceImage(imageUrl)
-      else setNotice('The saved trace reference is unavailable; the drawing opened without it.')
+      if (imageUrl) {
+        setResolvedTraceImage(imageUrl)
+        return
+      }
+      // Gone, or no longer traceable: drop the reference entirely rather than
+      // leave a trace layer pointing at an asset we may not use.
+      clearTrace()
+      setNotice('The saved trace reference is unavailable; the drawing opened without it.')
     }).catch(() => setNotice('The saved trace reference is unavailable; the drawing opened without it.'))
     return () => controller.abort()
-  }, [document.trace.assetId, document.trace.imageUrl, hasHydrated, setResolvedTraceImage])
+  }, [clearTrace, document.trace.assetId, document.trace.imageUrl, hasHydrated, services, setResolvedTraceImage])
 
   useEffect(() => {
     if (previousRevision.current !== document.revision) {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,14 +20,38 @@ from tests.conftest import make_settings
 
 DEFAULT = [style.value for style in DEFAULT_STYLE_ORDER]
 
-# Enabled synthetic assets, one per style. Events look the style up from the gallery.
+# Enabled synthetic assets, one per style. Events look the style up from the
+# gallery. Every asset here permits tracing, so these tests exercise learning
+# rather than the trace-permission gate (see test_trace_permission.py).
 _STYLE_ASSETS = {
     "manga_anime": "ls_synthetic_ac1f55b7390698a7",
     "western_ink": "ls_synthetic_4822d3e3a4cefde7",
     "realistic_academic": "ls_synthetic_34579de628de2f89",
-    "cartoon": "ls_synthetic_f1becf0b9d67dcc3",
+    "cartoon": "ls_synthetic_ee05835d4e94f4f3",
     "gesture_sketch": "ls_synthetic_fa19d028df6f073c",
 }
+
+
+def event_body(
+    session_id: str,
+    event: str,
+    style: str,
+    *,
+    asset_id: str | None = None,
+    query_revision: int = 4,
+    event_uuid: str | None = None,
+    include_style: bool = False,
+) -> dict[str, object]:
+    body: dict[str, object] = {
+        "event_uuid": event_uuid or str(uuid.uuid4()),
+        "session_id": session_id,
+        "asset_id": asset_id or _STYLE_ASSETS.get(style, _STYLE_ASSETS["cartoon"]),
+        "event": event,
+        "query_revision": query_revision,
+    }
+    if include_style:
+        body["style"] = style
+    return body
 
 
 def _event(
@@ -39,13 +65,7 @@ def _event(
 ) -> int:
     response = client.post(
         "/api/v1/events",
-        json={
-            "session_id": session_id,
-            "asset_id": asset_id or _STYLE_ASSETS.get(style, _STYLE_ASSETS["cartoon"]),
-            "event": event,
-            "style": style,
-            "query_revision": query_revision,
-        },
+        json=event_body(session_id, event, style, asset_id=asset_id, query_revision=query_revision),
     )
     return response.status_code
 
@@ -68,38 +88,38 @@ def test_new_profile_uses_fixed_default_order(client: TestClient) -> None:
 
 
 def test_events_are_recorded_with_server_timestamp(client: TestClient, session_id: str) -> None:
-    response = client.post(
-        "/api/v1/events",
-        json={
-            "session_id": session_id,
-            "asset_id": _STYLE_ASSETS["cartoon"],
-            "event": "pin",
-            "style": "cartoon",
-            "query_revision": 1,
-        },
-    )
+    sent = event_body(session_id, "pin", "cartoon", query_revision=1)
+    response = client.post("/api/v1/events", json=sent)
     assert response.status_code == 201
     body = response.json()
     assert body["id"] >= 1
+    assert body["event_uuid"] == sent["event_uuid"]
+    assert body["recorded"] is True
+    assert body["replayed"] is False
     datetime.fromisoformat(body["created_at"].replace("Z", "+00:00"))  # parses
 
 
 def test_invalid_event_payloads_are_422(client: TestClient, session_id: str) -> None:
     assert _event(client, session_id, "like", "cartoon") == 422
-    assert _event(client, session_id, "pin", "oil") == 422
     assert _event(client, "nope", "pin", "cartoon") == 422
+    # event_uuid is required: an event without an identity cannot be idempotent.
+    body = event_body(session_id, "pin", "cartoon")
+    del body["event_uuid"]
+    assert client.post("/api/v1/events", json=body).status_code == 422
+    body = event_body(session_id, "pin", "cartoon", event_uuid="not-a-uuid")
+    assert client.post("/api/v1/events", json=body).status_code == 422
 
 
 def test_unknown_asset_is_404(client: TestClient, session_id: str) -> None:
     response = client.post(
         "/api/v1/events",
-        json={
-            "session_id": session_id,
-            "asset_id": "ls_synthetic_0000000000000000",
-            "event": "open",
-            "style": "cartoon",
-            "query_revision": 1,
-        },
+        json=event_body(
+            session_id,
+            "open",
+            "cartoon",
+            asset_id="ls_synthetic_0000000000000000",
+            query_revision=1,
+        ),
     )
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "asset_not_found"
@@ -121,15 +141,18 @@ def test_disabled_asset_is_404(client: TestClient, session_id: str) -> None:
 def test_event_style_comes_from_gallery_not_client(
     client: TestClient, session_id: str, settings: Settings
 ) -> None:
+    # A client may still *send* style (older builds do); it is accepted and
+    # ignored, never stored and never part of the request's identity.
     response = client.post(
         "/api/v1/events",
-        json={
-            "session_id": session_id,
-            "asset_id": _STYLE_ASSETS["cartoon"],
-            "event": "open",
-            "style": "manga_anime",  # spoof
-            "query_revision": 1,
-        },
+        json=event_body(
+            session_id,
+            "open",
+            "manga_anime",  # spoofed style...
+            asset_id=_STYLE_ASSETS["cartoon"],  # ...on a cartoon asset
+            query_revision=1,
+            include_style=True,
+        ),
     )
     assert response.status_code == 201
     connection = connect(settings.db_path)
@@ -168,6 +191,108 @@ def test_unpin_cancels_pin(client: TestClient, session_id: str) -> None:
 def test_unpin_without_pin_does_not_penalize(client: TestClient, session_id: str) -> None:
     _event(client, session_id, "unpin", "cartoon")
     assert client.get("/api/v1/preferences").json()["row_order"] == DEFAULT
+
+
+# ------------------------------------------------ zero-weight unpin semantics
+#
+# Agreed semantics, asserted explicitly here:
+#   * unpin weighs 0 — it is never a penalty, and never pushes a style below
+#     a style the artist never touched;
+#   * unpin DOES end the matching pin's contribution: the +3 exists only while
+#     the asset is actually pinned;
+#   * pins themselves are durable state (see test_pins.py); the events below
+#     are only the learning signal that accompanies them.
+
+
+def test_unpin_weight_is_zero(tmp_path: Path) -> None:
+    from linescout_api.preferences import EVENT_WEIGHTS
+    from linescout_api.schemas import InteractionEvent
+
+    assert EVENT_WEIGHTS[InteractionEvent.UNPIN] == 0.0
+
+    now = datetime.now(UTC)
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    unpinned = connect(tmp_path / "unpinned.sqlite3")
+    migrate(unpinned)
+    untouched = connect(tmp_path / "untouched.sqlite3")
+    migrate(untouched)
+    # A cartoon pin that was later unpinned, plus a gesture open in both DBs.
+    for connection in (unpinned, untouched):
+        _insert_event(
+            connection,
+            session_id="s",
+            asset_id="b",
+            event="open",
+            style="gesture_sketch",
+            created_at=stamp,
+        )
+    _insert_event(
+        unpinned, session_id="s", asset_id="a", event="pin", style="cartoon", created_at=stamp
+    )
+    _insert_event(
+        unpinned, session_id="s", asset_id="a", event="unpin", style="cartoon", created_at=stamp
+    )
+    # Cartoon ends up exactly where a never-touched style is: zero, not negative.
+    assert compute_affinities(unpinned, half_life_days=30.0, now=now) == compute_affinities(
+        untouched, half_life_days=30.0, now=now
+    )
+    unpinned.close()
+    untouched.close()
+
+
+def test_unpin_removes_the_active_pin_contribution(tmp_path: Path) -> None:
+    now = datetime.now(UTC)
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    connection = connect(tmp_path / "toggle.sqlite3")
+    migrate(connection)
+    baseline = compute_affinities(connection, half_life_days=30.0, now=now)
+
+    _insert_event(
+        connection, session_id="s", asset_id="a", event="pin", style="cartoon", created_at=stamp
+    )
+    pinned = compute_affinities(connection, half_life_days=30.0, now=now)
+    assert pinned[PrimaryStyle.CARTOON] > baseline[PrimaryStyle.CARTOON]
+
+    _insert_event(
+        connection, session_id="s", asset_id="a", event="unpin", style="cartoon", created_at=stamp
+    )
+    assert compute_affinities(connection, half_life_days=30.0, now=now) == baseline
+
+    # Re-pinning starts a new contribution; it is not "double credit".
+    _insert_event(
+        connection, session_id="s", asset_id="a", event="pin", style="cartoon", created_at=stamp
+    )
+    assert compute_affinities(connection, half_life_days=30.0, now=now) == pinned
+    connection.close()
+
+
+def test_repeated_pins_cannot_refresh_the_pin_contribution(tmp_path: Path) -> None:
+    """Pin drumming keeps the *earliest* pin of the active run as its date."""
+    now = datetime.now(UTC)
+    old = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    fresh = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    drummed = connect(tmp_path / "drummed.sqlite3")
+    migrate(drummed)
+    once = connect(tmp_path / "once.sqlite3")
+    migrate(once)
+    for connection in (drummed, once):
+        _insert_event(
+            connection,
+            session_id="s",
+            asset_id="a",
+            event="pin",
+            style="cartoon",
+            created_at=old,
+        )
+    for _ in range(5):
+        _insert_event(
+            drummed, session_id="s", asset_id="a", event="pin", style="cartoon", created_at=fresh
+        )
+    assert compute_affinities(drummed, half_life_days=30.0, now=now) == compute_affinities(
+        once, half_life_days=30.0, now=now
+    )
+    drummed.close()
+    once.close()
 
 
 def test_repeated_clicks_do_not_write_duplicate_rows(
@@ -243,17 +368,18 @@ def _insert_event(
     created_at: str | None = None,
     query_revision: int = 1,
 ) -> None:
+    identity = str(uuid.uuid4())
     if created_at is None:
         connection.execute(
-            "INSERT INTO events(session_id, asset_id, event, style, query_revision)"
-            " VALUES (?,?,?,?,?)",
-            (session_id, asset_id, event, style, query_revision),
+            "INSERT INTO events(event_uuid, session_id, asset_id, event, style, query_revision)"
+            " VALUES (?,?,?,?,?,?)",
+            (identity, session_id, asset_id, event, style, query_revision),
         )
         return
     connection.execute(
-        "INSERT INTO events(session_id, asset_id, event, style, query_revision, created_at)"
-        " VALUES (?,?,?,?,?,?)",
-        (session_id, asset_id, event, style, query_revision, created_at),
+        "INSERT INTO events(event_uuid, session_id, asset_id, event, style, query_revision,"
+        " created_at) VALUES (?,?,?,?,?,?,?)",
+        (identity, session_id, asset_id, event, style, query_revision, created_at),
     )
 
 
@@ -286,35 +412,69 @@ def test_thirty_day_half_life_decays_old_events(tmp_path: Path) -> None:
     connection.close()
 
 
-def test_repeated_traces_on_one_asset_match_a_single_trace(tmp_path: Path) -> None:
+def test_repeated_traces_cannot_be_stored_or_refresh_the_contribution(tmp_path: Path) -> None:
+    """Coalescing is enforced by the database, and dated by the first click.
+
+    A repeat of the same (session, asset, event, revision, gallery) is not a
+    second contribution: SQLite refuses the row outright, so a retry storm can
+    neither add decayed weight nor move the contribution's timestamp forward.
+    """
     now = datetime.now(UTC)
     spam = connect(tmp_path / "spam.sqlite3")
     migrate(spam)
     once = connect(tmp_path / "once.sqlite3")
     migrate(once)
-    for hours in range(8):
+    first = (now - timedelta(hours=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    for hours in range(8, 0, -1):
         ts = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        _insert_event(
-            spam,
-            session_id="s",
-            asset_id="a",
-            event="trace",
-            style="cartoon",
-            created_at=ts,
-        )
+        if hours == 8:
+            _insert_event(
+                spam, session_id="s", asset_id="a", event="trace", style="cartoon", created_at=ts
+            )
+            continue
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_event(
+                spam, session_id="s", asset_id="a", event="trace", style="cartoon", created_at=ts
+            )
     _insert_event(
-        once,
-        session_id="s",
-        asset_id="a",
-        event="trace",
-        style="cartoon",
-        created_at=now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        once, session_id="s", asset_id="a", event="trace", style="cartoon", created_at=first
     )
+    assert int(spam.execute("SELECT COUNT(*) FROM events").fetchone()[0]) == 1
     spam_aff = compute_affinities(spam, half_life_days=30.0, now=now)
     once_aff = compute_affinities(once, half_life_days=30.0, now=now)
     assert spam_aff == once_aff
     spam.close()
     once.close()
+
+
+def test_aggregation_dates_a_contribution_by_its_earliest_row(tmp_path: Path) -> None:
+    """Historic duplicates (pre-0004 rows) count once, at the earliest time."""
+    now = datetime.now(UTC)
+    connection = connect(tmp_path / "legacy.sqlite3")
+    migrate(connection)
+    old = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    fresh = now.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    # Bypass the coalescing index the way a pre-0004 database would look.
+    connection.execute("DROP INDEX events_contribution_idx")
+    for stamp in (old, fresh):
+        _insert_event(
+            connection,
+            session_id="s",
+            asset_id="a",
+            event="open",
+            style="cartoon",
+            created_at=stamp,
+        )
+    reference = connect(tmp_path / "reference.sqlite3")
+    migrate(reference)
+    _insert_event(
+        reference, session_id="s", asset_id="a", event="open", style="cartoon", created_at=old
+    )
+    assert compute_affinities(connection, half_life_days=30.0, now=now) == compute_affinities(
+        reference, half_life_days=30.0, now=now
+    )
+    connection.close()
+    reference.close()
 
 
 def test_distinct_assets_still_accumulate(tmp_path: Path) -> None:

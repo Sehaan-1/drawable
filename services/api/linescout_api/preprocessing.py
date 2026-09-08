@@ -23,6 +23,13 @@ MAX_SNAPSHOT_EDGE = 4096
 MAX_COMPRESSED_BYTES = 256 * 1024  # 256 KiB — gzipped strokes, as uploaded
 MAX_DECOMPRESSED_BYTES = 1024 * 1024  # 1 MiB — stroke JSON after decompression
 
+# Identity of the snapshot-preprocessing pipeline (PNG decode, grayscale
+# normalization, ink measurement, insufficiency rule). Bumped only when a
+# change would make two calls with identical inputs produce meaningfully
+# different stats; echoed on every search response and in /health so clients
+# can tell whether two queries were prepared by the same code.
+PREPROCESSING_VERSION = "1.0.0"
+
 
 class SnapshotError(ValueError):
     def __init__(self, code: str, message: str, received_bytes: int | None = None) -> None:

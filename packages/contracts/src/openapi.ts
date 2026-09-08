@@ -21,6 +21,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assets/{asset_id}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Asset Permissions
+         * @description Permission metadata for an eligible asset.
+         *
+         *     This is the authoritative answer to "may this asset be traced?": it comes
+         *     from the recorded source permission (``allowed_trace``), never from
+         *     whether the line art is native or extracted. ``trace_url`` is ``null``
+         *     when tracing is not permitted, so a client restoring a saved trace layer
+         *     cannot resurrect an asset whose permission was revoked.
+         */
+        get: operations["get_asset_permissions_api_v1_assets__asset_id__permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/curation/assets/{asset_id}/{kind}": {
         parameters: {
             query?: never;
@@ -330,7 +356,7 @@ export interface paths {
         put?: never;
         /**
          * Record Event
-         * @description Record an interaction. Timestamp and style are generated server-side.
+         * @description Record an interaction. Timestamp, style, and namespace are server-side.
          */
         post: operations["record_event_api_v1_events_post"];
         delete?: never;
@@ -351,6 +377,53 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pins
+         * @description Pins for this API's gallery namespace, revalidated on every read.
+         */
+        get: operations["get_pins_api_v1_pins_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pins/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Pin Asset
+         * @description Pin an asset. Idempotent: re-pinning keeps the original pin time.
+         */
+        put: operations["pin_asset_api_v1_pins__asset_id__put"];
+        post?: never;
+        /**
+         * Unpin Asset
+         * @description Unpin an asset. Idempotent, and never a negative learning signal.
+         *
+         *     Unpinning an asset that is not pinned (or no longer exists) succeeds: the
+         *     caller's intent — "this must not be pinned" — is already true.
+         */
+        delete: operations["unpin_asset_api_v1_pins__asset_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -436,6 +509,37 @@ export interface components {
              * @default false
              */
             training: boolean;
+        };
+        /**
+         * AssetPermissions
+         * @description Permission metadata a client needs before *using* an asset.
+         *
+         *     ``trace_url`` is populated only when tracing is permitted, so a client
+         *     that restores a saved trace layer cannot resurrect an asset whose trace
+         *     permission was revoked.
+         */
+        AssetPermissions: {
+            /** Allowed Display */
+            allowed_display: boolean;
+            /** Allowed Trace */
+            allowed_trace: boolean;
+            /** Asset Id */
+            asset_id: string;
+            /** Asset Url */
+            asset_url: string;
+            /** Attribution */
+            attribution?: string | null;
+            /**
+             * Attribution Required
+             * @default false
+             */
+            attribution_required: boolean;
+            origin: components["schemas"]["LineArtOrigin"];
+            permission_basis: components["schemas"]["PermissionBasis"];
+            /** Thumbnail Url */
+            thumbnail_url: string;
+            /** Trace Url */
+            trace_url?: string | null;
         };
         /** Body_search_api_v1_search_post */
         Body_search_api_v1_search_post: {
@@ -765,6 +869,12 @@ export interface components {
             /** Asset Id */
             asset_id: string;
             event: components["schemas"]["InteractionEvent"];
+            /**
+             * Event Uuid
+             * Format: uuid
+             * @description Client-generated UUID identifying this interaction attempt (idempotency key).
+             */
+            event_uuid: string;
             /** Query Revision */
             query_revision: number;
             /**
@@ -772,16 +882,43 @@ export interface components {
              * Format: uuid
              */
             session_id: string;
-            /** @description Client-reported style. Ignored; the gallery asset's primary style is stored. */
-            style: components["schemas"]["PrimaryStyle"];
+            /**
+             * @deprecated
+             * @description Deprecated and ignored. Style is derived server-side from the gallery row, so this field is not part of the request's authoritative payload and never affects idempotency. It is accepted only so older clients keep working.
+             */
+            style?: components["schemas"]["PrimaryStyle"] | null;
         };
         /** EventResponse */
         EventResponse: {
             /** Created At */
             created_at: string;
+            /**
+             * Event Uuid
+             * Format: uuid
+             */
+            event_uuid: string;
             /** Id */
             id: number;
+            /**
+             * Recorded
+             * @default true
+             */
+            recorded: boolean;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
         };
+        /**
+         * GalleryKind
+         * @description Namespace an interaction or pin belongs to.
+         *
+         *     Stamped server-side from the API's own mode: fixture-gallery state can
+         *     never mix with live-gallery state.
+         * @enum {string}
+         */
+        GalleryKind: "fixture" | "live";
         /** HealthResponse */
         HealthResponse: {
             /** Api Version */
@@ -812,6 +949,8 @@ export interface components {
             index_version: string | null;
             /** Models */
             models: components["schemas"]["ModelVersion"][];
+            /** Preprocessing Version */
+            preprocessing_version: string;
             /** Ready */
             ready: boolean;
             /** Schema Version */
@@ -965,6 +1104,63 @@ export interface components {
             /** Permission Url */
             permission_url?: string | null;
         };
+        /**
+         * PinnedAsset
+         * @description A durably pinned reference, projected against the *current* gallery.
+         *
+         *     The projection is recomputed on every read, so a permission or eligibility
+         *     change is reflected immediately: ``trace_allowed`` is the asset's stored
+         *     trace permission (never inferred from ``origin``), and an asset that lost
+         *     display eligibility does not appear here at all.
+         */
+        PinnedAsset: {
+            /** Asset Id */
+            asset_id: string;
+            /** Asset Url */
+            asset_url: string;
+            origin: components["schemas"]["LineArtOrigin"];
+            /** Person Count */
+            person_count?: number | null;
+            /**
+             * Person Count Approximate
+             * @default false
+             */
+            person_count_approximate: boolean;
+            /** Pinned At */
+            pinned_at: string;
+            primary_scope: components["schemas"]["ScopeLabel"];
+            /** Quality */
+            quality: number;
+            /** Scopes */
+            scopes: components["schemas"]["ScopeLabel"][];
+            /** Secondary Scopes */
+            secondary_scopes?: components["schemas"]["ScopeLabel"][];
+            style: components["schemas"]["PrimaryStyle"];
+            /** Thumbnail Url */
+            thumbnail_url: string;
+            /**
+             * Trace Allowed
+             * @description Stored per-asset trace permission; never derived from origin.
+             */
+            trace_allowed: boolean;
+        };
+        /** PinsResponse */
+        PinsResponse: {
+            gallery_kind: components["schemas"]["GalleryKind"];
+            /** Pins */
+            pins: components["schemas"]["PinnedAsset"][];
+            /**
+             * Revoked
+             * @description Pins removed by this read because revalidation found the asset ineligible (permission revoked, review changed, derivatives stale, or asset gone).
+             */
+            revoked?: components["schemas"]["RevokedPin"][];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+        };
         /** PreferencesResponse */
         PreferencesResponse: {
             /** Affinities */
@@ -993,6 +1189,7 @@ export interface components {
             learning_enabled?: boolean | null;
             /**
              * Reset Affinities
+             * @description Forget learned affinities. Pins are durable application state and are never cleared by a reset.
              * @default false
              */
             reset_affinities: boolean;
@@ -1088,6 +1285,19 @@ export interface components {
          */
         ReviewState: "unreviewed" | "accepted" | "rejected" | "quarantined";
         /**
+         * RevokedPin
+         * @description A pin dropped because its asset is no longer eligible to be shown.
+         */
+        RevokedPin: {
+            /** Asset Id */
+            asset_id: string;
+            /**
+             * Reasons
+             * @description Stable machine-readable serving blockers, e.g. display_not_permitted.
+             */
+            reasons: string[];
+        };
+        /**
          * ScopeBreakdown
          * @description Reviewed/accepted/rejected counts for a single scope bucket.
          */
@@ -1144,6 +1354,14 @@ export interface components {
         SearchMode: "insufficient" | "provisional" | "confident";
         /** SearchResponse */
         SearchResponse: {
+            /** Api Version */
+            api_version: string;
+            /** Canvas Height */
+            canvas_height: number;
+            /** Canvas Width */
+            canvas_width: number;
+            /** Counts Approximate */
+            counts_approximate: boolean;
             /** Dataset Version */
             dataset_version?: string | null;
             /** Degradations */
@@ -1153,6 +1371,13 @@ export interface components {
             /** Index Version */
             index_version?: string | null;
             mode: components["schemas"]["SearchMode"];
+            /** Preprocessing Version */
+            preprocessing_version: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
             /**
              * Revision
              * @description Echoes the request revision unchanged.
@@ -1167,6 +1392,7 @@ export interface components {
             schema_version: 2;
             /** Scope Predictions */
             scope_predictions: components["schemas"]["ScopePrediction"][];
+            stroke_status: components["schemas"]["StrokeStatus"];
             timing: components["schemas"]["SearchTiming"];
             /** Warning */
             warning?: string | null;
@@ -1404,6 +1630,16 @@ export interface components {
              */
             version: 1;
         };
+        /**
+         * StrokeStatus
+         * @description Whether a vector ``strokes`` payload accompanied the snapshot.
+         *
+         *     ``absent`` means the query was raster-only (e.g. an imported image), so the
+         *     reported ``stroke_count``/``point_count`` are client estimates over the
+         *     snapshot with no vector ground truth to verify them against.
+         * @enum {string}
+         */
+        StrokeStatus: "present" | "absent";
         /** StyleAffinity */
         StyleAffinity: {
             /**
@@ -1473,6 +1709,46 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_asset_permissions_api_v1_assets__asset_id__permissions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetPermissions"];
+                };
+            };
+            /** @description Unknown or ineligible asset */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -1866,6 +2142,33 @@ export interface operations {
                     "application/json": components["schemas"]["EventResponse"];
                 };
             };
+            /** @description Tracing this asset is not permitted */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown or ineligible asset */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description event_uuid reused with a different payload */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -1893,6 +2196,97 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    get_pins_api_v1_pins_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinsResponse"];
+                };
+            };
+        };
+    };
+    pin_asset_api_v1_pins__asset_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinsResponse"];
+                };
+            };
+            /** @description Unknown or ineligible asset */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unpin_asset_api_v1_pins__asset_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PinsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2056,6 +2450,7 @@ export const curationCandidateOriginValues: ReadonlyArray<FlattenedDeepRequired<
 export const curationCandidateReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const degradationKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Degradation"]["kind"]> = ["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty"];
 export const derivativeProcessResponseProcessing_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["DerivativeProcessResponse"]["processing_state"]> = ["pending", "complete", "failed"];
+export const galleryKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["GalleryKind"]> = ["fixture", "live"];
 export const healthResponseDeviceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["device"]> = ["cuda", "cpu"];
 export const healthResponseWarmupValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["warmup"]> = ["pending", "complete", "skipped"];
 export const interactionEventValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["InteractionEvent"]> = ["open", "pin", "unpin", "trace"];
@@ -2077,4 +2472,5 @@ export const sfwScreeningMethodValues: ReadonlyArray<FlattenedDeepRequired<compo
 export const sfwVerdictValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwVerdict"]> = ["safe", "unsafe", "unsure"];
 export const strokePointerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["pointer"]> = ["pen", "mouse", "touch"];
 export const strokeToolValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["tool"]> = ["pressure", "monoline", "eraser"];
+export const strokeStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["StrokeStatus"]> = ["present", "absent"];
 export const styleSelectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["StyleSelection"]> = ["all", "manga_anime", "western_ink", "realistic_academic", "cartoon", "gesture_sketch"];

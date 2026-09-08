@@ -27,19 +27,30 @@ function svgData(id: number, label: string) {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
 }
 
+/**
+ * Origin and trace permission are independent facts about an asset: `native`
+ * describes how the line art was produced, `traceAllowed` is what the source's
+ * permissions allow. The fixture gallery deliberately contains both mismatched
+ * combinations (native but not traceable, extracted but traceable) so the UI
+ * can never get away with inferring one from the other.
+ */
 export const fixtureAssets: ReferenceAsset[] = Array.from({ length: 30 }, (_, index) => {
   const style = styles[index % styles.length] ?? 'Gesture'
   const scope = scopes[index % scopes.length] ?? 'Figure study'
+  const native = index % 3 !== 0
+  const traceAllowed = index % 4 !== 2
+  const imageUrl = svgData(index, scope)
   return {
     id: `fixture-${index + 1}`,
     title: `${scope} ${String(index + 1).padStart(2, '0')}`,
-    imageUrl: svgData(index, scope),
+    imageUrl,
     style,
     scope,
     source: 'drawable procedural fixture',
-    native: index % 3 !== 0,
+    native,
     match: index % 4 === 0 ? 'Strong' : index % 3 === 0 ? 'Related' : 'Close',
-    traceAllowed: index % 3 !== 0,
+    traceAllowed,
+    traceUrl: traceAllowed ? imageUrl : null,
   }
 })
 
@@ -73,7 +84,14 @@ export async function fixtureSearch(request: SearchRequest, signal: AbortSignal)
     }, { once: true })
   })
   if (lowerHint.includes('error')) throw new Error('The fixture search was asked to fail.')
-  const base = { revision: request.revision, generation: request.generation }
+  const base = {
+    revision: request.revision,
+    generation: request.generation,
+    // The offline fixture reflects the same provenance rules as the API: exact
+    // counts only when a vector payload was actually delivered.
+    countsApproximate: !request.strokes,
+    strokeStatus: request.strokes ? 'present' : 'absent',
+  } satisfies Pick<SearchResponse, 'revision' | 'generation' | 'countsApproximate' | 'strokeStatus'>
   if (request.strokeCount === 0) {
     return { ...base, mode: 'empty', interpretation: 'Blank canvas', groups: [] }
   }
