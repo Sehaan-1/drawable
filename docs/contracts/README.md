@@ -54,7 +54,8 @@ Everything else in the v3 contract exists to make these auditable:
 
 These properties are enforced at every layer: Pydantic manifest validators,
 the colab pipeline build, the SQLite `CHECK` constraints
-(`migrations/0002_contract_v2.sql`, `0003_eligibility_v3.sql`), the gallery
+(`migrations/0002_contract_v2.sql`, `0003_eligibility_v3.sql`,
+`0004_interaction_identity.sql`), the gallery
 loader/serving routes, and the search ranker (defence in depth). The derived
 `assets.enabled` column is a cache of the canonical predicate and is never
 hand-edited.
@@ -71,5 +72,9 @@ hand-edited.
   (`YYYY.MM.DD[-suffix]`); **`index_version`** is the manifest content hash
   (64 hex chars; the retrieval index is keyed by it). The API may report the
   first 16 hex chars of `index_version` to clients.
-- **Client pin storage** is versioned by key (`drawable-pins:<kind>:<version>`)
-  so format changes are additive, never destructive rewrites.
+- **Database schema version** is `4` (`migration_reports`); `0004` adds event
+  identity (`event_uuid`, `payload_hash`) and the durable `pins` table.
+- **Pin storage** is namespaced per gallery kind. Live pins are API rows;
+  fixture pins are browser-local and versioned by key
+  (`drawable-pins:fixture:<version>`) so format changes are additive, never
+  destructive rewrites.

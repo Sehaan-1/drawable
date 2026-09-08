@@ -93,8 +93,24 @@ A pure materialisation plus conservative checks:
   `derivative_problem_count`; `migration_reports` records what the migration
   did (report, never policy).
 
+`0004_interaction_identity.sql` (database schema version `4`):
+
+- `events` gains `event_uuid` (unique) and `payload_hash`. Existing rows get a
+  random uuid and a `NULL` hash, so a legacy uuid can never satisfy a replay —
+  reusing one is reported as a conflict rather than silently accepted.
+- Duplicate `open` / `trace` contributions for the same
+  `(session_id, asset_id, event, query_revision, gallery_kind)` are collapsed
+  to `MIN(id)` — the **earliest** row, so migrating cannot move a contribution
+  forward in time — and a partial unique index keeps them collapsed. `pin` /
+  `unpin` rows stay append-only.
+- New `pins(gallery_kind, asset_id, pinned_at)` table, primary key
+  `(gallery_kind, asset_id)`, `gallery_kind IN ('live','fixture')`. Pins are
+  durable state: no migration, affinity reset, or learning toggle clears them.
+- `preferences`, `curation_labels`, `search_log`, `snapshots` are untouched;
+  `migration_reports` records the dedupe counts.
+
 `tests/test_migration_safety.py` exercises this: a populated v1 database
-migrates through both steps, loses its assets cache, keeps user data, and the
+migrates through every step, loses its assets cache, keeps user data, and the
 CHECKs reject every no-gain violation.
 
 ## Compatibility failures (by design)

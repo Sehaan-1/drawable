@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
@@ -29,10 +29,10 @@ def test_cross_origin_mutation_is_forbidden(client: TestClient, session_id: str)
     response = client.post(
         "/api/v1/events",
         json={
+            "event_uuid": str(uuid4()),
             "session_id": session_id,
             "asset_id": "ls_synthetic_0000000000000000",
             "event": "open",
-            "style": "cartoon",
             "query_revision": 1,
         },
         headers={"origin": "http://evil.example"},
@@ -85,7 +85,7 @@ def test_health_reports_every_spec_field(client: TestClient) -> None:
     assert body["fixture_mode"] is True
     assert body["gallery_size"] == 23  # 24 synthetic records, one disabled
     assert body["dataset_version"] == "2026.09.08-synthetic"
-    assert body["schema_version"] == 3  # v3: eligibility + derivative currency
+    assert body["schema_version"] == 4  # v4: event identity + durable pins
     assert {model["name"] for model in body["models"]} == {
         "semantic",
         "structural",
