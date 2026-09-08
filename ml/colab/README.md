@@ -93,6 +93,19 @@ the moment that fork is re-created or detached. Merging into the canonical repos
 is what makes the pin permanent: a merge into `Sehaan-1/drawable` makes the mirror
 permanent and leaves the primary URL relying on the fork network still.
 
+One consequence of pinning a commit rather than a branch, worth naming because it
+looks wrong at first glance: the notebook *inside* the pinned tree still defaults to
+the pin that was current when that tree was written — a commit cannot contain its own
+SHA. It does not matter what runs, because cell 2 verifies HEAD against whatever
+`REPO_PIN` holds in the notebook you actually opened, and the code it puts on
+`sys.path` is the pinned tree's. To see the pin mean something, check it from the
+outside:
+
+```bash
+git -C /tmp/ls-pin rev-parse HEAD          # the pin
+grep -c 'source_rating+opennsfw2' /tmp/ls-pin/ml/linescout_ml/colab/config.py
+```
+
 `0000000000000000000000000000000000000000` is what the pin held before that commit
 existed: a format-valid SHA no repository contains, named out loud by
 `COLAB_PIN_PLACEHOLDER` so that `linescout-repro pin --check` (wired into CI) fails
