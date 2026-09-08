@@ -35,6 +35,7 @@ uv sync --frozen --extra gpu --python 3.11
 
 # Audit the Colab setup without a GPU: pins, lock coverage, the notebook's imports
 .venv/bin/linescout-repro selfcheck
+```
 
 The `dev` extra is enough for everything CI does: the pipeline's CPU stages need
 only `numpy` and `pillow`, and the GPU stages keep their imports lazy so a fresh

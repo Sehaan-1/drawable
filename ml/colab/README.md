@@ -399,7 +399,7 @@ what CI does:
 cd ml
 uv sync --frozen --extra dev --python 3.11
 
-.venv/bin/pytest tests/test_colab_pipeline.py -q   # end-to-end on generated images
+.venv/bin/pytest tests/test_colab_pipeline.py -q   # end-to-end on generated images + reporting cells
 .venv/bin/pytest tests/test_colab_notebook.py -q   # notebook structure + dry-run cell
 ```
 
@@ -408,6 +408,13 @@ names it imports are really exported by the package, asserts that no cell tries
 to reinstall torch, and **executes the notebook's dry-run cell** against the
 committed fixture. A refactor that breaks the notebook fails CI rather than
 failing someone's GPU session.
+
+`tests/test_colab_pipeline.py` additionally **executes the notebook's reporting
+cells** (extract, measure, de-duplicate, labels, manifest slice) against a completed
+runner and asserts on what they print. This exercises model attribute access and
+string lookups (like `getattr(item, field)`) against real outputs, preventing
+stale attributes from surviving undetected in cells that only run at the end of
+a session.
 
 With the GPU extras installed (`uv sync --frozen --extra gpu`) the same
 `PipelineRunner` runs headless:
