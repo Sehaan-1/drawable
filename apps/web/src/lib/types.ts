@@ -119,6 +119,12 @@ export interface SearchResponse {
   groups: ReferenceGroup[]
   warning?: string | null
   timing?: SearchTiming
+  /** Server-echoed provenance: false means counts were exactly verified. */
+  countsApproximate?: boolean
+  /** Whether a vector strokes payload accompanied this query. */
+  strokeStatus?: 'present' | 'absent'
+  preprocessingVersion?: string
+  apiVersion?: string
 }
 
 export interface HealthResult {

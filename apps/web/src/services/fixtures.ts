@@ -73,7 +73,14 @@ export async function fixtureSearch(request: SearchRequest, signal: AbortSignal)
     }, { once: true })
   })
   if (lowerHint.includes('error')) throw new Error('The fixture search was asked to fail.')
-  const base = { revision: request.revision, generation: request.generation }
+  const base = {
+    revision: request.revision,
+    generation: request.generation,
+    // The offline fixture reflects the same provenance rules as the API: exact
+    // counts only when a vector payload was actually delivered.
+    countsApproximate: !request.strokes,
+    strokeStatus: request.strokes ? 'present' : 'absent',
+  } satisfies Pick<SearchResponse, 'revision' | 'generation' | 'countsApproximate' | 'strokeStatus'>
   if (request.strokeCount === 0) {
     return { ...base, mode: 'empty', interpretation: 'Blank canvas', groups: [] }
   }

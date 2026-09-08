@@ -6,14 +6,22 @@ import time
 from typing import Annotated, NoReturn
 from uuid import UUID
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from linescout_ml.taxonomy import PrimaryStyle
 
 from linescout_api import fixture_ranker
+from linescout_api.config import MAX_POINT_COUNT, MAX_REVISION, MAX_STROKE_COUNT
 from linescout_api.deps import State
-from linescout_api.errors import bad_request, service_unavailable, too_large, unprocessable
+from linescout_api.errors import (
+    bad_request,
+    resolve_request_id,
+    service_unavailable,
+    too_large,
+    unprocessable,
+)
 from linescout_api.preferences import compute_affinities, read_preferences
 from linescout_api.preprocessing import (
+    PREPROCESSING_VERSION,
     SnapshotError,
     decode_snapshot,
     decode_strokes,
@@ -27,6 +35,8 @@ from linescout_api.schemas import (
     SearchMode,
     SearchResponse,
     SearchTiming,
+    StrokeSequence,
+    StrokeStatus,
     StyleSelection,
 )
 from linescout_api.state import AppState
@@ -45,6 +55,13 @@ def _raise_snapshot_error(error: SnapshotError, field: str, limit: int | None = 
     raise bad_request(error.code, error.message, field)
 
 
+def _vector_point_total(stroke_sequence: StrokeSequence | None) -> int | None:
+    """Exact number of points carried by a delivered vector payload, if any."""
+    if stroke_sequence is None:
+        return None
+    return sum(len(stroke.points) for stroke in stroke_sequence.strokes)
+
+
 @router.post(
     "/search",
     response_model=SearchResponse,
@@ -56,13 +73,14 @@ def _raise_snapshot_error(error: SnapshotError, field: str, limit: int | None = 
     },
 )
 async def search(
+    request: Request,
     state: State,
     session_id: Annotated[UUID, Form()],
-    revision: Annotated[int, Form(ge=1)],
+    revision: Annotated[int, Form(ge=1, le=MAX_REVISION)],
     canvas_width: Annotated[int, Form(gt=0)],
     canvas_height: Annotated[int, Form(gt=0)],
-    stroke_count: Annotated[int, Form(ge=0)],
-    point_count: Annotated[int, Form(ge=0)],
+    stroke_count: Annotated[int, Form(ge=0, le=MAX_STROKE_COUNT)],
+    point_count: Annotated[int, Form(ge=0, le=MAX_POINT_COUNT)],
     image: Annotated[UploadFile, File()],
     strokes: Annotated[UploadFile | None, File()] = None,
     text_hint: Annotated[str | None, Form()] = None,
@@ -70,6 +88,7 @@ async def search(
 ) -> SearchResponse:
     settings = state.settings
     started = time.perf_counter()
+    request_id = resolve_request_id(request)
 
     expected_canvas = settings.canvas_logical_size
     if canvas_width != expected_canvas:
@@ -138,6 +157,9 @@ async def search(
     except SnapshotError as error:
         _raise_snapshot_error(error, "strokes", settings.max_strokes_bytes)
 
+    # Canvas dimensions are validated exactly against the vector payload; a
+    # logical 2048 request paired with a non-2048 vector canvas is rejected
+    # outright (never rescaled or silently reinterpreted).
     if stroke_sequence is not None and (
         stroke_sequence.canvas_width != expected_canvas
         or stroke_sequence.canvas_height != expected_canvas
@@ -148,12 +170,23 @@ async def search(
             "strokes",
         )
 
+    # stroke_count is structural (one JSON element per stroke) and must match
+    # the delivered payload exactly.
     if stroke_sequence is not None and len(stroke_sequence.strokes) != stroke_count:
         raise unprocessable(
             "stroke_count_mismatch",
             "stroke_count does not match the strokes payload",
             "stroke_count",
         )
+
+    stroke_status = StrokeStatus.PRESENT if stroke_sequence is not None else StrokeStatus.ABSENT
+    vector_point_total = _vector_point_total(stroke_sequence)
+    # point_count is not structural: the vector payload is the ground truth,
+    # and a discrepancy is flagged as approximate rather than silently trusted
+    # or used to reject an otherwise well-formed drawing.
+    counts_approximate = (
+        vector_point_total != point_count
+    )  # None != point_count => True when no vector payload
 
     stats = ink_stats(gray)
     preprocessing_ms = (time.perf_counter() - started) * 1000
@@ -169,24 +202,43 @@ async def search(
             total_ms=round((time.perf_counter() - started) * 1000, 3),
         )
 
-    if is_insufficient(
-        stats, point_count, settings.min_points_for_search, settings.min_ink_diagonal_ratio
-    ):
-        response = SearchResponse(
+    dataset_version = state.gallery.dataset_version if state.gallery else None
+    index_version = state.gallery.manifest_hash[:16] if state.gallery else None
+
+    def base(mode: SearchMode, degradations: list[Degradation]) -> SearchResponse:
+        warning = "; ".join(item.detail for item in degradations) or None
+        return SearchResponse(
+            request_id=request_id,
+            api_version=state.api_version,
             revision=revision,
-            mode=SearchMode.INSUFFICIENT,
+            canvas_width=expected_canvas,
+            canvas_height=expected_canvas,
+            stroke_status=stroke_status,
+            counts_approximate=counts_approximate,
+            mode=mode,
             scope_predictions=[],
             groups=[],
             timing=timing(),
-            degradations=_degradations(state, mode=SearchMode.INSUFFICIENT),
-            dataset_version=state.gallery.dataset_version if state.gallery else None,
-            index_version=state.gallery.manifest_hash[:16] if state.gallery else None,
+            warning=warning,
+            degradations=degradations,
+            preprocessing_version=PREPROCESSING_VERSION,
+            dataset_version=dataset_version,
+            index_version=index_version,
         )
+
+    if is_insufficient(
+        stats, point_count, settings.min_points_for_search, settings.min_ink_diagonal_ratio
+    ):
+        response = base(SearchMode.INSUFFICIENT, _degradations(state, mode=SearchMode.INSUFFICIENT))
         _log_search(state, session_id, response, stroke_count, point_count)
         return response
 
     if not state.ready:
-        raise service_unavailable("not_ready", state.setup_error or "the API is not ready")
+        raise service_unavailable(
+            "not_ready",
+            state.setup_error or "the API is not ready",
+            details=state.readiness_details(),
+        )
 
     # Row order: explicit style from the request overrides the stored preference for this response.
     stored_selected, learning_enabled = read_preferences(state.connection)
@@ -212,19 +264,10 @@ async def search(
     retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
 
     degradations = _degradations(state, mode=mode)
-    warning = "; ".join(item.detail for item in degradations) or None
-
-    response = SearchResponse(
-        revision=revision,
-        mode=mode,
-        scope_predictions=_top_predictions(predictions),
-        groups=groups,
-        timing=timing(retrieval=retrieval_ms),
-        warning=warning,
-        degradations=degradations,
-        dataset_version=state.gallery.dataset_version if state.gallery else None,
-        index_version=state.gallery.manifest_hash[:16] if state.gallery else None,
-    )
+    response = base(mode, degradations)
+    response.scope_predictions = _top_predictions(predictions)
+    response.groups = groups
+    response.timing = timing(retrieval=retrieval_ms)
     _log_search(state, session_id, response, stroke_count, point_count)
     return response
 

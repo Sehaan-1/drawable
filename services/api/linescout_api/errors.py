@@ -138,8 +138,21 @@ def conflict(code: str, message: str, field: str | None = None) -> ApiError:
     return ApiError(409, code, message, field, retryable=False)
 
 
-def service_unavailable(code: str, message: str, field: str | None = None) -> ApiError:
-    return ApiError(503, code, message, field, headers={"Retry-After": "5"}, retryable=True)
+def service_unavailable(
+    code: str,
+    message: str,
+    field: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> ApiError:
+    return ApiError(
+        503,
+        code,
+        message,
+        field,
+        headers={"Retry-After": "5"},
+        retryable=True,
+        details=details,
+    )
 
 
 async def api_error_handler(request: Request, error: Exception) -> JSONResponse:

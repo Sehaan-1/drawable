@@ -22,6 +22,7 @@ __all__ = [
     "ScopeLabel",
     "LineArtOrigin",
     "SearchMode",
+    "StrokeStatus",
     "InteractionEvent",
     "StyleSelection",
 ]
@@ -49,6 +50,18 @@ class StyleSelection(StrEnum):
     REALISTIC_ACADEMIC = "realistic_academic"
     CARTOON = "cartoon"
     GESTURE_SKETCH = "gesture_sketch"
+
+
+class StrokeStatus(StrEnum):
+    """Whether a vector ``strokes`` payload accompanied the snapshot.
+
+    ``absent`` means the query was raster-only (e.g. an imported image), so the
+    reported ``stroke_count``/``point_count`` are client estimates over the
+    snapshot with no vector ground truth to verify them against.
+    """
+
+    PRESENT = "present"
+    ABSENT = "absent"
 
 
 class ApiModel(BaseModel):
@@ -107,6 +120,8 @@ class HealthResponse(ApiModel):
     torch_version: str | None
     api_version: str
     schema_version: int
+    #: Snapshot-preprocessing pipeline identity (see preprocessing.PREPROCESSING_VERSION).
+    preprocessing_version: str
     models: list[ModelVersion]
     dataset_version: str | None
     index_version: str | None
@@ -182,13 +197,29 @@ class SearchResponse(ApiModel):
     schema_version: Literal[2] = Field(
         default=2, description="Payload contract version; bump on any breaking response change."
     )
+    #: Request identity echoed from ``X-Request-Id`` (matches the error envelope).
+    request_id: UUID
+    #: Server build/release identifier for this response.
+    api_version: str
+    #: Request revision echoed unchanged (dedupe / out-of-order guard for clients).
     revision: int = Field(ge=1, description="Echoes the request revision unchanged.")
+    #: Logical canvas the query was validated against (always 2048 today).
+    canvas_width: int
+    canvas_height: int
+    #: Whether a vector ``strokes`` payload accompanied this query.
+    stroke_status: StrokeStatus
+    #: Whether the reported stroke/point counts are exact for this query. True
+    #: when no vector payload was present (raster-only) or the reported point
+    #: count disagreed with the delivered vector point total.
+    counts_approximate: bool
     mode: SearchMode
     scope_predictions: list[ScopePrediction]
     groups: list[SearchGroup]
     timing: SearchTiming
     warning: str | None = None
     degradations: list[Degradation] = Field(default_factory=list)
+    #: Snapshot-preprocessing pipeline identity (see preprocessing.PREPROCESSING_VERSION).
+    preprocessing_version: str
     #: Gallery the results came from; ``None`` when no gallery is loaded.
     dataset_version: str | None = None
     #: Manifest content hash (index version key); ``None`` when no gallery.

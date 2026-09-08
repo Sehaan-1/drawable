@@ -36,3 +36,47 @@ describe('live search mapping', () => {
     expect(matchLabel(0.4)).toBe('Related')
   })
 })
+
+import { toSearchResponse } from './liveServices'
+import type { SearchResponse as ApiSearchResponse } from '@drawable/contracts'
+import type { SearchRequest } from '../lib/types'
+
+describe('live search provenance round trip', () => {
+  const request: SearchRequest = {
+    sessionId: 's', revision: 4, generation: 2, strokeCount: 3, pointCount: 6, textHint: '', selectedStyle: null,
+  }
+  const wire = (over: Partial<ApiSearchResponse>): ApiSearchResponse => ({
+    schema_version: 2,
+    request_id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+    api_version: '0.1.0-test',
+    revision: 4,
+    canvas_width: 2048,
+    canvas_height: 2048,
+    stroke_status: 'present',
+    counts_approximate: false,
+    preprocessing_version: '1.0.0',
+    mode: 'confident',
+    scope_predictions: [],
+    groups: [],
+    timing: { preprocessing_ms: 1, embedding_ms: 0, retrieval_ms: 1, reranking_ms: 0, total_ms: 2 },
+    warning: null,
+    degradations: [],
+    dataset_version: '2026.09.08-synthetic',
+    index_version: 'abc',
+    ...over,
+  })
+
+  it('surfaces exact-count provenance and server versions on the view model', () => {
+    const view = toSearchResponse(wire({ counts_approximate: false, stroke_status: 'present' }), request)
+    expect(view.countsApproximate).toBe(false)
+    expect(view.strokeStatus).toBe('present')
+    expect(view.preprocessingVersion).toBe('1.0.0')
+    expect(view.apiVersion).toBe('0.1.0-test')
+  })
+
+  it('flags raster-only queries as approximate', () => {
+    const view = toSearchResponse(wire({ counts_approximate: true, stroke_status: 'absent' }), request)
+    expect(view.countsApproximate).toBe(true)
+    expect(view.strokeStatus).toBe('absent')
+  })
+})

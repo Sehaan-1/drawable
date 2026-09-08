@@ -500,6 +500,8 @@ export interface components {
             index_version: string | null;
             /** Models */
             models: components["schemas"]["ModelVersion"][];
+            /** Preprocessing Version */
+            preprocessing_version: string;
             /** Ready */
             ready: boolean;
             /** Schema Version */
@@ -771,6 +773,14 @@ export interface components {
         SearchMode: "insufficient" | "provisional" | "confident";
         /** SearchResponse */
         SearchResponse: {
+            /** Api Version */
+            api_version: string;
+            /** Canvas Height */
+            canvas_height: number;
+            /** Canvas Width */
+            canvas_width: number;
+            /** Counts Approximate */
+            counts_approximate: boolean;
             /** Dataset Version */
             dataset_version?: string | null;
             /** Degradations */
@@ -780,6 +790,13 @@ export interface components {
             /** Index Version */
             index_version?: string | null;
             mode: components["schemas"]["SearchMode"];
+            /** Preprocessing Version */
+            preprocessing_version: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
             /**
              * Revision
              * @description Echoes the request revision unchanged.
@@ -794,6 +811,7 @@ export interface components {
             schema_version: 2;
             /** Scope Predictions */
             scope_predictions: components["schemas"]["ScopePrediction"][];
+            stroke_status: components["schemas"]["StrokeStatus"];
             timing: components["schemas"]["SearchTiming"];
             /** Warning */
             warning?: string | null;
@@ -969,6 +987,16 @@ export interface components {
              */
             version: 1;
         };
+        /**
+         * StrokeStatus
+         * @description Whether a vector ``strokes`` payload accompanied the snapshot.
+         *
+         *     ``absent`` means the query was raster-only (e.g. an imported image), so the
+         *     reported ``stroke_count``/``point_count`` are client estimates over the
+         *     snapshot with no vector ground truth to verify them against.
+         * @enum {string}
+         */
+        StrokeStatus: "present" | "absent";
         /** StyleAffinity */
         StyleAffinity: {
             /**
@@ -1413,4 +1441,5 @@ export const sfwScreeningMethodValues: ReadonlyArray<FlattenedDeepRequired<compo
 export const sfwVerdictValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwVerdict"]> = ["safe", "unsafe", "unsure"];
 export const strokePointerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["pointer"]> = ["pen", "mouse", "touch"];
 export const strokeToolValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["tool"]> = ["pressure", "monoline", "eraser"];
+export const strokeStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["StrokeStatus"]> = ["present", "absent"];
 export const styleSelectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["StyleSelection"]> = ["all", "manga_anime", "western_ink", "realistic_academic", "cartoon", "gesture_sketch"];

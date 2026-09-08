@@ -42,11 +42,13 @@
             "type": "string"
           },
           "point_count": {
+            "maximum": 10000000.0,
             "minimum": 0.0,
             "title": "Point Count",
             "type": "integer"
           },
           "revision": {
+            "maximum": 2000000000.0,
             "minimum": 1.0,
             "title": "Revision",
             "type": "integer"
@@ -67,6 +69,7 @@
             "type": "string"
           },
           "stroke_count": {
+            "maximum": 1000000.0,
             "minimum": 0.0,
             "title": "Stroke Count",
             "type": "integer"
@@ -654,6 +657,10 @@
             "title": "Models",
             "type": "array"
           },
+          "preprocessing_version": {
+            "title": "Preprocessing Version",
+            "type": "string"
+          },
           "ready": {
             "title": "Ready",
             "type": "boolean"
@@ -711,6 +718,7 @@
           "torch_version",
           "api_version",
           "schema_version",
+          "preprocessing_version",
           "models",
           "dataset_version",
           "index_version",
@@ -1326,6 +1334,22 @@
       "SearchResponse": {
         "additionalProperties": false,
         "properties": {
+          "api_version": {
+            "title": "Api Version",
+            "type": "string"
+          },
+          "canvas_height": {
+            "title": "Canvas Height",
+            "type": "integer"
+          },
+          "canvas_width": {
+            "title": "Canvas Width",
+            "type": "integer"
+          },
+          "counts_approximate": {
+            "title": "Counts Approximate",
+            "type": "boolean"
+          },
           "dataset_version": {
             "anyOf": [
               {
@@ -1365,6 +1389,15 @@
           "mode": {
             "$ref": "#/components/schemas/SearchMode"
           },
+          "preprocessing_version": {
+            "title": "Preprocessing Version",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
           "revision": {
             "description": "Echoes the request revision unchanged.",
             "minimum": 1.0,
@@ -1385,6 +1418,9 @@
             "title": "Scope Predictions",
             "type": "array"
           },
+          "stroke_status": {
+            "$ref": "#/components/schemas/StrokeStatus"
+          },
           "timing": {
             "$ref": "#/components/schemas/SearchTiming"
           },
@@ -1401,11 +1437,18 @@
           }
         },
         "required": [
+          "request_id",
+          "api_version",
           "revision",
+          "canvas_width",
+          "canvas_height",
+          "stroke_status",
+          "counts_approximate",
           "mode",
           "scope_predictions",
           "groups",
-          "timing"
+          "timing",
+          "preprocessing_version"
         ],
         "title": "SearchResponse",
         "type": "object"
@@ -1778,6 +1821,15 @@
         ],
         "title": "StrokeSequence",
         "type": "object"
+      },
+      "StrokeStatus": {
+        "description": "Whether a vector ``strokes`` payload accompanied the snapshot.\n\n``absent`` means the query was raster-only (e.g. an imported image), so the\nreported ``stroke_count``/``point_count`` are client estimates over the\nsnapshot with no vector ground truth to verify them against.",
+        "enum": [
+          "present",
+          "absent"
+        ],
+        "title": "StrokeStatus",
+        "type": "string"
       },
       "StyleAffinity": {
         "additionalProperties": false,
