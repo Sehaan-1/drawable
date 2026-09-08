@@ -10,6 +10,8 @@ dependencies = [
 
 [project.scripts]
 linescout-manifest = "linescout_ml.cli:main"
+# Reproducibility toolbox: pinned checkout, pinned environment, pinned checkpoints.
+linescout-repro = "linescout_ml.repro_cli:main"
 
 [project.optional-dependencies]
 # The Colab GPU pipeline (linescout_ml.colab) needs image and array libraries,
@@ -22,6 +24,11 @@ pipeline = [
 # Everything the Colab notebook installs on a GPU runtime. torch/torchvision are
 # listed for completeness — Colab already ships a CUDA build, and the notebook
 # deliberately does not reinstall them.
+# Everything the Colab notebook installs on a GPU runtime, as the *floors* of the
+# pins in ml/colab/requirements-colab.txt. CI (``linescout-repro selfcheck``)
+# checks the two name sets agree, so a dependency cannot land in one and not the
+# other. torch/torchvision are listed for completeness only: Colab ships a CUDA
+# build and the notebook freezes what it finds instead of reinstalling it.
 gpu = [
     "linescout-ml[pipeline]",
     "torch>=2.4",
@@ -30,6 +37,18 @@ gpu = [
     "open-clip-torch>=3.1",
     "timm>=1.0",
     "opennsfw2>=0.16",
+    # Declared by opennsfw2, which fetches its own weights with it.
+    "gdown>=6.0",
+    "huggingface-hub>=0.30",
+    "safetensors>=0.5",
+    "einops>=0.8",
+    "opencv-python-headless>=4.10",
+    "scikit-image>=0.24",
+    "scipy>=1.13",
+    "filelock>=3.15",
+    "regex>=2024.5",
+    "ftfy>=6.2",
+    "tqdm>=4.66",
 ]
 dev = [
     "pytest>=8.3",
@@ -53,6 +72,13 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "N", "W"]
 
+[tool.ruff.lint.per-file-ignores]
+# A Colab cell is not a module. Two of E402's complaints are idiomatic there: an
+# explanatory docstring above the imports, and importing `linescout_ml` after the
+# cell that put it on sys.path. The notebook's *content* is held to account by
+# linescout-repro selfcheck and tests/test_colab_notebook.py instead.
+"colab/*.ipynb" = ["E402"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
@@ -67,6 +93,7 @@ module = [
     "open_clip.*",
     "controlnet_aux.*",
     "opennsfw2.*",
+    "huggingface_hub.*",
     "google.colab.*",
 ]
 ignore_missing_imports = true

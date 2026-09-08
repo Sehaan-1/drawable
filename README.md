@@ -86,7 +86,7 @@ documented in [`docs/contracts/`](docs/contracts/):
 | `GET /health` | readiness, CUDA/GPU, model + dataset/index versions, gallery size, warnings |
 | `POST /search` | full multipart contract with structured `400/413/422`; unready → `503`; blank input → `200 mode=insufficient` |
 | `POST /events` · `GET/PUT /preferences` | interaction logging, Laplace-smoothed 30-day-half-life style affinity |
-| `GET /assets/{id}/thumbnail` · `/line-art` | enabled + SFW assets only; missing files auto-disable the asset |
+| `GET /assets/{id}/thumbnail` · `/line-art` | servable assets only (`is_servable`: gallery member, display grant, accepted with a quality grade, human SFW approval); a missing file is a 404 for the session, never a manifest rewrite |
 | `/curation/*` | mounted only with `LINESCOUT_CURATION_MODE=1`; progress works, the rest is 501 until Milestone 2 |
 
 Interactive docs: <http://127.0.0.1:8000/api/v1/docs>.
@@ -101,13 +101,20 @@ Milestone 2 under their own terms — several require an access application,
 so start those early.
 
 Ingestion runs in Google Colab on a free T4/A100 runtime, so no GPU is needed at
-home: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sehaan-1/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
+home: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/junosapollo/drawable/blob/main/ml/colab/linescout_gpu_pipeline.ipynb)
 It reads a Drive folder of raw artwork and writes a validated gallery
 (`originals/`, `line_art/`, `thumbnails/`, `manifest.json`) plus MobileCLIP2 and
 DINOv2 feature shards, which you unzip into `data/` and point the API at. Every
 stage is resumable, labels are written as provisional for the curation UI to
 correct, and the notebook refuses to run with a placeholder dataset licence.
-Details in [`ml/colab/README.md`](ml/colab/README.md).
+
+The notebook is reproducible beyond lockfiles: it clones `junosapollo/drawable` at
+one pinned commit rather than `main`, installs `requirements-colab.txt` pins instead
+of whatever pip's solver likes today, and verifies every checkpoint against a SHA-256
+before a stage touches it. A run records the commit, the environment digest, the
+model revisions and the actual runtime versions into its manifest and report, so a
+report says what happened rather than what was intended. Details in
+[`ml/colab/README.md`](ml/colab/README.md).
 
 ## Roadmap
 

@@ -637,14 +637,26 @@ dev = [
 ]
 gpu = [
     { name = "controlnet-aux" },
+    { name = "einops" },
+    { name = "filelock" },
+    { name = "ftfy" },
+    { name = "gdown" },
+    { name = "huggingface-hub" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "open-clip-torch" },
+    { name = "opencv-python-headless" },
     { name = "opennsfw2" },
     { name = "pillow" },
+    { name = "regex" },
+    { name = "safetensors" },
+    { name = "scikit-image" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
+    { name = "tqdm" },
 ]
 pipeline = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -655,20 +667,31 @@ pipeline = [
 [package.metadata]
 requires-dist = [
     { name = "controlnet-aux", marker = "extra == 'gpu'", specifier = ">=0.0.9" },
+    { name = "einops", marker = "extra == 'gpu'", specifier = ">=0.8" },
+    { name = "filelock", marker = "extra == 'gpu'", specifier = ">=3.15" },
+    { name = "ftfy", marker = "extra == 'gpu'", specifier = ">=6.2" },
+    { name = "gdown", marker = "extra == 'gpu'", specifier = ">=6.0" },
+    { name = "huggingface-hub", marker = "extra == 'gpu'", specifier = ">=0.30" },
     { name = "linescout-ml", extras = ["pipeline"], marker = "extra == 'gpu'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=1.26" },
     { name = "numpy", marker = "extra == 'pipeline'", specifier = ">=1.26" },
     { name = "open-clip-torch", marker = "extra == 'gpu'", specifier = ">=3.1" },
+    { name = "opencv-python-headless", marker = "extra == 'gpu'", specifier = ">=4.10" },
     { name = "opennsfw2", marker = "extra == 'gpu'", specifier = ">=0.16" },
     { name = "pillow", marker = "extra == 'dev'", specifier = ">=10.4" },
     { name = "pillow", marker = "extra == 'pipeline'", specifier = ">=10.4" },
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
+    { name = "regex", marker = "extra == 'gpu'", specifier = ">=2024.5" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "safetensors", marker = "extra == 'gpu'", specifier = ">=0.5" },
+    { name = "scikit-image", marker = "extra == 'gpu'", specifier = ">=0.24" },
+    { name = "scipy", marker = "extra == 'gpu'", specifier = ">=1.13" },
     { name = "timm", marker = "extra == 'gpu'", specifier = ">=1.0" },
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.4" },
     { name = "torchvision", marker = "extra == 'gpu'", specifier = ">=0.19" },
+    { name = "tqdm", marker = "extra == 'gpu'", specifier = ">=4.66" },
 ]
 provides-extras = ["pipeline", "gpu", "dev"]
 
