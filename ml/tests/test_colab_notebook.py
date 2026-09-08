@@ -683,3 +683,83 @@ def test_the_config_cell_refuses_a_revision_that_is_not_a_sha(tmp_path: Path) ->
     namespace["CHECKOUT"] = replace(namespace["CHECKOUT"], revision="main", verified=False)
     with pytest.raises(ValidationError, match="source_revision"):
         exec(compile(strip_magics(cell_titled("4 ·")), "<config cell>", "exec"), namespace)
+
+
+# ------------------------------------------------------ the one-cell alternative
+#
+# `run_all` is offered inside a markdown cell, which means nothing imports it, nothing
+# compiles it, and no ordinary test would notice it drifting from the stages it claims
+# to replace. These assertions exist so that a shortcut written in prose stays a
+# shortcut through the same pipeline.
+
+
+def test_the_one_cell_alternative_runs_every_stage_the_cells_run() -> None:
+    import inspect
+
+    from linescout_ml.colab import PipelineRunner
+
+    body = inspect.getsource(PipelineRunner.run_all)
+    joined = "\n".join(code_sources())
+    solo = {match.group(1) for match in re.finditer(r"RUNNER\.(run_\w+)\(", joined)}
+    assert solo, "the notebook stopped calling stages by name"
+    missing = sorted(name for name in solo if f"self.{name}(" not in body)
+    assert not missing, f"the documented one-cell run no longer covers {missing}"
+
+
+def test_the_one_cell_alternative_leaves_the_same_files_behind() -> None:
+    """Provenance a reader cannot see is worse than no shortcut at all.
+
+    The stage calls are equivalent by the test above; the file copy cell 12 does is
+    not, so the snippet in the markdown has to carry it. A gallery that is missing
+    `runtime.json` looks exactly like a gallery that never had one.
+    """
+    alternative = next(text for text in markdown_sources() if "run_all(" in text)
+    assert "runtime.json" in alternative and "RUNTIME_SNAPSHOT" in alternative, (
+        "cell 12 copies the runtime record next to the manifest; the one-cell path "
+        "must copy it too or the two documented paths leave different galleries"
+    )
+    assert "CONFIG" in alternative, "the alternative must build on the verified cells"
+
+    block = re.search(r"```python\n(.*?)```", alternative, re.S)
+    assert block, "the alternative lost its python fence"
+    compile(block.group(1), "<run_all alternative>", "exec")
+
+
+# --------------------------------------------------------------- form hint hygiene
+
+
+def test_the_configuration_hints_only_name_values_the_model_accepts() -> None:
+    """Cell 1 is a form: its comments are the only documentation most runs read.
+
+    A hint that names a value the schema rejects sends someone to a traceback they
+    blame on the pipeline, and a hint that omits a legal value makes a feature
+    undiscoverable. Both are invisible to every other test here, because the comment
+    is never executed.
+    """
+    from typing import get_args
+
+    from linescout_ml.colab.config import SourceSpec
+
+    legal = {
+        name: {str(arg) for arg in get_args(SourceSpec.model_fields[name].annotation)}
+        for name in ("sfw_method", "extractor", "work_grouping", "origin")
+    }
+    config = cell_titled("1 ·")
+    checked = 0
+    for match in re.finditer(
+        r'"(\w+)": ".*?#.*?([a-z_][a-z0-9_+]*(?:\s*\|\s*[a-z_][a-z0-9_+]*)+)', config
+    ):
+        key, listing = match.group(1), match.group(2)
+        if key not in legal:
+            continue
+        for token in (part.strip() for part in listing.split("|")):
+            assert token in legal[key], f"cell 1 suggests {key}={token!r}, which is not a value"
+            checked += 1
+    assert checked >= 6, f"the hints stopped naming values at all ({checked} found)"
+
+    # `manual` is the operator-asserted verdict and the only way to skip screening, so
+    # it must stay discoverable in the same comment the gate's other options live in.
+    assert "manual" in legal["sfw_method"]
+    assert re.search(r'"sfw_method":.*#.*manual', config, re.S), (
+        "the manual option went undocumented"
+    )

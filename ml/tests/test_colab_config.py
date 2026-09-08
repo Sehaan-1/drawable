@@ -289,3 +289,78 @@ def test_overriding_one_field_does_not_strand_the_rest_of_the_preset() -> None:
     assert swapped.origin is LineArtOrigin.EXTRACTED
     assert swapped.uses_extractor and swapped.requires_nsfw
     assert swapped.license_id == "research-only"
+
+
+# ------------------------------------------------------------- the SFW trust rule
+#
+# `source_rating` runs no classifier at all, so the honest question about a preset is
+# not "is this dataset nice" but "who said so, and can the gallery audit them". Those
+# are policy decisions, which is exactly why they are spelled out here: changing one
+# should be a reviewable edit to this table, not a quiet default in a dict nobody
+# reads.
+
+SFW_POLICY: dict[str, str] = {
+    # A publisher's own programme, or a corpus gated behind an application.
+    "synthetic": "source_rating",
+    "quickdraw": "source_rating",
+    "manga109": "source_rating",
+    "ebdtheque": "source_rating",
+    "met_openaccess": "source_rating",
+    "smithsonian_openaccess": "source_rating",
+    # Community uploads: the site's rules are enforced by the people posting.
+    "amateur_drawings": "source_rating+opennsfw2",
+    "safebooru": "source_rating+opennsfw2",
+    # Research-only artwork of people, with no per-image rating to inherit.
+    "human_art": "opennsfw2",
+}
+
+
+def test_each_presets_sfw_policy_is_a_reviewed_choice() -> None:
+    assert set(SFW_POLICY) == set(SOURCE_PRESETS), "a preset appeared with no policy"
+    for key, method in SFW_POLICY.items():
+        spec = _resolved(preset=key, license_id="reviewed-in-a-test")
+        assert spec.sfw_method == method, f"{key} changed its SFW policy to {spec.sfw_method}"
+        assert spec.requires_nsfw is (method != "source_rating"), key
+
+
+def test_a_community_site_rating_tag_is_not_treated_as_a_guarantee() -> None:
+    """Safebooru's `rating` tags are user-assigned, and the gate exists to check them.
+
+    Honouring them would make the gallery's SFW screen a copy of a stranger's
+    moderation queue — which is fail-open twice over, once when a post is mis-tagged
+    and once when the site's definition of "safe" is looser than a product's.
+    """
+    from linescout_ml.colab import repro
+
+    for key in ("safebooru", "amateur_drawings"):
+        assert "opennsfw2" in _resolved(preset=key, license_id="x").sfw_method, key
+
+    spec = repro.load_requirement_spec()
+    specs = resolve_sources(
+        [{"preset": "safebooru", "license_id": "x"}], sources_root=Path("/tmp/linescout-sources")
+    )
+    plan = repro.plan_environment(specs, spec=spec)
+    assert "nsfw" in plan.groups, plan.groups
+    assert "extraction" in plan.groups, "booru art is not line art; it still needs a detector"
+
+
+def test_turning_off_zero_shot_labels_does_not_turn_off_screening() -> None:
+    """`label=False` is a quality knob; treating it as a safety knob is the bug.
+
+    The stage still loads the classifier for sources that need it, so the only thing
+    the toggle buys is skipping CLIP — and the config keeps recording which happened.
+    """
+    config = PipelineConfig(
+        dataset_version="2026.09.08-test",
+        output_root=Path("/tmp/linescout-label-off"),
+        sources=[preset_source("safebooru", root=Path("/tmp/x"), license_id="x")],
+        label=False,
+    )
+    assert config.label is False
+    assert any(spec.requires_nsfw for spec in config.sources), "the source still needs screening"
+    fields = set(type(config).model_fields)
+    assert "label" in fields and "sfw_min_confidence" in fields
+    # There is a knob for how strict the classifier is and none for whether the gate
+    # runs: skipping screening is a per-source statement (`sfw_method="manual"`), not
+    # a global "go faster" flag that a run forgets it set.
+    assert not {"sfw", "skip_sfw", "sfw_enabled", "screen_sfw"} & fields

@@ -99,8 +99,13 @@ class SourceSpec(BaseModel):
     origin: LineArtOrigin = LineArtOrigin.EXTRACTED
     extractor: ExtractorKey = "anime2sketch"
 
-    #: ``source_rating`` for datasets whose terms already guarantee SFW content,
-    #: ``opennsfw2`` for anything scraped. ``+`` runs both and keeps the stricter.
+    #: What the SFW gate is allowed to trust. ``source_rating`` runs no classifier and
+    #: is only defensible when a *publisher's* terms make the guarantee (a museum's
+    #: open-access programme, an application-gated research corpus); it is not
+    #: defensible for a community site whose rules are enforced by the people posting.
+    #: ``opennsfw2`` is the classifier alone, and ``+`` runs both and keeps the
+    #: stricter verdict — the right answer for anything scraped, including where the
+    #: source claims a rating, because that claim is what is being checked.
     sfw_method: SfwMethod = "source_rating"
 
     #: Images that share a work must share a split. ``filename`` treats every
@@ -343,14 +348,14 @@ SOURCE_PRESETS: dict[str, SourcePreset] = {
         ),
         SourcePreset(
             key="amateur_drawings",
-            description="Amateur Drawings (Informative Drawings) — 1,338 sketch pages",
+            description="Amateur Drawings (Informative Drawings) — 1,338 community sketch pages",
             license_note="informative-drawings: MIT code, dataset terms on the project page",
             defaults={
                 "default_style": PrimaryStyle.GESTURE_SKETCH,
                 "default_scopes": [ScopeLabel.FULL_BODY],
                 "origin": LineArtOrigin.NATIVE,
                 "extractor": "none",
-                "sfw_method": "source_rating",
+                "sfw_method": "source_rating+opennsfw2",
                 "work_grouping": "parent_dir",
             },
         ),
@@ -395,14 +400,14 @@ SOURCE_PRESETS: dict[str, SourcePreset] = {
         ),
         SourcePreset(
             key="safebooru",
-            description="Safebooru — the SFW-rated booru; rated safe by the source itself",
+            description="Safebooru — a booru whose posts carry user-assigned rating tags",
             license_note="per-post artist licences vary; record the post licence, not the site's",
             defaults={
                 "default_style": PrimaryStyle.MANGA_ANIME,
                 "default_scopes": [ScopeLabel.FULL_BODY, ScopeLabel.FACE_HEAD],
                 "origin": LineArtOrigin.EXTRACTED,
                 "extractor": "anime2sketch",
-                "sfw_method": "source_rating",
+                "sfw_method": "source_rating+opennsfw2",
                 "work_grouping": "filename",
                 "url_template": "https://safebooru.org/index.php?page=post&s=view&id={item_id}",
             },

@@ -12,10 +12,13 @@ a CLIP encoder ranked the label or the source default was used, the raw
 probabilities are kept beside it, and the curation UI exists to correct all of
 it. Nothing here is a ground truth claim.
 
-The SFW gate is deliberately separate from the style/scope gate: a source whose
-terms already guarantee SFW content (museum open-access scans, children's
-drawing datasets) is recorded with ``method="source_rating"``, and only scraped
-sources pay for ``opennsfw2``. An asset that fails the gate is quarantined —
+The SFW gate is deliberately separate from the style/scope gate, and the rule for
+which one runs is *who made the guarantee*, not how pretty the dataset is: a
+publisher's own terms (a museum open-access programme, an application-gated research
+corpus) are recorded as ``method="source_rating"`` and no classifier runs; anything
+scraped from a community pays for ``opennsfw2``, including when the site ships rating
+tags, because those tags are the claim under test. An asset that fails the gate is
+quarantined —
 ``review.state="quarantined"`` and ``enabled=false`` — which the manifest
 enforces as an invariant, so an unsafe asset cannot be served by accident.
 """
@@ -307,7 +310,14 @@ def person_count_for(scopes: Sequence[ScopeLabel]) -> int | None:
 
 
 def source_rating_sfw(confidence: float = 1.0) -> SfwDecision:
-    """SFW verdict taken from the source's own rating or terms."""
+    """Record that the *source* vouched for this content, and that nothing checked.
+
+    No image is opened here. That is the point of the method existing — a museum's
+    open-access programme is a real guarantee and paying a classifier to rediscover
+    it would only add false positives over public-domain nudes — but the recorded
+    ``method="source_rating"`` is a claim about provenance, not an inspection, which
+    is why a preset that scraped a community site does not get to use it alone.
+    """
     return SfwDecision(
         safe=True, confidence=round(min(max(confidence, 0.0), 1.0), 4), method="source_rating"
     )

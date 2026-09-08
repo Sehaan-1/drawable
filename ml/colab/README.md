@@ -261,6 +261,11 @@ Colab disconnects idle and heavy sessions, so nothing is a long transaction:
   instead of ending the run.
 * De-duplication marks duplicates but keeps their files, so changing
   `dedupe_threshold` and re-running the cell can both drop and restore assets.
+* The weights cache is the one thing that does *not* survive: it defaults to
+  `/root/.cache/linescout/checkpoints`, and a recycled runtime throws ~770 MB of
+  pinned files away, verified again on download. Point `CHECKPOINT_CACHE_DIR` at
+  Drive to keep them across disconnects, and accept that Drive's FUSE mount reads a
+  400 MB file slower than a local disk — worth it on a long run, not on a smoke test.
 
 ## Labels are provisional
 
@@ -273,9 +278,25 @@ fail the SFW gate are written `quarantined` + `enabled=false`, which the
 manifest enforces as an invariant.
 
 The SFW screen runs on the **original**, not the line art, because extraction
-removes exactly the content a classifier needs to see. Sources whose terms
-already guarantee SFW content are recorded as `source_rating` and pay nothing;
-only scraped sources run `opennsfw2`.
+removes exactly the content a classifier needs to see. What a source may be
+trusted on is a per-preset policy, and the rule is *who made the guarantee* — not
+how innocuous the dataset looks:
+
+| | Presets | Gate |
+|---|---|---|
+| A publisher's own programme, or a corpus gated behind an application | `synthetic`, `quickdraw`, `manga109`, `ebdtheque`, `met_openaccess`, `smithsonian_openaccess` | `source_rating`: no classifier runs, and every asset records that it did not |
+| Community uploads, where the people posting enforce the rules | `amateur_drawings`, `safebooru` | `source_rating+opennsfw2`: both, stricter verdict wins |
+| Artwork of people, with nothing to inherit | `human_art` | `opennsfw2` |
+
+A booru's `rating` tags are the claim the gate exists to check, so they are not a
+guarantee — honouring them would make the gallery's safety screen a copy of a
+stranger's moderation queue. The only supported way to skip screening is
+`sfw_method="manual"`, which records `sfw.method="manual"`: your verdict, attributed
+to you, in every asset and in the run report. Nothing else turns it off — not
+`RUN_LABELS = False`, which skips the CLIP ranking and still loads the classifier for
+the sources that need it — and an original the pipeline cannot read fails *closed*.
+`SFW_POLICY` in `tests/test_colab_config.py` is the table, so changing a preset's
+policy is a reviewed edit to a test rather than a default nobody read.
 
 ## Licences
 

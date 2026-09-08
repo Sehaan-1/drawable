@@ -56,6 +56,26 @@ the Drive/GitHub auth cell you already run.
 | 11 | 10–12 · Embed, build, export | 20×N images, two shards, one manifest, one zip. |
 | 12 | 12b · Run report | The `reproducibility:` block must print a `code ...@<12 hex> (clean tree, cloned)` line, the environment digest, the checkpoint digest count, and the runtime summary. `code NOT RECORDED — this run did not verify a checkout against a pin` means exactly that, and the run is not reproducible however clean the numbers look. |
 
+## The default example source asks for the gate
+
+Cell 1 ships `amateur_drawings` — a community site's uploads — so cell 2b prints
+`needs the opennsfw2 gate`, `PLAN.groups` includes `nsfw`, and cell 2d installs
+`opennsfw2==0.18.0` plus `gdown==6.2.0`. TensorFlow itself is already in the image, so
+it is *recorded*, never installed: expect it under `present`, not `install`, and expect
+`torch` to keep its `+cu` build tag.
+
+`opennsfw2/open_nsfw_weights.h5` is the one download in the lock with no published
+digest — GitHub does not hash release assets, and inventing a number here would be
+worse than admitting the gap. That is what `policy record` is for: a stale or foreign
+file already in the cache still stops the run, the bytes that arrived are hashed, and
+the digest lands in `run_report.json`. Before publishing a gallery that depends on it,
+pin what you saw:
+
+```bash
+.venv/bin/linescout-repro checkpoints record \
+  --artifact opennsfw2/open_nsfw_weights.h5 --file <path from the run report>
+```
+
 ## What to bring back
 
 Paste this into the pull request that records a run — it is the only part of the table
