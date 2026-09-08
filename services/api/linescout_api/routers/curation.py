@@ -9,10 +9,12 @@ Milestone 2 implements the curation loop end-to-end:
   audit row in ``curation_labels``, and mirrors the decision into the
   ``assets`` cache so the change is observable in search results and asset
   serving immediately.
-* :func:`export_snapshot` writes a frozen JSON snapshot of every keep *and*
-  reject label to ``data/snapshots/`` so quality-model training can see both
-  classes without depending on the live database. The wire response names the
-  file relative to the data dir; it never leaks a host filesystem path.
+* :func:`export_snapshot` writes an **immutable full snapshot**: the latest
+  keep-or-reject label per asset (rejected assets included) at a point in
+  time, chained to the previous snapshot via ``previous_snapshot_id``. Every
+  export is a new file; snapshots are never edited and never incremental.
+  The append-only ``curation_labels`` audit history stays in the database —
+  the snapshot is the state view, the table is the history.
 * :func:`progress` aggregates reviewed / accepted / rejected counts overall
   and broken down by style and scope.
 
@@ -33,12 +35,20 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse
-from linescout_ml.taxonomy import GALLERY_SCOPES, PrimaryStyle, ReviewState, ScopeLabel
+from linescout_ml.manifest import AllowedUses, Permissions, SfwHumanDecision, SfwScreening
+from linescout_ml.taxonomy import (
+    GALLERY_SCOPES,
+    CurationBlocker,
+    LearningSplit,
+    PrimaryStyle,
+    ReviewState,
+    ScopeLabel,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from linescout_api.deps import State
 from linescout_api.errors import conflict, not_found, unprocessable
-from linescout_api.gallery import enabled_assets
+from linescout_api.gallery import enabled_assets, recompute_enabled, serving_blockers
 
 log = logging.getLogger(__name__)
 
@@ -121,13 +131,16 @@ class CropBox(BaseModel):
 
 
 class CurationCandidate(BaseModel):
-    """One candidate asset for review."""
+    """One candidate asset for review (the v2 wire shape)."""
 
     model_config = ConfigDict(extra="forbid")
 
     asset_id: str
     primary_style: PrimaryStyle
-    scopes: list[ScopeLabel]
+    primary_scope: ScopeLabel
+    secondary_scopes: list[ScopeLabel] = Field(default_factory=list)
+    person_count: int | None = Field(default=None, ge=0)
+    person_count_approximate: bool = False
     width: int = Field(ge=1)
     height: int = Field(ge=1)
     thumbnail_url: str
@@ -135,10 +148,22 @@ class CurationCandidate(BaseModel):
     origin: Literal["native_line_art", "extracted_line_art"]
     crop: CropBox | None = None
     review_state: Literal["unreviewed", "accepted", "rejected", "quarantined"]
+    blockers: list[CurationBlocker] = Field(default_factory=list)
     quality_score: float = Field(ge=0.0, le=1.0)
-    sfw_safe: bool
-    sfw_confidence: float = Field(ge=0.0, le=1.0)
+    #: Automated screen (tri-state) — ``None`` when no screen ever ran.
+    sfw_screening: SfwScreening | None = None
+    #: Human SFW decision — ``None`` when no human has decided yet.
+    sfw_human: SfwHumanDecision | None = None
+    #: Permission provenance and the three independent use grants.
+    permissions: Permissions
+    allowed_uses: AllowedUses
+    learning_split: LearningSplit
+    gallery_member: bool = True
+    gold_member: bool = False
     source_work_id: str
+    parent_asset_id: str | None = None
+    artist_id: str | None = None
+    leakage_group_id: str | None = None
 
 
 class LabelRequest(BaseModel):
@@ -153,19 +178,40 @@ class LabelRequest(BaseModel):
     expected_review_state: ReviewState
     decision: Literal["keep", "reject"]
     primary_style: PrimaryStyle | None = None
-    scopes: list[ScopeLabel] | None = None
+    #: The single best scope; required on ``keep`` when the stored primary is
+    #: still ``unknown`` (an unknown primary cannot be accepted).
+    primary_scope: ScopeLabel | None = None
+    secondary_scopes: list[ScopeLabel] | None = None
     crop: CropBox | None = None
-    malformed_anatomy: bool = False
-    poor_extraction: bool = False
+    #: Named, use-blocking defects. Blockers force ``reject`` (or quarantine);
+    #: a ``keep`` carrying blockers is a 422.
+    blockers: list[CurationBlocker] = Field(default_factory=list)
+    #: Optional human SFW assertion recorded with this label. ``None`` leaves
+    #: any existing human decision untouched.
+    sfw_safe: bool | None = None
     quality: int | None = Field(default=None, ge=1, le=3)
     note: str | None = Field(default=None, max_length=2000)
     reviewer: str | None = Field(default=None, max_length=64)
 
-    @field_validator("scopes")
+    @field_validator("secondary_scopes")
     @classmethod
     def _no_duplicate_scopes(cls, value: list[ScopeLabel] | None) -> list[ScopeLabel] | None:
-        if value is not None and len(value) != len(set(value)):
-            msg = "scopes contains duplicates"
+        if value is None:
+            return None
+        if len(value) != len(set(value)):
+            msg = "secondary_scopes contains duplicates"
+            raise ValueError(msg)
+        bad = [scope for scope in value if scope not in GALLERY_SCOPES]
+        if bad:
+            msg = f"secondary_scopes cannot carry query-only or unknown scopes: {bad}"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("blockers")
+    @classmethod
+    def _unique_blockers(cls, value: list[CurationBlocker]) -> list[CurationBlocker]:
+        if len(set(value)) != len(value):
+            msg = "blockers contains duplicates"
             raise ValueError(msg)
         return value
 
@@ -173,6 +219,12 @@ class LabelRequest(BaseModel):
     def _quality_required_on_keep(self) -> LabelRequest:
         if self.decision == "keep" and self.quality is None:
             msg = "quality is required when decision='keep'"
+            raise ValueError(msg)
+        if self.decision == "keep" and self.blockers:
+            msg = "blockers cannot be accepted; reject or quarantine instead"
+            raise ValueError(msg)
+        if self.decision == "keep" and self.primary_scope is ScopeLabel.UNKNOWN:
+            msg = "primary_scope 'unknown' cannot be accepted; pick a scope"
             raise ValueError(msg)
         return self
 
@@ -185,7 +237,12 @@ class LabelResponse(BaseModel):
     decision: Literal["keep", "reject"]
     review_state: Literal["unreviewed", "accepted", "rejected", "quarantined"]
     review_quality: int | None
+    blockers: list[CurationBlocker] = Field(default_factory=list)
+    sfw_human_approved: bool | None
     enabled: bool
+    #: Why the asset is not servable, as stable machine-readable reasons.
+    #: Empty iff ``enabled`` is true.
+    serving_blockers: list[str] = Field(default_factory=list)
     created_at: str
 
 
@@ -198,7 +255,10 @@ class SnapshotResponse(BaseModel):
     #: Path relative to the API data dir, e.g. ``snapshots/curation_….json``.
     #: Never an absolute host filesystem path.
     path: str
+    #: Distinct labeled assets captured (latest label per asset, keeps and rejects).
     label_count: int
+    #: Lineage: the previous full snapshot this one supersedes, or ``None``.
+    previous_snapshot_id: str | None
     style_breakdown: dict[PrimaryStyle, int]
     created_at: str
 
@@ -218,26 +278,36 @@ def _candidate_base_query(
     """Build the SELECT for the candidate pool.
 
     Stratification happens in :func:`_pick_candidate`; here we just gather the
-    row set so the picker can balance across the style×scope grid. The scope
-    buckets are the GALLERY scopes (``unknown`` is query-only).
+    row set so the picker can balance across the style×scope grid. The queue
+    holds *unreviewed* assets: anything not safe per the automated screen was
+    quarantined at ingestion, so no extra SFW filter is needed here. Human SFW
+    approval happens through this queue, not before it.
     """
     sql = [
-        "SELECT asset_id, primary_style, scopes_json, width, height, origin,",
-        " crop_json, review_state, quality_score, sfw_safe, sfw_confidence,",
-        " source_work_id",
+        "SELECT asset_id, primary_style, primary_scope, secondary_scopes_json,",
+        " person_count, person_count_approximate, width, height, origin,",
+        " crop_json, review_state, blockers_json, quality_score,",
+        " sfw_verdict, sfw_confidence, sfw_method,",
+        " sfw_human_safe, sfw_human_reviewer, sfw_human_decided_at,",
+        " license_id, permission_basis, permission_url, attribution, attribution_required,",
+        " allowed_display, allowed_training, allowed_trace,",
+        " learning_split, gallery_member, gold_member, source_work_id,",
+        " parent_asset_id, artist_id, leakage_group_id",
         " FROM assets",
-        " WHERE review_state = 'unreviewed' AND sfw_safe = 1",
+        " WHERE review_state = 'unreviewed'",
     ]
     params: list[object] = []
     if style is not None:
         sql.append(" AND primary_style = ?")
         params.append(style.value)
     if scope is not None:
-        # Either the asset declares the scope directly, or it carries only
-        # the ``unknown`` placeholder — both are valid review targets.
-        sql.append(" AND (scopes_json LIKE ? OR scopes_json LIKE ?)")
+        # Either the asset declares the scope directly, or its primary is
+        # still the ``unknown`` placeholder — both are valid review targets.
+        sql.append(
+            " AND (primary_scope = ? OR secondary_scopes_json LIKE ? OR primary_scope = 'unknown')"
+        )
+        params.append(scope.value)
         params.append(f'%"{scope.value}"%')
-        params.append('%"unknown"%')
     sql.append(" ORDER BY asset_id")
     return "\n".join(sql), params
 
@@ -267,13 +337,7 @@ def _pick_candidate(
     for row in rows:
         primary = PrimaryStyle(row["primary_style"])
         style_counts[primary] += 1
-        try:
-            asset_scopes = [ScopeLabel(value) for value in json.loads(row["scopes_json"])]
-        except (ValueError, json.JSONDecodeError):
-            asset_scopes = []
-        if not asset_scopes:
-            asset_scopes = [ScopeLabel.UNKNOWN]
-        for scope_label in asset_scopes:
+        for scope_label in _row_scopes(row):
             if scope_label is ScopeLabel.UNKNOWN:
                 continue
             scope_counts[scope_label] = scope_counts[scope_label] + 1
@@ -304,22 +368,34 @@ def _pick_candidate(
     for row in rows:
         if PrimaryStyle(row["primary_style"]) is not target_style:
             continue
-        try:
-            asset_scopes = [ScopeLabel(value) for value in json.loads(row["scopes_json"])]
-        except (ValueError, json.JSONDecodeError):
-            continue
-        if target_scope in asset_scopes:
+        if target_scope in _row_scopes(row):
             return row
     # Cell is empty (deficit was driven by 0 in another column); fall back.
     return rows[0]
 
 
+def _row_scopes(row: sqlite3.Row) -> list[ScopeLabel]:
+    """Primary plus secondary scopes of a queue row; malformed JSON reads empty."""
+    try:
+        primary = ScopeLabel(row["primary_scope"])
+    except ValueError:
+        return []
+    try:
+        secondaries = [ScopeLabel(value) for value in json.loads(row["secondary_scopes_json"])]
+    except (ValueError, json.JSONDecodeError):
+        secondaries = []
+    return [primary, *secondaries]
+
+
+def _row_blockers(row: sqlite3.Row) -> list[CurationBlocker]:
+    try:
+        return [CurationBlocker(value) for value in json.loads(row["blockers_json"] or "[]")]
+    except (ValueError, json.JSONDecodeError):
+        return []
+
+
 def _build_candidate(row: sqlite3.Row, connection: sqlite3.Connection) -> CurationCandidate:
     """Hydrate a queue row into the wire response."""
-    try:
-        scopes = [ScopeLabel(value) for value in json.loads(row["scopes_json"])]
-    except (ValueError, json.JSONDecodeError):
-        scopes = []
     crop: CropBox | None = None
     if row["crop_json"]:
         try:
@@ -327,10 +403,39 @@ def _build_candidate(row: sqlite3.Row, connection: sqlite3.Connection) -> Curati
             crop = CropBox.model_validate(data)
         except (ValueError, json.JSONDecodeError):
             crop = None
+    screening: SfwScreening | None = None
+    if row["sfw_verdict"] is not None:
+        screening = SfwScreening(
+            verdict=row["sfw_verdict"],
+            confidence=row["sfw_confidence"],
+            method=row["sfw_method"] or "none",
+        )
+    sfw_human: SfwHumanDecision | None = None
+    if row["sfw_human_safe"] is not None:
+        sfw_human = SfwHumanDecision(
+            safe=bool(row["sfw_human_safe"]),
+            reviewer=row["sfw_human_reviewer"] or "local",
+            decided_at=row["sfw_human_decided_at"],
+        )
+    permissions = Permissions(
+        license_id=row["license_id"],
+        basis=row["permission_basis"],
+        permission_url=row["permission_url"],
+        attribution=row["attribution"],
+        attribution_required=bool(row["attribution_required"]),
+    )
+    allowed_uses = AllowedUses(
+        display=bool(row["allowed_display"]),
+        training=bool(row["allowed_training"]),
+        trace=bool(row["allowed_trace"]),
+    )
     return CurationCandidate(
         asset_id=row["asset_id"],
         primary_style=PrimaryStyle(row["primary_style"]),
-        scopes=scopes,
+        primary_scope=ScopeLabel(row["primary_scope"]),
+        secondary_scopes=[scope for scope in _row_scopes(row)[1:] if scope in GALLERY_SCOPES],
+        person_count=row["person_count"],
+        person_count_approximate=bool(row["person_count_approximate"]),
         width=int(row["width"]),
         height=int(row["height"]),
         thumbnail_url=f"/api/v1/curation/assets/{row['asset_id']}/thumbnail",
@@ -338,10 +443,19 @@ def _build_candidate(row: sqlite3.Row, connection: sqlite3.Connection) -> Curati
         origin=row["origin"],
         crop=crop,
         review_state=row["review_state"],
+        blockers=_row_blockers(row),
         quality_score=float(row["quality_score"]),
-        sfw_safe=bool(row["sfw_safe"]),
-        sfw_confidence=float(row["sfw_confidence"]),
+        sfw_screening=screening,
+        sfw_human=sfw_human,
+        permissions=permissions,
+        allowed_uses=allowed_uses,
+        learning_split=LearningSplit(row["learning_split"]),
+        gallery_member=bool(row["gallery_member"]),
+        gold_member=bool(row["gold_member"]),
         source_work_id=row["source_work_id"],
+        parent_asset_id=row["parent_asset_id"],
+        artist_id=row["artist_id"],
+        leakage_group_id=row["leakage_group_id"],
     )
 
 
@@ -370,7 +484,7 @@ def _style_breakdown(connection: sqlite3.Connection) -> dict[PrimaryStyle, Style
         ).fetchone()
         remaining_row = connection.execute(
             "SELECT COUNT(*) AS n FROM assets"
-            " WHERE primary_style = ? AND review_state = 'unreviewed' AND sfw_safe = 1",
+            " WHERE primary_style = ? AND review_state = 'unreviewed'",
             (style.value,),
         ).fetchone()
         out[style] = StyleBreakdown(
@@ -403,7 +517,7 @@ def _scope_breakdown(connection: sqlite3.Connection) -> dict[ScopeLabel, ScopeBr
         remaining_row = connection.execute(
             "SELECT COUNT(DISTINCT a.asset_id) AS n FROM assets a"
             " JOIN asset_scopes s ON s.asset_id = a.asset_id"
-            " WHERE s.scope = ? AND a.review_state = 'unreviewed' AND a.sfw_safe = 1",
+            " WHERE s.scope = ? AND a.review_state = 'unreviewed'",
             (scope_label.value,),
         ).fetchone()
         out[scope_label] = ScopeBreakdown(
@@ -460,14 +574,16 @@ def next_candidate(
 def preview_asset(state: State, asset_id: str, kind: str) -> FileResponse:
     """Serve unreviewed (and other) gallery files to the curation UI only.
 
-    Public ``/api/v1/assets/{id}/...`` routes stay gated on
-    ``enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1``.
+    Public ``/api/v1/assets/{id}/...`` routes stay gated on the derived
+    ``enabled = 1`` flag (the full v2 serving predicate).
     """
     column = _PREVIEW_KINDS.get(kind)
     if column is None or state.gallery is None:
         raise not_found("asset_not_found", "asset not found")
     row = state.connection.execute(
-        f"SELECT {column} AS path FROM assets WHERE asset_id = ? AND sfw_safe = 1",  # noqa: S608
+        f"SELECT {column} AS path FROM assets WHERE asset_id = ?"  # noqa: S608
+        " AND (sfw_verdict IS NULL OR sfw_verdict != 'unsafe')"
+        " AND (sfw_human_safe IS NULL OR sfw_human_safe = 1)",
         (asset_id,),
     ).fetchone()
     if row is None:
@@ -496,19 +612,20 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
             "no gallery loaded; set LINESCOUT_GALLERY_MANIFEST and restart the API",
         )
     row = state.connection.execute(
-        "SELECT asset_id, review_state, review_quality, enabled, sfw_safe, width, height"
+        "SELECT asset_id, review_state, review_quality, enabled, sfw_verdict,"
+        " sfw_human_safe, primary_scope, width, height"
         " FROM assets WHERE asset_id = ?",
         (body.asset_id,),
     ).fetchone()
     if row is None:
         raise not_found("asset_not_found", f"asset {body.asset_id} is not in the gallery")
-    # Rejecting an SFW-unsafe asset has no semantic meaning — those are
+    # Labelling a screened-unsafe asset has no semantic meaning — those are
     # quarantined at ingestion; surface a structured 422 instead of silently
     # accepting the label.
-    if not row["sfw_safe"]:
+    if row["sfw_verdict"] == "unsafe" and row["sfw_human_safe"] != 1:
         raise unprocessable(
             "asset_not_sfw",
-            "cannot label a non-SFW asset; quarantine happens at ingestion",
+            "cannot label an SFW-unsafe asset; quarantine happens at ingestion",
         )
     if body.crop is not None and not _crop_fits(body.crop, int(row["width"]), int(row["height"])):
         raise unprocessable(
@@ -516,30 +633,54 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
             "crop rectangle exceeds the asset's width/height",
             field="crop",
         )
+    # A keep cannot leave an unknown primary scope in place: the reviewer would
+    # be accepting a non-label. Provide one or fix it first.
+    if (
+        body.decision == "keep"
+        and row["primary_scope"] == "unknown"
+        and (body.primary_scope is None or body.primary_scope is ScopeLabel.UNKNOWN)
+    ):
+        raise unprocessable(
+            "primary_scope_required",
+            "cannot accept an asset whose primary scope is unknown; set primary_scope",
+            field="primary_scope",
+        )
 
-    review_state, review_quality, enabled = _apply_decision_to_asset(body, row)
+    review_state, review_quality = _apply_decision_to_asset(body)
     crop_json = body.crop.model_dump_json() if body.crop else None
-    scopes_json = json.dumps([scope.value for scope in body.scopes]) if body.scopes else None
+    primary_scope = (
+        body.primary_scope.value
+        if body.primary_scope is not None and body.primary_scope is not ScopeLabel.UNKNOWN
+        else None
+    )
+    secondary_json = (
+        json.dumps([scope.value for scope in body.secondary_scopes])
+        if body.secondary_scopes is not None
+        else None
+    )
+    blockers_json = json.dumps([blocker.value for blocker in body.blockers])
     reviewer = body.reviewer or "local"
+    decided_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
     # Single transaction: write the audit row, then mirror the decision into
-    # the assets cache. The schema's CHECK constraints guard style and scope
-    # membership, so a typo from the UI would surface as a SQLite IntegrityError.
+    # the assets cache. The schema's CHECK constraints guard style, scope, and
+    # split membership, so a typo from the UI surfaces as a SQLite IntegrityError.
     cursor = state.connection.execute("BEGIN")
     try:
         cursor = state.connection.execute(
             "INSERT INTO curation_labels ("
-            " asset_id, decision, primary_style, scopes_json, crop_json,"
-            " malformed_anatomy, poor_extraction, quality, note, reviewer"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " asset_id, decision, primary_style, primary_scope, secondary_scopes_json,"
+            " crop_json, blockers_json, sfw_safe, quality, note, reviewer"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 body.asset_id,
                 body.decision,
                 body.primary_style.value if body.primary_style else None,
-                scopes_json,
+                primary_scope,
+                secondary_json,
                 crop_json,
-                int(body.malformed_anatomy),
-                int(body.poor_extraction),
+                blockers_json,
+                body.sfw_safe,
                 body.quality,
                 body.note,
                 reviewer,
@@ -550,18 +691,28 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
             "UPDATE assets SET"
             " review_state = ?,"
             " review_quality = ?,"
-            " enabled = ?,"
+            " blockers_json = ?,"
             " primary_style = COALESCE(?, primary_style),"
-            " scopes_json = COALESCE(?, scopes_json),"
-            " crop_json = COALESCE(?, crop_json)"
+            " primary_scope = COALESCE(?, primary_scope),"
+            " secondary_scopes_json = COALESCE(?, secondary_scopes_json),"
+            " crop_json = COALESCE(?, crop_json),"
+            " sfw_human_safe = COALESCE(?, sfw_human_safe),"
+            " sfw_human_reviewer = CASE WHEN ? IS NULL THEN sfw_human_reviewer ELSE ? END,"
+            " sfw_human_decided_at = CASE WHEN ? IS NULL THEN sfw_human_decided_at ELSE ? END"
             " WHERE asset_id = ? AND review_state = ?",
             (
                 review_state,
                 review_quality,
-                int(enabled),
+                blockers_json,
                 body.primary_style.value if body.primary_style else None,
-                scopes_json,
+                primary_scope,
+                secondary_json,
                 crop_json,
+                body.sfw_safe,
+                body.sfw_safe,
+                reviewer,
+                body.sfw_safe,
+                decided_at,
                 body.asset_id,
                 body.expected_review_state.value,
             ),
@@ -578,18 +729,26 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
                 "asset review_state changed since the candidate was loaded",
                 field="expected_review_state",
             )
-        if body.scopes is not None:
+        if body.secondary_scopes is not None and primary_scope is not None:
             state.connection.execute(
                 "DELETE FROM asset_scopes WHERE asset_id = ?", (body.asset_id,)
             )
             state.connection.executemany(
                 "INSERT INTO asset_scopes(asset_id, scope) VALUES (?, ?)",
-                [(body.asset_id, scope.value) for scope in body.scopes if scope in GALLERY_SCOPES],
+                [
+                    (body.asset_id, scope.value)
+                    for scope in (ScopeLabel(primary_scope), *body.secondary_scopes)
+                    if scope in GALLERY_SCOPES
+                ],
             )
+        # ``enabled`` is derived (the frozen is_servable predicate); recompute
+        # it inside the same transaction so the mirror never drifts.
+        enabled = recompute_enabled(state.connection, body.asset_id)
+        blockers = serving_blockers(state.connection, body.asset_id) if not enabled else []
         # Audit row timestamp is the source of truth for clients; read it back
         # so the wire response matches what is stored.
         stamp = state.connection.execute(
-            "SELECT created_at FROM curation_labels WHERE id = ?", (label_id,)
+            "SELECT created_at, sfw_safe FROM curation_labels WHERE id = ?", (label_id,)
         ).fetchone()
         state.connection.execute("COMMIT")
     except Exception:
@@ -597,7 +756,7 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
         raise
 
     # Reload the in-memory enabled-asset list so /search and /assets/* reflect
-    # the new enabled flag without requiring a process restart.
+    # the new serving flag without requiring a process restart.
     state.assets = enabled_assets(state.connection)
 
     return LabelResponse(
@@ -606,21 +765,28 @@ def write_label(state: State, body: LabelRequest) -> LabelResponse:
         decision=body.decision,
         review_state=review_state,
         review_quality=review_quality,
+        blockers=body.blockers,
+        sfw_human_approved=bool(stamp["sfw_safe"])
+        if stamp and stamp["sfw_safe"] is not None
+        else (bool(row["sfw_human_safe"]) if row["sfw_human_safe"] is not None else None),
         enabled=enabled,
+        serving_blockers=blockers,
         created_at=str(stamp["created_at"]) if stamp else "",
     )
 
 
-def _apply_decision_to_asset(body: LabelRequest, row: sqlite3.Row) -> tuple[str, int | None, bool]:
-    """Translate a label into the new (review_state, review_quality, enabled) triple.
+def _apply_decision_to_asset(body: LabelRequest) -> tuple[str, int | None]:
+    """Translate a label into the new (review_state, review_quality) pair.
 
-    * ``keep``  -> ``accepted``. Enabled only when quality >= 2; quality-1
-      reference assets stay out of public retrieval.
-    * ``reject`` -> ``rejected``; the asset is disabled so it drops out of search.
+    * ``keep``   -> ``accepted``. Serving is decided by the derived predicate,
+      not here: permission, human SFW approval, and the quality floor all
+      still apply, and the response explains any that fail.
+    * ``reject`` -> ``rejected``; the asset drops out of search via the same
+      derived predicate.
     """
     if body.decision == "keep":
-        return "accepted", body.quality, bool(body.quality and body.quality >= 2)
-    return "rejected", body.quality, False
+        return "accepted", body.quality
+    return "rejected", body.quality
 
 
 # ----------------------------------------------------------------- snapshots
@@ -657,26 +823,46 @@ def _snapshot_target(directory: Path, now: datetime | None = None) -> tuple[str,
 
 @router.post("/snapshots", response_model=SnapshotResponse, status_code=201)
 def export_snapshot(state: State) -> SnapshotResponse:
+    """Write an immutable **full** snapshot of the current curation state.
+
+    Frozen semantics (v2): the snapshot captures the *latest* keep-or-reject
+    label per asset — rejected assets included — at the moment of the export.
+    It is a state view, not an export cursor: every POST writes a new file and
+    never mutates a previous one, and the append-only ``curation_labels``
+    audit history stays complete in the database. Lineage is recorded through
+    ``previous_snapshot_id`` and the ``snapshots`` registry table.
+    """
     if state.gallery is None:
         raise not_found(
             "gallery_unavailable",
             "no gallery loaded; set LINESCOUT_GALLERY_MANIFEST and restart the API",
         )
 
+    # Latest label per asset (highest id among keep/reject decisions). This
+    # includes rejected assets — quality-model training needs both classes.
     rows = state.connection.execute(
-        "SELECT cl.id, cl.asset_id, cl.decision, cl.primary_style, cl.scopes_json,"
-        " cl.crop_json, cl.malformed_anatomy, cl.poor_extraction, cl.quality,"
-        " cl.note, cl.reviewer, cl.created_at,"
-        " a.primary_style AS asset_primary_style, a.scopes_json AS asset_scopes_json,"
+        "SELECT cl.id, cl.asset_id, cl.decision, cl.primary_style, cl.primary_scope,"
+        " cl.secondary_scopes_json, cl.crop_json, cl.blockers_json, cl.sfw_safe,"
+        " cl.quality, cl.note, cl.reviewer, cl.created_at,"
+        " a.primary_style AS asset_primary_style, a.primary_scope AS asset_primary_scope,"
+        " a.secondary_scopes_json AS asset_secondary_scopes_json,"
         " a.review_state, a.review_quality"
         " FROM curation_labels cl"
+        " JOIN ("
+        "   SELECT asset_id, MAX(id) AS latest_id FROM curation_labels"
+        "   WHERE decision IN ('keep', 'reject') GROUP BY asset_id"
+        " ) latest ON latest.latest_id = cl.id"
         " JOIN assets a ON a.asset_id = cl.asset_id"
-        " WHERE cl.decision IN ('keep', 'reject')"
-        " ORDER BY cl.id"
+        " ORDER BY cl.asset_id"
     ).fetchall()
 
     target_dir = _snapshot_dir(state)
     snapshot_id, target_path = _snapshot_target(target_dir)
+    previous = state.connection.execute(
+        "SELECT snapshot_id FROM snapshots ORDER BY created_at DESC, snapshot_id DESC LIMIT 1"
+    ).fetchone()
+    previous_snapshot_id = str(previous["snapshot_id"]) if previous else None
+
     breakdown: dict[PrimaryStyle, int] = {style: 0 for style in STYLE_BUCKETS}
     serialized: list[dict[str, object]] = []
     for row in rows:
@@ -688,10 +874,15 @@ def export_snapshot(state: State) -> SnapshotResponse:
                 "asset_id": row["asset_id"],
                 "decision": row["decision"],
                 "primary_style": primary.value,
-                "scopes": json.loads(row["scopes_json"] or row["asset_scopes_json"] or "[]"),
+                "primary_scope": row["primary_scope"] or row["asset_primary_scope"],
+                "secondary_scopes": json.loads(
+                    row["secondary_scopes_json"] or row["asset_secondary_scopes_json"] or "[]"
+                ),
                 "crop": json.loads(row["crop_json"]) if row["crop_json"] else None,
-                "malformed_anatomy": bool(row["malformed_anatomy"]),
-                "poor_extraction": bool(row["poor_extraction"]),
+                "blockers": json.loads(row["blockers_json"] or "[]"),
+                "sfw_human_approved": (
+                    bool(row["sfw_safe"]) if row["sfw_safe"] is not None else None
+                ),
                 "quality": int(row["quality"]) if row["quality"] is not None else None,
                 "note": row["note"],
                 "reviewer": row["reviewer"],
@@ -703,10 +894,12 @@ def export_snapshot(state: State) -> SnapshotResponse:
             }
         )
 
+    created_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "snapshot_id": snapshot_id,
-        "created_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "previous_snapshot_id": previous_snapshot_id,
+        "created_at": created_at,
         "gallery": {
             "dataset_version": state.gallery.dataset_version,
             "manifest_hash": state.gallery.manifest_hash,
@@ -716,24 +909,41 @@ def export_snapshot(state: State) -> SnapshotResponse:
         "labels": serialized,
     }
 
-    target_dir = _snapshot_dir(state)
-    target_path = target_dir / f"{snapshot_id}.json"
     target_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     log.info("wrote curation snapshot %s (%d labels)", snapshot_id, len(serialized))
 
-    # Mark every label row that landed in the snapshot as exported so a second
-    # POST does not re-export them. The ``snapshot_id`` column is the audit
-    # trail that ties a label to the immutable JSON file.
-    state.connection.execute(
-        "UPDATE curation_labels SET snapshot_id = ?"
-        " WHERE decision IN ('keep', 'reject') AND snapshot_id IS NULL",
-        (snapshot_id,),
-    )
+    # Register the snapshot for lineage, then stamp every never-exported label
+    # with the *first* snapshot that captured it. That column is an audit
+    # trail only — it is never used to filter what a future snapshot contains
+    # (snapshots are full, not incremental).
+    state.connection.execute("BEGIN")
+    try:
+        state.connection.execute(
+            "INSERT INTO snapshots (snapshot_id, created_at, label_count,"
+            " previous_snapshot_id, path) VALUES (?,?,?,?,?)",
+            (
+                snapshot_id,
+                created_at,
+                len(serialized),
+                previous_snapshot_id,
+                f"snapshots/{target_path.name}",
+            ),
+        )
+        state.connection.execute(
+            "UPDATE curation_labels SET snapshot_id = ?"
+            " WHERE decision IN ('keep', 'reject') AND snapshot_id IS NULL",
+            (snapshot_id,),
+        )
+        state.connection.execute("COMMIT")
+    except Exception:
+        state.connection.execute("ROLLBACK")
+        raise
 
     return SnapshotResponse(
         snapshot_id=snapshot_id,
         path=f"snapshots/{target_path.name}",
         label_count=len(serialized),
+        previous_snapshot_id=previous_snapshot_id,
         style_breakdown=breakdown,
-        created_at=payload["created_at"],
+        created_at=created_at,
     )

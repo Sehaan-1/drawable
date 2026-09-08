@@ -39,10 +39,15 @@ def compute_affinities(
     prefs = connection.execute("SELECT affinity_reset_at FROM preferences WHERE id = 1").fetchone()
     reset_at = prefs["affinity_reset_at"] if prefs else None
 
-    query = "SELECT session_id, asset_id, query_revision, style, event, created_at FROM events"
+    # Only live-gallery interactions feed preferences: fixture namespaces are
+    # separate, so fixture-mode usage never shapes real retrieval (v2 freeze).
+    query = (
+        "SELECT session_id, asset_id, query_revision, style, event, created_at FROM events"
+        " WHERE gallery_kind = 'live'"
+    )
     params: tuple[object, ...] = ()
     if reset_at:
-        query += " WHERE created_at > ?"
+        query += " AND created_at > ?"
         params = (reset_at,)
 
     decay = math.log(2) / max(half_life_days, 1e-6)

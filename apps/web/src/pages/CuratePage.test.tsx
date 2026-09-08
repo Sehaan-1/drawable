@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { TooltipProvider } from '@radix-ui/react-tooltip'
 import { useServiceStore } from '../services/serviceRegistry'
+import { makeCandidate } from '../test/candidateFactory'
 import type { JSX, ReactNode } from 'react'
 
 const originalFetch = globalThis.fetch
@@ -72,22 +73,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_test',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_test/thumbnail',
-            line_art_url: '/api/v1/assets/ls_test/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_test', thumbnail_url: '/api/v1/assets/ls_test/thumbnail', line_art_url: '/api/v1/assets/ls_test/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {
@@ -222,22 +208,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_shortcut',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_shortcut/thumbnail',
-            line_art_url: '/api/v1/assets/ls_shortcut/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_shortcut', thumbnail_url: '/api/v1/assets/ls_shortcut/thumbnail', line_art_url: '/api/v1/assets/ls_shortcut/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {
@@ -281,22 +252,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_reject',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_reject/thumbnail',
-            line_art_url: '/api/v1/assets/ls_reject/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_reject', thumbnail_url: '/api/v1/assets/ls_reject/thumbnail', line_art_url: '/api/v1/assets/ls_reject/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {
@@ -334,22 +290,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_noquality',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_noquality/thumbnail',
-            line_art_url: '/api/v1/assets/ls_noquality/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_noquality', thumbnail_url: '/api/v1/assets/ls_noquality/thumbnail', line_art_url: '/api/v1/assets/ls_noquality/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {
@@ -386,22 +327,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_help',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_help/thumbnail',
-            line_art_url: '/api/v1/assets/ls_help/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_help', thumbnail_url: '/api/v1/assets/ls_help/thumbnail', line_art_url: '/api/v1/assets/ls_help/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {
@@ -434,22 +360,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_pulse',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_pulse/thumbnail',
-            line_art_url: '/api/v1/assets/ls_pulse/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_pulse', thumbnail_url: '/api/v1/assets/ls_pulse/thumbnail', line_art_url: '/api/v1/assets/ls_pulse/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {
@@ -479,22 +390,12 @@ describe('CuratePage', () => {
 
   it('restores the previous candidate from history', async () => {
     let nextCount = 0
-    const candidate = (assetId: string) => ({
-      asset_id: assetId,
-      primary_style: 'manga_anime',
-      scopes: ['eye'],
-      width: 256,
-      height: 256,
-      thumbnail_url: `/api/v1/curation/assets/${assetId}/thumbnail`,
-      line_art_url: `/api/v1/curation/assets/${assetId}/line-art`,
-      origin: 'native_line_art',
-      crop: null,
-      review_state: 'unreviewed',
-      quality_score: 0.85,
-      sfw_safe: true,
-      sfw_confidence: 0.99,
-      source_work_id: 'synthetic-work-000',
-    })
+    const candidate = (assetId: string) =>
+      makeCandidate({
+        asset_id: assetId,
+        thumbnail_url: `/api/v1/curation/assets/${assetId}/thumbnail`,
+        line_art_url: `/api/v1/curation/assets/${assetId}/line-art`,
+      })
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/curation/next')) {
         const id = nextCount === 0 ? 'ls_first' : 'ls_second'
@@ -529,22 +430,7 @@ describe('CuratePage', () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/curation/next')) {
         return Promise.resolve(
-          mockJsonResponse({
-            asset_id: 'ls_toast',
-            primary_style: 'manga_anime',
-            scopes: ['eye'],
-            width: 256,
-            height: 256,
-            thumbnail_url: '/api/v1/assets/ls_toast/thumbnail',
-            line_art_url: '/api/v1/assets/ls_toast/line-art',
-            origin: 'native_line_art',
-            crop: null,
-            review_state: 'unreviewed',
-            quality_score: 0.85,
-            sfw_safe: true,
-            sfw_confidence: 0.99,
-            source_work_id: 'synthetic-work-000',
-          }),
+          mockJsonResponse(makeCandidate({ asset_id: 'ls_toast', thumbnail_url: '/api/v1/assets/ls_toast/thumbnail', line_art_url: '/api/v1/assets/ls_toast/line-art' })),
         )
       }
       if (url.includes('/curation/progress')) {

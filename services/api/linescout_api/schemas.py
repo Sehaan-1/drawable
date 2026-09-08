@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from linescout_ml.taxonomy import LineArtOrigin, PrimaryStyle, ScopeLabel
@@ -59,9 +59,19 @@ class ApiModel(BaseModel):
 
 
 class ErrorDetail(ApiModel):
+    """One structured error.
+
+    ``code`` is a stable, machine-readable slug (never a filename or path).
+    ``field`` names the offending request field when one field is at fault.
+    ``details`` is optional, code-specific structured data (e.g. byte limits
+    for ``image_too_large``); it must never contain absolute filesystem paths,
+    user content, or secrets.
+    """
+
     code: str = Field(description="Stable machine-readable error code, e.g. image_too_large.")
     message: str
     field: str | None = None
+    details: dict[str, Any] | None = None
 
 
 class ErrorResponse(ApiModel):
@@ -121,15 +131,22 @@ class SearchResult(ApiModel):
     asset_id: str
     thumbnail_url: str
     style: PrimaryStyle
+    #: Convenience view: primary first, then secondaries.
     scopes: list[ScopeLabel]
+    primary_scope: ScopeLabel
+    secondary_scopes: list[ScopeLabel] = Field(default_factory=list)
     origin: LineArtOrigin
     trace_allowed: bool = Field(
         description="Whether this asset may be placed on the trace layer. "
-        "Native line art is allowed; extracted line art is not."
+        "Stored per-asset permission (v2); never derived from origin on the wire."
     )
     relevance: float = Field(ge=0.0, le=1.0, description="Calibrated relevance probability.")
     quality: float = Field(ge=0.0, le=1.0)
     asset_url: str = Field(description="Trace-compatible full asset URL.")
+    #: ``None`` = not applicable or not assessed; with ``person_count_approximate``
+    #: the integer is an estimate (e.g. a crowd), not a headcount.
+    person_count: int | None = Field(default=None, ge=0)
+    person_count_approximate: bool = False
 
 
 class SearchGroup(ApiModel):
@@ -149,13 +166,33 @@ class SearchTiming(ApiModel):
     total_ms: float
 
 
+class Degradation(ApiModel):
+    """One structured way this response is degraded relative to full quality.
+
+    ``degradations`` on the response is the canonical, machine-readable view;
+    the top-level ``warning`` string is a convenience join kept for older
+    clients and may be removed in a future contract version.
+    """
+
+    kind: Literal["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty"]
+    detail: str
+
+
 class SearchResponse(ApiModel):
+    schema_version: Literal[2] = Field(
+        default=2, description="Payload contract version; bump on any breaking response change."
+    )
     revision: int = Field(ge=1, description="Echoes the request revision unchanged.")
     mode: SearchMode
     scope_predictions: list[ScopePrediction]
     groups: list[SearchGroup]
     timing: SearchTiming
     warning: str | None = None
+    degradations: list[Degradation] = Field(default_factory=list)
+    #: Gallery the results came from; ``None`` when no gallery is loaded.
+    dataset_version: str | None = None
+    #: Manifest content hash (index version key); ``None`` when no gallery.
+    index_version: str | None = None
 
 
 class StrokePoint(ApiModel):

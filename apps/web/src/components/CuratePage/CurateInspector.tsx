@@ -1,20 +1,30 @@
 /**
  * Right-side inspector for the current candidate.
  *
- * Holds the in-flight review form (primary style override, scope override,
- * quality, malformed/poor flags, and free-form note). Submission is
- * delegated to the parent: the parent owns the keyboard shortcuts and the
- * React Query mutation, this component just exposes a controlled form so
- * ``K`` / ``R`` / ``1..3`` can pre-fill it before commit.
+ * Holds the in-flight review form (primary style override, primary scope,
+ * secondary scopes, quality, named blockers, the human SFW decision, and a
+ * free-form note). Submission is delegated to the parent: the parent owns the
+ * keyboard shortcuts and the React Query mutation, this component just exposes
+ * a controlled form so ``K`` / ``R`` / ``1..3`` can pre-fill it before commit.
+ *
+ * Schema-v2 rules mirrored here so the server never has to bounce a label:
+ * - a keep requires a quality, a known primary scope, and zero blockers;
+ * - secondary scopes are gallery scopes and never repeat the primary;
+ * - the human SFW decision is tri-state: unset, approved, or flagged.
  */
 
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import {
+  BLOCKER_TITLES,
+  CURATION_BLOCKERS,
+  GALLERY_SCOPES,
+  PERMISSION_BASIS_TITLES,
   PRIMARY_STYLES,
   SCOPE_LABELS,
   SCOPE_TITLES,
   STYLE_TITLES,
+  type CurationBlocker,
   type PrimaryStyle,
   type ScopeLabel,
 } from '@drawable/contracts'
@@ -23,11 +33,13 @@ import type { CurationCandidate } from './types'
 
 export interface ReviewFormState {
   primaryStyle: PrimaryStyle
-  scopes: ScopeLabel[]
+  primaryScope: ScopeLabel
+  secondaryScopes: ScopeLabel[]
   quality: 1 | 2 | 3 | null
   note: string
-  malformedAnatomy: boolean
-  poorExtraction: boolean
+  blockers: CurationBlocker[]
+  /** null = no decision recorded, true = human approved safe, false = flagged unsafe. */
+  sfwSafe: boolean | null
 }
 
 export interface CurateInspectorProps {
@@ -48,14 +60,15 @@ const QUALITY_DESCRIPTORS: Record<1 | 2 | 3, string> = {
   3: 'Anchor-quality example',
 }
 
-function defaultForm(candidate: CurationCandidate): ReviewFormState {
+export function defaultForm(candidate: CurationCandidate): ReviewFormState {
   return {
     primaryStyle: candidate.primary_style,
-    scopes: [...candidate.scopes],
+    primaryScope: candidate.primary_scope,
+    secondaryScopes: [...(candidate.secondary_scopes ?? [])],
     quality: null,
     note: '',
-    malformedAnatomy: false,
-    poorExtraction: false,
+    blockers: [],
+    sfwSafe: null,
   }
 }
 
@@ -112,16 +125,43 @@ export function CurateInspector({
     onFormChange(next)
   }
 
-  const toggleScope = (scope: ScopeLabel) => {
+  const setPrimaryScope = (scope: ScopeLabel) => {
     if (!draft) return
-    const has = draft.scopes.includes(scope)
-    const scopes = has ? draft.scopes.filter((value) => value !== scope) : [...draft.scopes, scope]
-    update({ scopes })
+    // The primary scope is exactly one label; secondaries must never repeat
+    // it, so switching the primary drops it from the secondary set.
+    const secondaryScopes = draft.secondaryScopes.filter((value) => value !== scope)
+    update({ primaryScope: scope, secondaryScopes })
+  }
+
+  const toggleSecondaryScope = (scope: ScopeLabel) => {
+    if (!draft) return
+    const has = draft.secondaryScopes.includes(scope)
+    const secondaryScopes = has
+      ? draft.secondaryScopes.filter((value) => value !== scope)
+      : [...draft.secondaryScopes, scope]
+    update({ secondaryScopes })
+  }
+
+  const toggleBlocker = (blocker: CurationBlocker) => {
+    if (!draft) return
+    const has = draft.blockers.includes(blocker)
+    const blockers = has ? draft.blockers.filter((value) => value !== blocker) : [...draft.blockers, blocker]
+    update({ blockers })
   }
 
   const form = draft ?? defaultForm(candidate)
-  const canKeep = form.quality !== null && !busy
+  const keepBlockedReason = form.quality === null
+    ? 'Pick a quality to keep'
+    : form.primaryScope === 'unknown'
+      ? 'Set a known primary scope to keep'
+      : form.blockers.length > 0
+        ? 'Blocked assets are rejected, not kept'
+        : null
+  const canKeep = keepBlockedReason === null && !busy
   const canReject = !busy
+
+  const sfwScreening = candidate.sfw_screening
+  const sfwHuman = candidate.sfw_human
 
   return (
     <aside className="candidate-inspector">
@@ -146,18 +186,35 @@ export function CurateInspector({
         </select>
       </label>
 
+      <label>
+        <span>Primary scope</span>
+        <select
+          value={form.primaryScope}
+          onChange={(event) => setPrimaryScope(event.target.value as ScopeLabel)}
+          disabled={busy}
+          data-testid="primary-scope-select"
+        >
+          {SCOPE_LABELS.map((scope) => (
+            <option key={scope} value={scope}>
+              {SCOPE_TITLES[scope]}
+            </option>
+          ))}
+        </select>
+        <small className="field-hint">Exactly one; “Unknown” keeps the asset provisional</small>
+      </label>
+
       <fieldset>
-        <legend>Scopes (toggle)</legend>
+        <legend>Secondary scopes</legend>
         <div className="scope-chips">
-          {SCOPE_LABELS.filter((scope) => scope !== 'unknown').map((scope) => {
-            const active = form.scopes.includes(scope)
+          {GALLERY_SCOPES.filter((scope) => scope !== form.primaryScope).map((scope) => {
+            const active = form.secondaryScopes.includes(scope)
             return (
               <button
                 key={scope}
                 type="button"
                 className={`chip ${active ? 'is-active' : ''}`}
                 aria-pressed={active}
-                onClick={() => toggleScope(scope)}
+                onClick={() => toggleSecondaryScope(scope)}
                 disabled={busy}
                 data-testid={`scope-chip-${scope}`}
               >
@@ -193,27 +250,53 @@ export function CurateInspector({
       </fieldset>
 
       <fieldset className="flag-fieldset">
-        <legend>Flags</legend>
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={form.malformedAnatomy}
-            onChange={(event) => update({ malformedAnatomy: event.target.checked })}
-            disabled={busy}
-            data-testid="flag-malformed"
-          />
-          Malformed anatomy
-        </label>
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={form.poorExtraction}
-            onChange={(event) => update({ poorExtraction: event.target.checked })}
-            disabled={busy}
-            data-testid="flag-poor"
-          />
-          Poor line-art extraction
-        </label>
+        <legend>Blockers</legend>
+        {CURATION_BLOCKERS.map((blocker) => (
+          <label key={blocker} className="checkbox">
+            <input
+              type="checkbox"
+              checked={form.blockers.includes(blocker)}
+              onChange={() => toggleBlocker(blocker)}
+              disabled={busy}
+              data-testid={`blocker-${blocker}`}
+            />
+            {BLOCKER_TITLES[blocker]}
+          </label>
+        ))}
+        <small className="field-hint">Blocking is terminal: keep is disabled while any blocker is set</small>
+      </fieldset>
+
+      <fieldset>
+        <legend>Human SFW decision</legend>
+        <div className="segmented-control" role="radiogroup" aria-label="Human SFW decision">
+          {([
+            ['unset', 'Not reviewed'],
+            ['safe', 'Safe'],
+            ['unsafe', 'Unsafe'],
+          ] as const).map(([value, label]) => {
+            const active =
+              (value === 'unset' && form.sfwSafe === null) ||
+              (value === 'safe' && form.sfwSafe === true) ||
+              (value === 'unsafe' && form.sfwSafe === false)
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                className={active ? 'is-active' : ''}
+                onClick={() => update({ sfwSafe: value === 'unset' ? null : value === 'safe' })}
+                disabled={busy}
+                data-testid={`sfw-${value}`}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+        <small className="field-hint">
+          Serving requires explicit human approval — an automated “safe” verdict is not enough
+        </small>
       </fieldset>
 
       <label className="note-field">
@@ -249,9 +332,52 @@ export function CurateInspector({
         </div>
         <div>
           <dt>SFW check</dt>
+          <dd data-testid="sfw-check">
+            {sfwHuman ? (
+              <>
+                <StatusDot tone={sfwHuman.safe ? 'success' : 'error'} />
+                {sfwHuman.safe ? 'Human approved' : 'Human flagged'}
+              </>
+            ) : sfwScreening ? (
+              <>
+                <StatusDot tone={sfwScreening.verdict === 'safe' ? 'warning' : 'error'} />
+                {sfwScreening.verdict === 'safe'
+                  ? `Screened safe · ${((sfwScreening.confidence ?? 0) * 100).toFixed(0)}% · needs human review`
+                  : sfwScreening.verdict === 'unsure'
+                    ? 'Screened unsure · quarantined'
+                    : 'Screened unsafe · quarantined'}
+              </>
+            ) : (
+              <>
+                <StatusDot tone="warning" />
+                No automated screening · needs human review
+              </>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Permission</dt>
+          <dd data-testid="permission-basis">
+            <StatusDot tone={candidate.permissions.basis === 'unknown' ? 'error' : 'success'} />
+            {PERMISSION_BASIS_TITLES[candidate.permissions.basis]}
+            {candidate.allowed_uses.display ? ' · display' : ''}
+            {candidate.allowed_uses.training ? ' · training' : ''}
+            {candidate.allowed_uses.trace ? ' · trace' : ''}
+            {!candidate.allowed_uses.display && !candidate.allowed_uses.training && !candidate.allowed_uses.trace
+              ? ' · no uses allowed'
+              : ''}
+          </dd>
+        </div>
+        <div>
+          <dt>Learning split</dt>
+          <dd data-testid="learning-split">{candidate.learning_split}</dd>
+        </div>
+        <div>
+          <dt>People</dt>
           <dd>
-            <StatusDot tone={candidate.sfw_safe ? 'success' : 'warning'} />
-            {candidate.sfw_safe ? `Passed · ${(candidate.sfw_confidence * 100).toFixed(0)}%` : 'Flagged'}
+            {candidate.person_count === null
+              ? 'Unknown'
+              : `${candidate.person_count}${candidate.person_count_approximate ? ' (approx.)' : ''}`}
           </dd>
         </div>
       </dl>
@@ -269,6 +395,7 @@ export function CurateInspector({
           className="button--primary"
           onClick={onKeep}
           disabled={!canKeep}
+          title={keepBlockedReason ?? undefined}
           data-testid="keep-button"
         >
           <Check size={16} /> Keep <kbd>K</kbd>

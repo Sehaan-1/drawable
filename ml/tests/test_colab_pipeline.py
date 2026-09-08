@@ -32,8 +32,14 @@ from linescout_ml.colab.export import zip_gallery
 from linescout_ml.colab.label import LabelScores, OpenNsfw2Classifier, ZeroShotLabeler
 from linescout_ml.colab.models import MODEL_CARDS
 from linescout_ml.colab.runner import PipelineError, PipelineRunner, candidate_summary
-from linescout_ml.manifest import Manifest, ManifestRecord, SfwDecision
-from linescout_ml.taxonomy import PrimaryStyle, ReviewState, ScopeLabel
+from linescout_ml.manifest import Manifest, ManifestRecord, SfwScreening, is_servable
+from linescout_ml.taxonomy import (
+    PrimaryStyle,
+    ReviewState,
+    ScopeLabel,
+    SfwScreeningMethod,
+    SfwVerdict,
+)
 
 # --------------------------------------------------------------------- fixtures
 
@@ -99,23 +105,28 @@ def test_dry_run_writes_a_complete_gallery(dry_run: tuple[PipelineConfig, Pipeli
             assert tile.size == (config.thumbnail_size, config.thumbnail_size)
 
 
-def test_dry_run_records_are_uncurated_and_disabled(
+def test_dry_run_records_are_uncurated_and_not_servable(
     dry_run: tuple[PipelineConfig, PipelineRunner],
 ) -> None:
-    """Assets start disabled; production search only serves accepted records."""
+    """Assets start unservable; display needs permission, acceptance, human SFW."""
     config, _ = dry_run
     manifest = read_manifest(config.manifest_path)
     assert manifest is not None
     for record in manifest.records:
-        assert record.enabled is False
+        assert is_servable(record) is False
         assert record.review.state is ReviewState.UNREVIEWED
         assert record.review.quality is None
-        assert record.sfw.safe is True
-        assert record.sfw.method == "source_rating"
+        assert record.review.blockers == []
+        assert record.sfw_screening is not None
+        assert record.sfw_screening.verdict is SfwVerdict.SAFE
+        assert record.sfw_screening.method is SfwScreeningMethod.SOURCE_RATING
+        assert record.sfw_human is None  # a screen is never a human approval
+        assert record.allowed_uses.display is False  # permission basis is unknown
         assert record.origin.value == "native_line_art"
         assert record.extraction_model is None  # native assets must not claim an extractor
-        assert record.license_id == "CC0-1.0"
+        assert record.permissions.license_id == "CC0-1.0"
         assert record.pipeline_version == config.pipeline_version
+        assert record.label_version == config.label_version
 
 
 def test_dry_run_manifest_passes_the_project_cli(
@@ -502,8 +513,10 @@ def test_zero_shot_labels_reach_the_manifest(
     assert manifest is not None
     for record in manifest.records:
         assert record.primary_style is PrimaryStyle.MANGA_ANIME
-        assert record.scopes == [ScopeLabel.FACE_HEAD, ScopeLabel.HAIR]
+        assert record.primary_scope is ScopeLabel.FACE_HEAD
+        assert record.secondary_scopes == [ScopeLabel.HAIR]
         assert record.person_count == 1
+        assert record.person_count_approximate is True  # a zero-shot heuristic
     labelled = [candidate.labels for candidate in runner.store if candidate.labels]
     assert labelled and all(item.labelled_by == "zero_shot" for item in labelled)
     assert labelled[0].style_scores is not None
@@ -531,7 +544,7 @@ def test_a_multi_character_label_implies_two_people(
         assert len(record.scopes) > 1  # a content scope comes along with it
 
 
-def test_an_unsafe_source_is_quarantined_and_disabled(
+def test_an_unsafe_source_is_quarantined_and_not_servable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source_tree(tmp_path / "sources", count=2, size=320)
@@ -540,8 +553,10 @@ def test_an_unsafe_source_is_quarantined_and_disabled(
         def __init__(self, batch_size: int = 8) -> None:
             self.batch_size = batch_size
 
-        def decision(self, image: Image.Image, *, min_confidence: float) -> SfwDecision:
-            return SfwDecision(safe=False, confidence=0.1, method="opennsfw2")
+        def decision(self, image: Image.Image, *, min_confidence: float) -> SfwScreening:
+            return SfwScreening(
+                verdict=SfwVerdict.UNSAFE, confidence=0.1, method=SfwScreeningMethod.OPENNSFW2
+            )
 
     monkeypatch.setattr(
         OpenNsfw2Classifier, "load", classmethod(lambda cls, *args, **kwargs: StubClassifier())
@@ -556,11 +571,12 @@ def test_an_unsafe_source_is_quarantined_and_disabled(
     manifest = read_manifest(config.manifest_path)
     assert manifest is not None
     for record in manifest.records:
-        assert record.sfw.safe is False
-        assert record.sfw.method == "opennsfw2"
-        assert record.enabled is False
+        assert record.sfw_screening is not None
+        assert record.sfw_screening.verdict is SfwVerdict.UNSAFE
+        assert record.sfw_screening.method is SfwScreeningMethod.OPENNSFW2
+        assert is_servable(record) is False
         assert record.review.state is ReviewState.QUARANTINED
-    assert manifest.enabled_records == []
+    assert manifest.servable_records == []
     label_stage = next(stage for stage in runner.stages if stage.name == "label")
     assert any("opennsfw2" in note for note in label_stage.notes)
 
@@ -573,7 +589,8 @@ def test_labelling_uses_source_defaults_when_disabled(
     assert manifest is not None
     for record in manifest.records:
         assert record.primary_style is PrimaryStyle.GESTURE_SKETCH
-        assert record.scopes == [ScopeLabel.FULL_BODY]
+        assert record.primary_scope is ScopeLabel.FULL_BODY
+        assert record.secondary_scopes == []
     labels = [candidate.labels for candidate in runner.store if candidate.labels]
     assert labels and all(item.labelled_by == "source_default" for item in labels)
 

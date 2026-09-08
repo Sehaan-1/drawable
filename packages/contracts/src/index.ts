@@ -22,6 +22,10 @@ export type LineArtOrigin = Schemas['LineArtOrigin']
 export type SearchMode = Schemas['SearchMode']
 export type InteractionEvent = Schemas['InteractionEvent']
 export type StyleSelection = Schemas['StyleSelection']
+export type CurationBlocker = Schemas['CurationBlocker']
+export type LearningSplit = Schemas['LearningSplit']
+export type PermissionBasis = Schemas['PermissionBasis']
+export type SfwVerdict = Schemas['SfwVerdict']
 
 /** Fixed default style-row order for new preference profiles (spec §3). */
 export const DEFAULT_STYLE_ORDER = [
@@ -54,6 +58,43 @@ export const SCOPE_LABELS = [
   'unknown',
 ] as const satisfies readonly ScopeLabel[]
 
+/**
+ * Scopes a gallery asset may carry (everything but `unknown`). Secondary
+ * scopes must come from this set and differ from the primary scope.
+ */
+export const GALLERY_SCOPES = [
+  'eye',
+  'eyebrow',
+  'mouth',
+  'face_head',
+  'hair',
+  'hand',
+  'foot',
+  'upper_body_clothing',
+  'full_body',
+  'multi_character',
+] as const satisfies readonly Exclude<ScopeLabel, 'unknown'>[]
+
+/** Named blockers; keeping a blocked asset is a wire-level 422. */
+export const CURATION_BLOCKERS = ['anatomy', 'extraction'] as const satisfies
+  readonly CurationBlocker[]
+
+export const BLOCKER_TITLES: Record<CurationBlocker, string> = {
+  anatomy: 'Malformed anatomy',
+  extraction: 'Poor line-art extraction',
+}
+
+export const PERMISSION_BASIS_TITLES: Record<PermissionBasis, string> = {
+  first_party: 'First-party',
+  public_domain: 'Public domain',
+  license_terms: 'License terms',
+  explicit_consent: 'Explicit consent',
+  unknown: 'Unknown',
+}
+
+export const LEARNING_SPLITS = ['train', 'validation', 'test', 'none'] as const satisfies
+  readonly LearningSplit[]
+
 export const STYLE_TITLES: Record<PrimaryStyle, string> = {
   manga_anime: 'Manga / anime',
   western_ink: 'Western comic / ink',
@@ -80,8 +121,14 @@ export const SCOPE_TITLES: Record<ScopeLabel, string> = {
 type AssertSame<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never
 const _styles: AssertSame<(typeof PRIMARY_STYLES)[number], PrimaryStyle> = true
 const _scopes: AssertSame<(typeof SCOPE_LABELS)[number], ScopeLabel> = true
+const _galleryScopes: AssertSame<(typeof GALLERY_SCOPES)[number], Exclude<ScopeLabel, 'unknown'>> = true
+const _blockers: AssertSame<(typeof CURATION_BLOCKERS)[number], CurationBlocker> = true
+const _splits: AssertSame<(typeof LEARNING_SPLITS)[number], LearningSplit> = true
 void _styles
 void _scopes
+void _galleryScopes
+void _blockers
+void _splits
 
 export function isPrimaryStyle(value: unknown): value is PrimaryStyle {
   return typeof value === 'string' && (PRIMARY_STYLES as readonly string[]).includes(value)
@@ -98,6 +145,7 @@ export type SearchGroup = Schemas['SearchGroup']
 export type SearchResult = Schemas['SearchResult']
 export type SearchTiming = Schemas['SearchTiming']
 export type ScopePrediction = Schemas['ScopePrediction']
+export type Degradation = Schemas['Degradation']
 
 export type StrokeSequence = Schemas['StrokeSequence']
 export type Stroke = Schemas['Stroke']
@@ -119,6 +167,14 @@ export type StyleBreakdown = Schemas['StyleBreakdown']
 export type LabelRequest = Schemas['LabelRequest']
 export type LabelResponse = Schemas['LabelResponse']
 export type SnapshotResponse = Schemas['SnapshotResponse']
+
+// Permission, SFW, and split models shared by the manifest and the curation
+// wire (schema v2). Unknown permission never implies any allowed use, and a
+// missing human SFW decision never implies approval.
+export type Permissions = Schemas['Permissions']
+export type AllowedUses = Schemas['AllowedUses']
+export type SfwScreening = Schemas['SfwScreening']
+export type SfwHumanDecision = Schemas['SfwHumanDecision']
 
 export type ErrorResponse = Schemas['ErrorResponse']
 

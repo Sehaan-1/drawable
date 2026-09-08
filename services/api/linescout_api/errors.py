@@ -39,6 +39,7 @@ def error_body(
     status_code: int,
     request_id: UUID | None = None,
     retryable: bool | None = None,
+    details: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     rid = request_id or uuid4()
     retry = retryable if retryable is not None else status_code in RETRYABLE_STATUS
@@ -46,7 +47,7 @@ def error_body(
         schema_version=1,
         request_id=rid,
         retryable=retry,
-        error=ErrorDetail(code=code, message=message, field=field),
+        error=ErrorDetail(code=code, message=message, field=field, details=details),
     )
     return payload.model_dump(mode="json"), {"X-Request-Id": str(rid)}
 
@@ -60,6 +61,7 @@ def json_error(
     request_id: UUID | None = None,
     retryable: bool | None = None,
     headers: dict[str, str] | None = None,
+    details: dict[str, Any] | None = None,
 ) -> JSONResponse:
     content, extra = error_body(
         code=code,
@@ -68,6 +70,7 @@ def json_error(
         status_code=status_code,
         request_id=request_id,
         retryable=retryable,
+        details=details,
     )
     return JSONResponse(
         status_code=status_code, content=content, headers={**(headers or {}), **extra}
@@ -86,6 +89,7 @@ class ApiError(HTTPException):
         headers: dict[str, str] | None = None,
         retryable: bool | None = None,
         request_id: UUID | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(status_code=status_code, detail=message, headers=headers)
         self.code = code
@@ -93,6 +97,7 @@ class ApiError(HTTPException):
         self.field = field
         self.retryable = retryable
         self.request_id = request_id
+        self.details = details
 
     def to_response(self, request: Request | None = None) -> JSONResponse:
         content, extra = error_body(
@@ -102,6 +107,7 @@ class ApiError(HTTPException):
             status_code=self.status_code,
             request_id=resolve_request_id(request, self.request_id),
             retryable=self.retryable,
+            details=self.details,
         )
         headers = {**(self.headers or {}), **extra}
         return JSONResponse(status_code=self.status_code, content=content, headers=headers)
@@ -111,8 +117,13 @@ def bad_request(code: str, message: str, field: str | None = None) -> ApiError:
     return ApiError(400, code, message, field, retryable=False)
 
 
-def too_large(code: str, message: str, field: str | None = None) -> ApiError:
-    return ApiError(413, code, message, field, retryable=False)
+def too_large(
+    code: str,
+    message: str,
+    field: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> ApiError:
+    return ApiError(413, code, message, field, retryable=False, details=details)
 
 
 def unprocessable(code: str, message: str, field: str | None = None) -> ApiError:
@@ -155,10 +166,23 @@ async def http_error_handler(request: Request, error: Exception) -> JSONResponse
 
 async def validation_error_handler(request: Request, error: Exception) -> JSONResponse:
     assert isinstance(error, RequestValidationError)
-    first = error.errors()[0] if error.errors() else {}
+    errors = error.errors()
+    first = errors[0] if errors else {}
     location = ".".join(
         str(part) for part in first.get("loc", ()) if part not in ("body", "query", "path")
     )
+    # ``details.errors`` carries every failed field, not just the first, so
+    # clients can mark up the whole form in one round trip.
+    detail_errors = [
+        {
+            "field": ".".join(str(part) for part in item.get("loc", ()))
+            if item.get("loc")
+            else None,
+            "message": str(item.get("msg", "invalid value")),
+            "type": str(item.get("type", "value_error")),
+        }
+        for item in errors
+    ]
     return json_error(
         422,
         "validation_error",
@@ -166,4 +190,5 @@ async def validation_error_handler(request: Request, error: Exception) -> JSONRe
         field=location or None,
         request_id=resolve_request_id(request),
         retryable=False,
+        details={"errors": detail_errors} if detail_errors else None,
     )

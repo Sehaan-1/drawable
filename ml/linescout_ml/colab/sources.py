@@ -26,15 +26,15 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from linescout_ml.colab.config import PipelineConfig, SourceSpec, SplitFractions
-from linescout_ml.manifest import CropBox, SfwDecision
-from linescout_ml.taxonomy import GALLERY_SCOPES, DatasetSplit, PrimaryStyle, ScopeLabel
+from linescout_ml.manifest import CropBox, SfwHumanDecision, SfwScreening
+from linescout_ml.taxonomy import GALLERY_SCOPES, LearningSplit, PrimaryStyle, ScopeLabel
 
 #: Split order used by the cumulative-fraction lookup in :func:`split_for_work`.
-SPLIT_ORDER: tuple[DatasetSplit, ...] = (
-    DatasetSplit.TRAIN,
-    DatasetSplit.VALIDATION,
-    DatasetSplit.TEST,
-    DatasetSplit.GALLERY_ONLY,
+SPLIT_ORDER: tuple[LearningSplit, ...] = (
+    LearningSplit.TRAIN,
+    LearningSplit.VALIDATION,
+    LearningSplit.TEST,
+    LearningSplit.NONE,
 )
 
 
@@ -57,25 +57,50 @@ class AssetLabels(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     primary_style: PrimaryStyle
-    scopes: list[ScopeLabel] = Field(min_length=1)
+    #: The single best scope. ``unknown`` is legal here: when no scope clears
+    #: the confidence floor the pipeline records "not determined" instead of
+    #: inventing a label, and curation resolves it before acceptance.
+    primary_scope: ScopeLabel = ScopeLabel.UNKNOWN
+    #: Additional scopes below the primary, in descending score order.
+    secondary_scopes: list[ScopeLabel] = Field(default_factory=list)
     person_count: int | None = Field(default=None, ge=0, le=50)
-    sfw: SfwDecision
+    #: Pipeline person counts are heuristics (multi -> 2, human scope -> 1),
+    #: so the label stages record them as approximate; a human count is exact.
+    person_count_approximate: bool = False
+    #: Automated SFW screen only. A human SFW decision is recorded through
+    #: curation, or — for whole sources the operator asserts by hand — as the
+    #: ``sfw_human`` batch decision below.
+    sfw: SfwScreening | None = None
+    #: A human SFW decision made at ingestion time (operator-asserted source).
+    #: ``None`` for every automated method; curation writes the rest.
+    sfw_human: SfwHumanDecision | None = None
     #: ``zero_shot`` when a CLIP text encoder ranked the labels, otherwise the
     #: source defaults were used and curation must confirm them.
     labelled_by: Literal["zero_shot", "source_default"] = "source_default"
     style_scores: dict[str, float] | None = None
     scope_scores: dict[str, float] | None = None
 
+    @property
+    def scopes(self) -> list[ScopeLabel]:
+        """Primary first, then secondaries (mirrors the manifest record)."""
+        return [self.primary_scope, *self.secondary_scopes]
+
     @model_validator(mode="after")
     def _gallery_scopes_only(self) -> Self:
-        bad = [scope for scope in self.scopes if scope not in GALLERY_SCOPES]
+        bad = [scope for scope in self.secondary_scopes if scope not in GALLERY_SCOPES]
         if bad:
-            msg = f"assets cannot carry query-only scopes: {bad}"
+            msg = f"secondary scopes cannot carry query-only scopes: {bad}"
+            raise ValueError(msg)
+        if self.primary_scope in self.secondary_scopes:
+            msg = "primary_scope must not repeat in secondary_scopes"
             raise ValueError(msg)
         if ScopeLabel.MULTI_CHARACTER in self.scopes and (
             self.person_count is None or self.person_count < 2
         ):
             msg = "multi_character assets must have person_count >= 2"
+            raise ValueError(msg)
+        if self.person_count_approximate and self.person_count is None:
+            msg = "person_count_approximate requires a person_count"
             raise ValueError(msg)
         return self
 
@@ -92,7 +117,12 @@ class Candidate(BaseModel):
     work_id: str
     relative_path: str
     source_path: str
-    split: DatasetSplit
+    split: LearningSplit
+    #: Leakage group id derived from the source's ``leakage_grouping``.
+    #: ``None`` when unknown (the work id is then the de-facto group).
+    leakage_group_id: str | None = None
+    #: Artist identity when the source declares one. ``None`` = unknown.
+    artist_id: str | None = None
 
     # Filled by the extract stage
     asset_id: str | None = None
@@ -174,7 +204,24 @@ def work_id_for(source: SourceSpec, relative_path: str) -> str:
     return f"{source.name}/{item_id_for(relative_path)}"
 
 
-def split_for_work(work_id: str, seed: int, fractions: SplitFractions) -> DatasetSplit:
+def leakage_group_for(source: SourceSpec, work_id: str) -> str | None:
+    """Leakage group id under the source's ``leakage_grouping`` policy.
+
+    ``work`` keeps the one-work-one-split rule (group key = work id, reported
+    as ``None`` so the work id itself remains the de-facto group);
+    ``artist`` groups by the source's declared artist; ``source`` puts the
+    entire source in one group.
+    """
+    if source.leakage_grouping == "source":
+        return f"source:{source.name}"
+    if source.leakage_grouping == "artist":
+        if source.default_artist_id is None:
+            return None
+        return f"artist:{source.default_artist_id}"
+    return None
+
+
+def split_for_work(work_id: str, seed: int, fractions: SplitFractions) -> LearningSplit:
     """Deterministic split assignment from a hash of the work id.
 
     Hashing (rather than shuffling a list) means the answer does not depend on
@@ -186,7 +233,7 @@ def split_for_work(work_id: str, seed: int, fractions: SplitFractions) -> Datase
     cumulative = 0.0
     for split, share in zip(
         SPLIT_ORDER,
-        (fractions.train, fractions.validation, fractions.test, fractions.gallery_only),
+        (fractions.train, fractions.validation, fractions.test, fractions.unassigned),
         strict=True,
     ):
         cumulative += share
@@ -239,6 +286,8 @@ def discover(config: PipelineConfig) -> list[Candidate]:
                     relative_path=image.relative_path,
                     source_path=str(image.path.resolve()),
                     split=split_for_work(image.work_id, config.seed, config.splits),
+                    leakage_group_id=leakage_group_for(source, image.work_id),
+                    artist_id=source.default_artist_id,
                 )
             )
     return candidates

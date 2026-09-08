@@ -21,8 +21,8 @@ from linescout_ml.colab.sources import (
     split_for_work,
     work_id_for,
 )
-from linescout_ml.manifest import SfwDecision
-from linescout_ml.taxonomy import DatasetSplit, PrimaryStyle, ScopeLabel
+from linescout_ml.manifest import SfwScreening
+from linescout_ml.taxonomy import LearningSplit, PrimaryStyle, ScopeLabel
 
 
 def _source(root: Path, **overrides: object) -> SourceSpec:
@@ -90,7 +90,7 @@ def test_discover_assigns_keys_and_splits(tmp_path: Path) -> None:
     candidates = discover(_config(tmp_path))
     assert len(candidates) == 6
     assert all(candidate.key.startswith("sketches/") for candidate in candidates)
-    assert all(candidate.split in set(DatasetSplit) for candidate in candidates)
+    assert all(candidate.split in set(LearningSplit) for candidate in candidates)
     assert len({candidate.key for candidate in candidates}) == 6
 
 
@@ -137,7 +137,7 @@ def test_one_work_never_crosses_splits(tmp_path: Path) -> None:
     source_tree(root, count=9, subdirs=True)  # three pages per "book"
     config = _config(tmp_path, sources=[_source(root, work_grouping="parent_dir")])
     candidates = discover(config)
-    per_work: dict[str, set[DatasetSplit]] = {}
+    per_work: dict[str, set[LearningSplit]] = {}
     for candidate in candidates:
         per_work.setdefault(candidate.work_id, set()).add(candidate.split)
     assert all(len(splits) == 1 for splits in per_work.values())
@@ -162,25 +162,24 @@ def test_split_assignment_depends_on_the_seed() -> None:
 def test_split_assignment_roughly_follows_the_fractions() -> None:
     fractions = SplitFractions()
     counts = Counter(split_for_work(f"work-{index}", 7, fractions) for index in range(4000))
-    assert counts[DatasetSplit.TRAIN] / 4000 == pytest.approx(0.70, abs=0.05)
-    assert counts[DatasetSplit.VALIDATION] / 4000 == pytest.approx(0.15, abs=0.05)
-    assert counts[DatasetSplit.TEST] / 4000 == pytest.approx(0.15, abs=0.05)
-    assert counts.get(DatasetSplit.GALLERY_ONLY, 0) == 0
+    assert counts[LearningSplit.TRAIN] / 4000 == pytest.approx(0.70, abs=0.05)
+    assert counts[LearningSplit.VALIDATION] / 4000 == pytest.approx(0.15, abs=0.05)
+    assert counts[LearningSplit.TEST] / 4000 == pytest.approx(0.15, abs=0.05)
+    assert counts.get(LearningSplit.NONE, 0) == 0
 
 
 def test_custom_split_fractions_are_honoured() -> None:
-    fractions = SplitFractions(train=0.7, validation=0.1, test=0.1, gallery_only=0.1)
+    fractions = SplitFractions(train=0.7, validation=0.1, test=0.1, unassigned=0.1)
     counts = Counter(split_for_work(f"work-{index}", 7, fractions) for index in range(4000))
-    assert counts[DatasetSplit.TRAIN] / 4000 == pytest.approx(0.70, abs=0.05)
-    assert counts[DatasetSplit.TEST] / 4000 == pytest.approx(0.10, abs=0.05)
+    assert counts[LearningSplit.TRAIN] / 4000 == pytest.approx(0.70, abs=0.05)
+    assert counts[LearningSplit.TEST] / 4000 == pytest.approx(0.10, abs=0.05)
     assert len(counts) == 4
 
 
 def test_a_gallery_only_share_of_one_puts_everything_in_the_gallery() -> None:
-    fractions = SplitFractions(train=0.0, validation=0.0, test=0.0, gallery_only=1.0)
+    fractions = SplitFractions(train=0.0, validation=0.0, test=0.0, unassigned=1.0)
     assert all(
-        split_for_work(f"work-{index}", 3, fractions) is DatasetSplit.GALLERY_ONLY
-        for index in range(50)
+        split_for_work(f"work-{index}", 3, fractions) is LearningSplit.NONE for index in range(50)
     )
 
 
@@ -200,9 +199,9 @@ def _measurements(phash_value: str = "0123456789abcdef") -> Measurements:
 def _labels() -> AssetLabels:
     return AssetLabels(
         primary_style=PrimaryStyle.MANGA_ANIME,
-        scopes=[ScopeLabel.FACE_HEAD],
+        primary_scope=ScopeLabel.FACE_HEAD,
         person_count=1,
-        sfw=SfwDecision(safe=True, confidence=1.0, method="source_rating"),
+        sfw=SfwScreening(verdict="safe", confidence=1.0, method="source_rating"),
     )
 
 

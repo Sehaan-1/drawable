@@ -32,8 +32,8 @@ export interface paths {
          * Preview Asset
          * @description Serve unreviewed (and other) gallery files to the curation UI only.
          *
-         *     Public ``/api/v1/assets/{id}/...`` routes stay gated on
-         *     ``enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1``.
+         *     Public ``/api/v1/assets/{id}/...`` routes stay gated on the derived
+         *     ``enabled = 1`` flag (the full v2 serving predicate).
          */
         get: operations["preview_asset_api_v1_curation_assets__asset_id___kind__get"];
         put?: never;
@@ -104,7 +104,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Export Snapshot */
+        /**
+         * Export Snapshot
+         * @description Write an immutable **full** snapshot of the current curation state.
+         *
+         *     Frozen semantics (v2): the snapshot captures the *latest* keep-or-reject
+         *     label per asset — rejected assets included — at the moment of the export.
+         *     It is a state view, not an export cursor: every POST writes a new file and
+         *     never mutates a previous one, and the append-only ``curation_labels``
+         *     audit history stays complete in the database. Lineage is recorded through
+         *     ``previous_snapshot_id`` and the ``snapshots`` registry table.
+         */
         post: operations["export_snapshot_api_v1_curation_snapshots_post"];
         delete?: never;
         options?: never;
@@ -205,6 +215,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AllowedUses
+         * @description What the asset may be used for. Three independent grants, all opt-in.
+         *
+         *     A use is only ``True`` when the permission basis justifies it (or a
+         *     recorded human permission decision does). Anything unknown stays ``False``:
+         *     unknown permission must not imply permission.
+         */
+        AllowedUses: {
+            /**
+             * Display
+             * @default false
+             */
+            display: boolean;
+            /**
+             * Trace
+             * @default false
+             */
+            trace: boolean;
+            /**
+             * Training
+             * @default false
+             */
+            training: boolean;
+        };
         /** Body_search_api_v1_search_post */
         Body_search_api_v1_search_post: {
             /** Canvas Height */
@@ -245,15 +280,48 @@ export interface components {
             y: number;
         };
         /**
+         * CurationBlocker
+         * @description A named defect that blocks specific uses regardless of review state.
+         *
+         *     Blockers are not review states; they are assertions about the asset that
+         *     outlive individual decisions. While any blocker is present the asset is
+         *     neither servable nor trainable (see ``is_servable`` / ``is_trainable`` in
+         *     :mod:`linescout_ml.manifest`). The curation API refuses a ``keep`` decision
+         *     that carries blockers — blockers force ``reject`` or ``quarantine``.
+         *
+         *     Adding a new blocker kind is a schema change: extend this enum, bump the
+         *     manifest schema version, and migrate the ``blockers_json`` columns.
+         * @enum {string}
+         */
+        CurationBlocker: "anatomy" | "extraction";
+        /**
          * CurationCandidate
-         * @description One candidate asset for review.
+         * @description One candidate asset for review (the v2 wire shape).
          */
         CurationCandidate: {
+            allowed_uses: components["schemas"]["AllowedUses"];
+            /** Artist Id */
+            artist_id?: string | null;
             /** Asset Id */
             asset_id: string;
+            /** Blockers */
+            blockers?: components["schemas"]["CurationBlocker"][];
             crop?: components["schemas"]["CropBox"] | null;
+            /**
+             * Gallery Member
+             * @default true
+             */
+            gallery_member: boolean;
+            /**
+             * Gold Member
+             * @default false
+             */
+            gold_member: boolean;
             /** Height */
             height: number;
+            /** Leakage Group Id */
+            leakage_group_id?: string | null;
+            learning_split: components["schemas"]["LearningSplit"];
             /** Line Art Url */
             line_art_url: string;
             /**
@@ -261,6 +329,17 @@ export interface components {
              * @enum {string}
              */
             origin: "native_line_art" | "extracted_line_art";
+            /** Parent Asset Id */
+            parent_asset_id?: string | null;
+            permissions: components["schemas"]["Permissions"];
+            /** Person Count */
+            person_count?: number | null;
+            /**
+             * Person Count Approximate
+             * @default false
+             */
+            person_count_approximate: boolean;
+            primary_scope: components["schemas"]["ScopeLabel"];
             primary_style: components["schemas"]["PrimaryStyle"];
             /** Quality Score */
             quality_score: number;
@@ -269,12 +348,10 @@ export interface components {
              * @enum {string}
              */
             review_state: "unreviewed" | "accepted" | "rejected" | "quarantined";
-            /** Scopes */
-            scopes: components["schemas"]["ScopeLabel"][];
-            /** Sfw Confidence */
-            sfw_confidence: number;
-            /** Sfw Safe */
-            sfw_safe: boolean;
+            /** Secondary Scopes */
+            secondary_scopes?: components["schemas"]["ScopeLabel"][];
+            sfw_human?: components["schemas"]["SfwHumanDecision"] | null;
+            sfw_screening?: components["schemas"]["SfwScreening"] | null;
             /** Source Work Id */
             source_work_id: string;
             /** Thumbnail Url */
@@ -309,13 +386,43 @@ export interface components {
              */
             target: number;
         };
-        /** ErrorDetail */
+        /**
+         * Degradation
+         * @description One structured way this response is degraded relative to full quality.
+         *
+         *     ``degradations`` on the response is the canonical, machine-readable view;
+         *     the top-level ``warning`` string is a convenience join kept for older
+         *     clients and may be removed in a future contract version.
+         */
+        Degradation: {
+            /** Detail */
+            detail: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "fixture_mode" | "cpu_fallback" | "branch_disabled" | "gallery_empty";
+        };
+        /**
+         * ErrorDetail
+         * @description One structured error.
+         *
+         *     ``code`` is a stable, machine-readable slug (never a filename or path).
+         *     ``field`` names the offending request field when one field is at fault.
+         *     ``details`` is optional, code-specific structured data (e.g. byte limits
+         *     for ``image_too_large``); it must never contain absolute filesystem paths,
+         *     user content, or secrets.
+         */
         ErrorDetail: {
             /**
              * Code
              * @description Stable machine-readable error code, e.g. image_too_large.
              */
             code: string;
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
             /** Field */
             field?: string | null;
             /** Message */
@@ -426,6 +533,8 @@ export interface components {
         LabelRequest: {
             /** Asset Id */
             asset_id: string;
+            /** Blockers */
+            blockers?: components["schemas"]["CurationBlocker"][];
             crop?: components["schemas"]["CropBox"] | null;
             /**
              * Decision
@@ -433,30 +542,25 @@ export interface components {
              */
             decision: "keep" | "reject";
             expected_review_state: components["schemas"]["ReviewState"];
-            /**
-             * Malformed Anatomy
-             * @default false
-             */
-            malformed_anatomy: boolean;
             /** Note */
             note?: string | null;
-            /**
-             * Poor Extraction
-             * @default false
-             */
-            poor_extraction: boolean;
+            primary_scope?: components["schemas"]["ScopeLabel"] | null;
             primary_style?: components["schemas"]["PrimaryStyle"] | null;
             /** Quality */
             quality?: number | null;
             /** Reviewer */
             reviewer?: string | null;
-            /** Scopes */
-            scopes?: components["schemas"]["ScopeLabel"][] | null;
+            /** Secondary Scopes */
+            secondary_scopes?: components["schemas"]["ScopeLabel"][] | null;
+            /** Sfw Safe */
+            sfw_safe?: boolean | null;
         };
         /** LabelResponse */
         LabelResponse: {
             /** Asset Id */
             asset_id: string;
+            /** Blockers */
+            blockers?: components["schemas"]["CurationBlocker"][];
             /** Created At */
             created_at: string;
             /**
@@ -475,7 +579,22 @@ export interface components {
              * @enum {string}
              */
             review_state: "unreviewed" | "accepted" | "rejected" | "quarantined";
+            /** Serving Blockers */
+            serving_blockers?: string[];
+            /** Sfw Human Approved */
+            sfw_human_approved: boolean | null;
         };
+        /**
+         * LearningSplit
+         * @description Learning assignment for an asset. Gallery/gold membership is separate.
+         *
+         *     ``none`` means *no training assignment*: the asset is excluded from every
+         *     learning population. It is not a conflict in the one-group-one-split rule
+         *     (only two different assigned splits on the same work or leakage group
+         *     are). The default derivation policy keeps 70/15/15 over assigned works.
+         * @enum {string}
+         */
+        LearningSplit: "train" | "validation" | "test" | "none";
         /**
          * LineArtOrigin
          * @description Whether the visible reference is native line art or machine-extracted.
@@ -492,6 +611,42 @@ export interface components {
             name: string;
             /** Version */
             version: string;
+        };
+        /**
+         * PermissionBasis
+         * @description Why the asset's allowed uses may be claimed.
+         *
+         *     * ``license_terms``    — the recorded licence's terms grant the use.
+         *     * ``public_domain``    — no rights reserved (verified dedication).
+         *     * ``explicit_consent`` — the artist/source gave recorded permission.
+         *     * ``first_party``      — content produced by this project itself.
+         *     * ``unknown``          — the default. Grants *nothing*: unknown permission
+         *       must not imply permission.
+         * @enum {string}
+         */
+        PermissionBasis: "license_terms" | "public_domain" | "explicit_consent" | "first_party" | "unknown";
+        /**
+         * Permissions
+         * @description Permission provenance for one asset.
+         *
+         *     ``license_id`` has no default — provenance is the point of the manifest,
+         *     and a silent default would let an unverified licence claim ship. ``basis``
+         *     defaults to ``unknown``, which grants no uses at all.
+         */
+        Permissions: {
+            /** Attribution */
+            attribution?: string | null;
+            /**
+             * Attribution Required
+             * @default false
+             */
+            attribution_required: boolean;
+            /** @default unknown */
+            basis: components["schemas"]["PermissionBasis"];
+            /** License Id */
+            license_id: string;
+            /** Permission Url */
+            permission_url?: string | null;
         };
         /** PreferencesResponse */
         PreferencesResponse: {
@@ -544,7 +699,18 @@ export interface components {
         };
         /**
          * ReviewState
-         * @description Human curation state for an asset.
+         * @description Human curation state for an asset (definitions are part of the contract).
+         *
+         *     * ``unreviewed`` — no human decision recorded. Not servable, not trainable.
+         *     * ``accepted``   — a human approved the asset's labels. Servable iff the
+         *       other gates pass (display permission, gallery membership, human SFW
+         *       approval, no blockers); trainable iff training permission and split allow.
+         *     * ``rejected``   — terminal human verdict that the asset is unsuitable.
+         *       Never served, never trained on as a positive example; retained for audit
+         *       and (only where training use is permitted) as a negative example for
+         *       quality models.
+         *     * ``quarantined``— reversible hold pending investigation (SFW concern,
+         *       provenance concern, extraction rework). All uses blocked while held.
          * @enum {string}
          */
         ReviewState: "unreviewed" | "accepted" | "rejected" | "quarantined";
@@ -566,8 +732,13 @@ export interface components {
          * ScopeLabel
          * @description What part of a character (or how many characters) an image depicts.
          *
-         *     An asset may carry several scope labels; queries return one probability per
-         *     label plus ``unknown``.
+         *     An asset carries exactly one ``primary_scope`` plus any number of
+         *     ``secondary_scopes``; queries return one probability per label plus
+         *     ``unknown``.
+         *
+         *     ``eyebrow`` and ``mouth`` are retained as first-class detail scopes, and
+         *     ``person_count`` stays nullable on the record (null = not applicable or
+         *     not assessed).
          * @enum {string}
          */
         ScopeLabel: "eye" | "eyebrow" | "mouth" | "face_head" | "hair" | "hand" | "foot" | "upper_body_clothing" | "full_body" | "multi_character" | "unknown";
@@ -600,14 +771,27 @@ export interface components {
         SearchMode: "insufficient" | "provisional" | "confident";
         /** SearchResponse */
         SearchResponse: {
+            /** Dataset Version */
+            dataset_version?: string | null;
+            /** Degradations */
+            degradations?: components["schemas"]["Degradation"][];
             /** Groups */
             groups: components["schemas"]["SearchGroup"][];
+            /** Index Version */
+            index_version?: string | null;
             mode: components["schemas"]["SearchMode"];
             /**
              * Revision
              * @description Echoes the request revision unchanged.
              */
             revision: number;
+            /**
+             * Schema Version
+             * @description Payload contract version; bump on any breaking response change.
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
             /** Scope Predictions */
             scope_predictions: components["schemas"]["ScopePrediction"][];
             timing: components["schemas"]["SearchTiming"];
@@ -624,6 +808,14 @@ export interface components {
              */
             asset_url: string;
             origin: components["schemas"]["LineArtOrigin"];
+            /** Person Count */
+            person_count?: number | null;
+            /**
+             * Person Count Approximate
+             * @default false
+             */
+            person_count_approximate: boolean;
+            primary_scope: components["schemas"]["ScopeLabel"];
             /** Quality */
             quality: number;
             /**
@@ -633,12 +825,14 @@ export interface components {
             relevance: number;
             /** Scopes */
             scopes: components["schemas"]["ScopeLabel"][];
+            /** Secondary Scopes */
+            secondary_scopes?: components["schemas"]["ScopeLabel"][];
             style: components["schemas"]["PrimaryStyle"];
             /** Thumbnail Url */
             thumbnail_url: string;
             /**
              * Trace Allowed
-             * @description Whether this asset may be placed on the trace layer. Native line art is allowed; extracted line art is not.
+             * @description Whether this asset may be placed on the trace layer. Stored per-asset permission (v2); never derived from origin on the wire.
              */
             trace_allowed: boolean;
         };
@@ -656,6 +850,56 @@ export interface components {
             total_ms: number;
         };
         /**
+         * SfwHumanDecision
+         * @description A human SFW decision. The only thing that can gate display.
+         */
+        SfwHumanDecision: {
+            /** Decided At */
+            decided_at?: string | null;
+            /**
+             * Reviewer
+             * @default local
+             */
+            reviewer: string;
+            /** Safe */
+            safe: boolean;
+        };
+        /**
+         * SfwScreening
+         * @description An automated (machine) SFW screen. Never a substitute for approval.
+         *
+         *     ``None`` on the record means no screen was ever run. A screen result is
+         *     tri-state: ``unsure`` is a concern to resolve, not a pass.
+         */
+        SfwScreening: {
+            /** Confidence */
+            confidence?: number | null;
+            /** @default none */
+            method: components["schemas"]["SfwScreeningMethod"];
+            verdict: components["schemas"]["SfwVerdict"];
+        };
+        /**
+         * SfwScreeningMethod
+         * @description How an automated SFW screen was produced.
+         *
+         *     ``manual`` is deliberately absent: a human SFW decision is recorded
+         *     separately on the manifest record (``sfw_human``), never as a screening
+         *     method.
+         * @enum {string}
+         */
+        SfwScreeningMethod: "none" | "source_rating" | "opennsfw2" | "source_rating+opennsfw2";
+        /**
+         * SfwVerdict
+         * @description Tri-state result of an automated SFW screen.
+         *
+         *     ``unsure`` is distinct from ``unsafe``: borderline confidence is a concern
+         *     to resolve, not a condemnation. Both ``unsafe`` and ``unsure`` keep an
+         *     asset out of the unreviewed queue at ingestion (quarantined instead), and
+         *     neither ever substitutes for human approval.
+         * @enum {string}
+         */
+        SfwVerdict: "safe" | "unsafe" | "unsure";
+        /**
          * SnapshotResponse
          * @description Body of ``POST /curation/snapshots``.
          */
@@ -666,6 +910,8 @@ export interface components {
             label_count: number;
             /** Path */
             path: string;
+            /** Previous Snapshot Id */
+            previous_snapshot_id: string | null;
             /** Snapshot Id */
             snapshot_id: string;
             /** Style Breakdown */
@@ -1145,20 +1391,26 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const curationBlockerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationBlocker"]> = ["anatomy", "extraction"];
 export const curationCandidateOriginValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["origin"]> = ["native_line_art", "extracted_line_art"];
 export const curationCandidateReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
+export const degradationKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Degradation"]["kind"]> = ["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty"];
 export const healthResponseDeviceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["device"]> = ["cuda", "cpu"];
 export const healthResponseWarmupValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["warmup"]> = ["pending", "complete", "skipped"];
 export const interactionEventValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["InteractionEvent"]> = ["open", "pin", "unpin", "trace"];
 export const labelRequestDecisionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LabelRequest"]["decision"]> = ["keep", "reject"];
 export const labelResponseDecisionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LabelResponse"]["decision"]> = ["keep", "reject"];
 export const labelResponseReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LabelResponse"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
+export const learningSplitValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LearningSplit"]> = ["train", "validation", "test", "none"];
 export const lineArtOriginValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LineArtOrigin"]> = ["native_line_art", "extracted_line_art"];
+export const permissionBasisValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PermissionBasis"]> = ["license_terms", "public_domain", "explicit_consent", "first_party", "unknown"];
 export const primaryStyleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PrimaryStyle"]> = ["manga_anime", "western_ink", "realistic_academic", "cartoon", "gesture_sketch"];
 export const reviewStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewState"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const scopeLabelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ScopeLabel"]> = ["eye", "eyebrow", "mouth", "face_head", "hair", "hand", "foot", "upper_body_clothing", "full_body", "multi_character", "unknown"];
 export const searchGroupKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SearchGroup"]["kind"]> = ["best_match", "style", "provisional_scope"];
 export const searchModeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SearchMode"]> = ["insufficient", "provisional", "confident"];
+export const sfwScreeningMethodValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwScreeningMethod"]> = ["none", "source_rating", "opennsfw2", "source_rating+opennsfw2"];
+export const sfwVerdictValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwVerdict"]> = ["safe", "unsafe", "unsure"];
 export const strokePointerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["pointer"]> = ["pen", "mouse", "touch"];
 export const strokeToolValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["tool"]> = ["pressure", "monoline", "eraser"];
 export const styleSelectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["StyleSelection"]> = ["all", "manga_anime", "western_ink", "realistic_academic", "cartoon", "gesture_sketch"];

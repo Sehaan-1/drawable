@@ -10,7 +10,7 @@ Structural rules it must honour (they are tested):
 - Best Match first with up to 8 results, then one row per style with up to 6.
 - Style rows never include an asset below the relevance floor.
 - Provisional mode returns up to three scope groups with 4 results each.
-- Only enabled, SFW-safe assets can appear.
+- Only servable assets (derived enabled flag) can appear.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
-from linescout_ml.taxonomy import DEFAULT_STYLE_ORDER, LineArtOrigin, PrimaryStyle, ScopeLabel
+from linescout_ml.taxonomy import DEFAULT_STYLE_ORDER, PrimaryStyle, ScopeLabel
 
 from linescout_api.gallery import GalleryAsset
 from linescout_api.preprocessing import InkStats
@@ -121,11 +121,15 @@ def to_result(asset: GalleryAsset, relevance: float) -> SearchResult:
         thumbnail_url=f"/api/v1/assets/{asset.asset_id}/thumbnail",
         style=asset.primary_style,
         scopes=[ScopeLabel(scope) for scope in asset.scopes],
+        primary_scope=ScopeLabel(asset.primary_scope),
+        secondary_scopes=[ScopeLabel(scope) for scope in asset.secondary_scopes],
         origin=asset.origin,
-        trace_allowed=asset.origin is LineArtOrigin.NATIVE,
+        trace_allowed=asset.trace_allowed,
         relevance=relevance,
         quality=asset.quality_score,
         asset_url=f"/api/v1/assets/{asset.asset_id}/line-art",
+        person_count=asset.person_count,
+        person_count_approximate=asset.person_count_approximate,
     )
 
 

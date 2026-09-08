@@ -23,8 +23,7 @@ def _parse_ts(value: str) -> datetime:
 def _gallery_style(state: AppState, asset_id: str) -> str:
     """Style is taken from the enabled gallery row, never from the client."""
     row = state.connection.execute(
-        "SELECT primary_style FROM assets"
-        " WHERE asset_id = ? AND enabled = 1 AND review_state = 'accepted' AND sfw_safe = 1",
+        "SELECT primary_style FROM assets WHERE asset_id = ? AND enabled = 1",
         (asset_id,),
     ).fetchone()
     if row is None:
@@ -55,8 +54,12 @@ def record_event(state: State, body: EventRequest) -> EventResponse:
         if datetime.now(UTC) - created < EVENT_DEBOUNCE:
             return EventResponse(id=int(last["id"]), created_at=str(last["created_at"]))
 
+    # The gallery namespace is stamped server-side from the API's own mode:
+    # fixture-mode events can never influence live-gallery preferences.
+    gallery_kind = "fixture" if state.settings.fixture_mode else "live"
     cursor = state.connection.execute(
-        "INSERT INTO events(session_id, asset_id, event, style, query_revision) VALUES (?,?,?,?,?)"
+        "INSERT INTO events(session_id, asset_id, event, style, query_revision, gallery_kind)"
+        " VALUES (?,?,?,?,?,?)"
         " RETURNING id, created_at",
         (
             str(body.session_id),
@@ -64,6 +67,7 @@ def record_event(state: State, body: EventRequest) -> EventResponse:
             body.event.value,
             style,
             body.query_revision,
+            gallery_kind,
         ),
     )
     row = cursor.fetchone()
