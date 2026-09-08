@@ -530,12 +530,24 @@ def test_the_cli_reports_a_placeholder_pin_without_inventing_a_commit() -> None:
 
 
 def test_the_cli_names_the_placeholder_loudly_and_can_fail_ci_on_it() -> None:
-    code, out, err = run_cli("pin")
+    """Written against both pin states, so it survives the bump and still proves the gate.
+
+    The default output depends on whether this repository's pin is final yet; the
+    placeholder branch is reachable on demand with ``--pin``, which is what keeps
+    the failure mode a reader of the docs is told about under test forever.
+    """
+    code, out, _ = run_cli("pin")
     assert code == 0, "printing the pin is not an error"
-    assert "PLACEHOLDER" in out and "REPO_PIN" in out, out
-    if not repro.pin_is_finalised(repro.COLAB_PIN):  # while the placeholder is in force
+    if repro.pin_is_finalised(repro.COLAB_PIN):
+        assert "immutable: True" in out, out
+    else:
+        assert "PLACEHOLDER" in out and "REPO_PIN" in out, out
         code, _, err = run_cli("pin", "--check")
-        assert code == 1 and "PIN NOT FINALISED" in err
+        assert code == 1 and "PIN NOT FINALISED" in err, err
+
+    code, out, err = run_cli("pin", "--pin", repro.COLAB_PIN_PLACEHOLDER, "--check")
+    assert code == 1, out
+    assert "PLACEHOLDER" in out and "PIN NOT FINALISED" in err, err
 
 
 def test_a_candidate_pin_is_judged_on_the_same_two_rules(tmp_path: Path) -> None:

@@ -42,7 +42,7 @@ the Drive/GitHub auth cell you already run.
 
 | # | Cell | What must be true when it finishes |
 |---|---|---|
-| 1 | 0 · Before you start | Read it. `REPO_PIN` is printed as a placeholder if it still is one — that is a bug in this repository, not in your session, and cell 2 will refuse to fetch. |
+| 1 | 0 · Before you start | Read it. If `REPO_PIN` still prints as a placeholder, that is a bug in this repository and not in your session — `linescout-repro pin --check` in CI should have caught it before you got here. |
 | 2 | 1 · Run configuration | `LIMIT_PER_SOURCE = 20`, one `SOURCES` entry with a real `license_id`, `MOUNT_DRIVE = True`. |
 | 3 | 2 · GPU, Drive, checkout | `GPU 0, T4, ...` appears, then the record: `repository : /content/drawable`, `pinned at : <40 hex>`, `HEAD : <12 hex>  (matches the pin)`, `working tree : clean (0 untracked)`. Anything else there — `(does NOT match the pin)`, `DIRTY` — has to be explained before you spend an hour on it. |
 | 4 | 2b · Resolve sources | Each source prints `origin=`/`extractor=`/`sfw=`. Human-Art prints `sfw=opennsfw2` and the line `needs the opennsfw2 gate (its Keras backend comes from the runtime)` **even if you never wrote `sfw_method`**. That line is the reason this cell runs before the install. |

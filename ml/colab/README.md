@@ -63,7 +63,7 @@ these is optional, and none of them are the author's machine being representativ
 ### The repository pin
 
 The notebook defaults to **`junosapollo/drawable`** at commit
-`0000000000000000000000000000000000000000`, fetched over
+`06ae97663c8c322f5020ae3574cb9ec55f00dbe3` (`06ae97663c8c`), fetched over
 `https://github.com/junosapollo/drawable.git` — the unauthenticated transport, because
 nothing that has to be reproducible should depend on a token you happen to have in a
 runtime. `REPO_URL` is a form field for the private-repo case and for a fork; the pin
@@ -77,14 +77,20 @@ when the canonical URL is unreachable, and it cannot change what runs: whatever 
 is checked out by SHA and the checkout is refused if HEAD is not the pin. Content
 addressing is what makes a mirror safe; "a second URL I trust" would not be.
 
-Those 40 hex digits are a **placeholder** until the finalized pipeline exists as a
-commit, and while it is one, CI is red by design: `linescout-repro pin --check` fails,
-and cell 2 prints the same warning. Bumping it is a small, boring, procedural change:
+That commit is `ml: make the Colab pipeline reproducible beyond lockfiles`. It was
+pushed to `Sehaan-1/drawable` first, so until it reaches the canonical repository the
+notebook resolves it through the mirror — which is the fallback's whole purpose, and
+visible in cell 2's output as a `note:` line rather than as a silent substitution.
+`0000000000000000000000000000000000000000` is what the pin held before that commit
+existed: a format-valid SHA no repository contains, named out loud by
+`COLAB_PIN_PLACEHOLDER` so that `linescout-repro pin --check` (wired into CI) fails
+while it is in force and cell 2 says so. Bumping the pin is a small, boring,
+procedural change:
 
 ```bash
 # 1. land the pipeline, get its commit
 git rev-parse HEAD                             # e.g. 3f9c1d2e...
-.venv/bin/linescout-repro pin --pin 3f9c1d2e...40   # judge the candidate first
+.venv/bin/linescout-repro pin --pin <the 40 hex you just read>   # judge it first
 # 2. COLAB_PIN in ml/linescout_ml/colab/repro.py, REPO_PIN in the notebook cell 1 form
 git commit -am "docs: pin Colab to <sha>"
 .venv/bin/linescout-repro pin --check && .venv/bin/linescout-repro selfcheck

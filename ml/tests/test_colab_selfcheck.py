@@ -121,7 +121,7 @@ def test_it_notices_the_notebook_drifting_from_the_package_pin(
     patch_notebook_cell(
         root,
         "# @title 1 · Run configuration",
-        lambda text: text.replace('REPO_PIN = "' + "0" * 40 + '"', f'REPO_PIN = "{pin}"'),
+        lambda text: text.replace(f'REPO_PIN = "{repro.COLAB_PIN}"', f'REPO_PIN = "{pin}"'),
     )
     problems = colab.run_selfcheck(root)
     assert any(expected in problem and "REPO_PIN" in problem for problem in problems), problems
