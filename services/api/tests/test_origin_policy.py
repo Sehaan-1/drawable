@@ -165,6 +165,7 @@ def _label_body(client: TestClient) -> dict[str, object]:
     return {
         "asset_id": candidate["asset_id"],
         "expected_review_state": "unreviewed",
+        "expected_label_version": candidate["label_version"],
         "decision": "keep",
         "quality": 3,
     }

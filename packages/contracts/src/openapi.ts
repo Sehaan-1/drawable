@@ -56,12 +56,99 @@ export interface paths {
         };
         /**
          * Preview Asset
-         * @description Serve unreviewed (and other) gallery files to the curation UI only.
+         * @description Serve gallery files to the curation UI only, behind reveal controls.
          *
          *     Public ``/api/v1/assets/{id}/...`` routes stay gated on the derived
-         *     ``enabled = 1`` flag (the full v2 serving predicate).
+         *     ``enabled = 1`` flag (the full serving predicate) — they never serve
+         *     quarantined/uncertain content, and reveal grants do not apply there.
+         *     Here (curation only), *held* records additionally require a deliberate,
+         *     unexpired reveal grant; without one the preview fails with
+         *     ``reveal_required`` instead of leaking the image.
          */
         get: operations["preview_asset_api_v1_curation_assets__asset_id___kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curation/assets/{asset_id}/crops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Crop
+         * @description Cut an immutable child derivative from this asset.
+         *
+         *     The child gets its own identity (deterministic from dataset+item+crop),
+         *     its parent's identity links, bounded geometry, **fresh files and
+         *     hashes**, and its own processing/review state — it is created
+         *     ``unreviewed`` with ``derivatives_current = 0`` (awaiting processing)
+         *     and ``enabled = 0``. It can only ever be enabled after its required
+         *     processing completes *and* a human accepts it with all serving gates
+         *     passing; nothing about the parent's review/SFW/gold state is inherited.
+         *     Held (quarantined/uncertain/flagged) parents cannot be cropped — that
+         *     would launder held content into a fresh reviewable asset.
+         */
+        post: operations["create_crop_api_v1_curation_assets__asset_id__crops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curation/assets/{asset_id}/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Process Derivative
+         * @description Run (or re-run) a derivative's required processing.
+         *
+         *     Verifies the child's files against their recorded checksums, rebuilds
+         *     every measurement from the child's *own* bytes, regenerates the
+         *     thumbnail, and — only when all of that succeeds — marks the child's
+         *     derivatives current. Index membership (the in-memory serving list) and
+         *     the derived ``enabled`` flag are recomputed in the same transaction, and
+         *     the response carries the artifact stamp any future embedding must bind
+         *     to (per the frozen vector contract, a new derivative has no vectors yet:
+         *     ``embedding_status: "missing"``).
+         */
+        post: operations["process_derivative_api_v1_curation_assets__asset_id__process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curation/candidates/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Candidate
+         * @description Stable retrieval of one candidate by id, whatever its review state.
+         *
+         *     This is the read path for Previous (re-fetch the *actual* previous
+         *     candidate — live metadata, not a stale copy) and for conflict
+         *     reconciliation after a 409.
+         */
+        get: operations["get_candidate_api_v1_curation_candidates__asset_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -121,6 +208,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/curation/quarantine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quarantine
+         * @description The SFW adjudication backlog: held records, **metadata only**.
+         *
+         *     Quarantined (any reason), screened unsafe/unsure, or human-flagged
+         *     records. No image bytes and no preview URLs until a deliberate reveal.
+         */
+        get: operations["list_quarantine_api_v1_curation_quarantine_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curation/quarantine/{asset_id}/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reveal Quarantined
+         * @description Issue a deliberate, expiring reveal grant for one held record.
+         *
+         *     The grant is recorded (who revealed what, when, until when) and is the
+         *     *only* way the curation preview route will serve held content. It never
+         *     applies to the public asset routes, and it changes nothing about the
+         *     asset itself — review state, version, and eligibility are untouched.
+         */
+        post: operations["reveal_quarantined_api_v1_curation_quarantine__asset_id__reveal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curation/queue/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip Candidate
+         * @description Advance the session past an asset without a label.
+         *
+         *     The asset is excluded from *this session's* queue (it is not mutated:
+         *     its review state, version, and eligibility are untouched) and the cursor
+         *     moves to it, so the next serve is a different item.
+         */
+        post: operations["skip_candidate_api_v1_curation_queue_skip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curation/sfw/{asset_id}/adjudication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adjudicate Sfw
+         * @description Record an explicit human SFW adjudication for a held/uncertain record.
+         *
+         *     Effects (one transaction, atomic conditional on ``expected_label_version``):
+         *
+         *     * ``safe`` — the human decision is mirrored onto the asset and a
+         *       quarantined record returns to ``unreviewed`` so it can be reviewed on
+         *       its merits through the normal queue. Serving still requires every
+         *       other gate (permission, accepted review with quality, no blockers).
+         *     * ``unsafe`` — the record is quarantined and human-flagged; it leaves
+         *       every serving surface until a future adjudication says otherwise.
+         *       The public asset routes were already closed to it and stay closed.
+         *
+         *     Both outcomes are append-only audit history in ``sfw_adjudications``.
+         */
+        post: operations["adjudicate_sfw_api_v1_curation_sfw__asset_id__adjudication_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/curation/snapshots": {
         parameters: {
             query?: never;
@@ -134,12 +325,18 @@ export interface paths {
          * Export Snapshot
          * @description Write an immutable **full** snapshot of the current curation state.
          *
-         *     Frozen semantics (v2): the snapshot captures the *latest* keep-or-reject
-         *     label per asset — rejected assets included — at the moment of the export.
-         *     It is a state view, not an export cursor: every POST writes a new file and
-         *     never mutates a previous one, and the append-only ``curation_labels``
-         *     audit history stays complete in the database. Lineage is recorded through
-         *     ``previous_snapshot_id`` and the ``snapshots`` registry table.
+         *     Frozen semantics: the snapshot captures the *latest* keep-or-reject
+         *     label per asset — rejected assets included — from a **consistent
+         *     database view**. The whole export (label read, lineage read, file
+         *     publication, registry insert, and the exact linking of the exported
+         *     label rows to the snapshot) runs inside one ``BEGIN IMMEDIATE``
+         *     transaction, so a concurrent label write or a concurrent export can
+         *     never interleave: writers serialize, the second export chains to the
+         *     first via ``previous_snapshot_id``, and neither file can overwrite the
+         *     other. Every export is a new file; snapshots are never edited and never
+         *     incremental, and the append-only ``curation_labels`` audit history stays
+         *     complete in the database. The published bytes' SHA-256 is recorded on
+         *     the registry row so the export stays verifiable after later edits.
          */
         post: operations["export_snapshot_api_v1_curation_snapshots_post"];
         delete?: never;
@@ -384,6 +581,50 @@ export interface components {
             y: number;
         };
         /**
+         * CropRequest
+         * @description Body of ``POST /curation/assets/{asset_id}/crops``.
+         *
+         *     The crop is cut from the parent's *current, verified* line art; the child
+         *     is created pending its own processing and review.
+         */
+        CropRequest: {
+            crop: components["schemas"]["CropBox"];
+            /** Expected Label Version */
+            expected_label_version: number;
+            /** Note */
+            note?: string | null;
+            /** Reviewer */
+            reviewer?: string | null;
+        };
+        /** CropResponse */
+        CropResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Created */
+            created: boolean;
+            crop: components["schemas"]["CropBox"];
+            /** Derivatives Current */
+            derivatives_current: boolean;
+            /** Height */
+            height: number;
+            /** Label Version */
+            label_version: number;
+            /** Parent Asset Id */
+            parent_asset_id: string;
+            /**
+             * Processing State
+             * @enum {string}
+             */
+            processing_state: "pending" | "complete" | "failed";
+            /**
+             * Review State
+             * @enum {string}
+             */
+            review_state: "unreviewed" | "accepted" | "rejected" | "quarantined";
+            /** Width */
+            width: number;
+        };
+        /**
          * CurationBlocker
          * @description A named defect that blocks specific uses regardless of review state.
          *
@@ -411,6 +652,8 @@ export interface components {
             /** Blockers */
             blockers?: components["schemas"]["CurationBlocker"][];
             crop?: components["schemas"]["CropBox"] | null;
+            /** Derivative Processing State */
+            derivative_processing_state?: ("pending" | "complete" | "failed") | null;
             /**
              * Gallery Member
              * @default true
@@ -423,6 +666,8 @@ export interface components {
             gold_member: boolean;
             /** Height */
             height: number;
+            /** Label Version */
+            label_version: number;
             /** Leakage Group Id */
             leakage_group_id?: string | null;
             learning_split: components["schemas"]["LearningSplit"];
@@ -478,6 +723,8 @@ export interface components {
             by_style: {
                 [key: string]: components["schemas"]["StyleBreakdown"];
             };
+            /** Quarantined */
+            quarantined: number;
             /** Rejected */
             rejected: number;
             /** Remaining */
@@ -513,6 +760,71 @@ export interface components {
              * @enum {string}
              */
             kind: "fixture_mode" | "cpu_fallback" | "branch_disabled" | "gallery_empty" | "blank_raster" | "vector_absent" | "vector_sparse";
+        };
+        /**
+         * DerivativeArtifactStamp
+         * @description Binds embeddings/index entries to the exact derivative bytes.
+         *
+         *     Matches the frozen vector contract (``ml/linescout_ml/embeddings.py``):
+         *     an embedding entry is only ``available`` when its recorded stamp equals
+         *     the asset's current stamp. A freshly processed derivative has no vectors
+         *     yet, so its embedding status is ``missing`` until the index build.
+         */
+        DerivativeArtifactStamp: {
+            /** Line Art Checksum */
+            line_art_checksum: string;
+            /** Processing Revision */
+            processing_revision: number;
+        };
+        /**
+         * DerivativeMeasurements
+         * @description Measurements rebuilt from the derivative's own bytes.
+         */
+        DerivativeMeasurements: {
+            /** Background Coverage */
+            background_coverage: number;
+            /** Height */
+            height: number;
+            /** Ink Coverage */
+            ink_coverage: number;
+            /** Phash */
+            phash: string;
+            /** Quality Score */
+            quality_score: number;
+            /** Text Coverage */
+            text_coverage: number;
+            /** Width */
+            width: number;
+        };
+        /** DerivativeProcessResponse */
+        DerivativeProcessResponse: {
+            artifact: components["schemas"]["DerivativeArtifactStamp"];
+            /** Asset Id */
+            asset_id: string;
+            /** Attempts */
+            attempts: number;
+            /** Derivatives Current */
+            derivatives_current: boolean;
+            /**
+             * Embedding Status
+             * @default missing
+             * @constant
+             */
+            embedding_status: "missing";
+            /** Enabled */
+            enabled: boolean;
+            /** Label Version */
+            label_version: number;
+            measurements?: components["schemas"]["DerivativeMeasurements"] | null;
+            /** Parent Asset Id */
+            parent_asset_id: string;
+            /**
+             * Processing State
+             * @enum {string}
+             */
+            processing_state: "pending" | "complete" | "failed";
+            /** Serving Blockers */
+            serving_blockers?: string[];
         };
         /**
          * ErrorDetail
@@ -681,12 +993,13 @@ export interface components {
             asset_id: string;
             /** Blockers */
             blockers?: components["schemas"]["CurationBlocker"][];
-            crop?: components["schemas"]["CropBox"] | null;
             /**
              * Decision
              * @enum {string}
              */
             decision: "keep" | "reject";
+            /** Expected Label Version */
+            expected_label_version: number;
             expected_review_state: components["schemas"]["ReviewState"];
             /** Note */
             note?: string | null;
@@ -698,6 +1011,8 @@ export interface components {
             reviewer?: string | null;
             /** Secondary Scopes */
             secondary_scopes?: components["schemas"]["ScopeLabel"][] | null;
+            /** Session Id */
+            session_id?: string | null;
             /** Sfw Safe */
             sfw_safe?: boolean | null;
         };
@@ -718,6 +1033,8 @@ export interface components {
             enabled: boolean;
             /** Id */
             id: number;
+            /** Label Version */
+            label_version: number;
             /** Review Quality */
             review_quality: number | null;
             /**
@@ -892,6 +1209,54 @@ export interface components {
          * @enum {string}
          */
         PrimaryStyle: "manga_anime" | "western_ink" | "realistic_academic" | "cartoon" | "gesture_sketch";
+        /**
+         * QuarantineCandidate
+         * @description One held record in the SFW adjudication backlog (metadata only).
+         *
+         *     Image URLs stay ``None`` until a deliberate reveal grant exists; the
+         *     preview route enforces the grant independently, so the URLs are never a
+         *     bypass.
+         */
+        QuarantineCandidate: {
+            /** Asset Id */
+            asset_id: string;
+            /** Blockers */
+            blockers?: components["schemas"]["CurationBlocker"][];
+            /** Derivative Processing State */
+            derivative_processing_state?: ("pending" | "complete" | "failed") | null;
+            /** Height */
+            height: number;
+            /** Label Version */
+            label_version: number;
+            /** Line Art Url */
+            line_art_url?: string | null;
+            /** Parent Asset Id */
+            parent_asset_id?: string | null;
+            primary_scope: components["schemas"]["ScopeLabel"];
+            primary_style: components["schemas"]["PrimaryStyle"];
+            /** Quality Score */
+            quality_score: number;
+            /** Reveal Expires At */
+            reveal_expires_at?: string | null;
+            /**
+             * Revealed
+             * @default false
+             */
+            revealed: boolean;
+            /**
+             * Review State
+             * @enum {string}
+             */
+            review_state: "unreviewed" | "accepted" | "rejected" | "quarantined";
+            sfw_human?: components["schemas"]["SfwHumanDecision"] | null;
+            sfw_screening?: components["schemas"]["SfwScreening"] | null;
+            /** Source Work Id */
+            source_work_id: string;
+            /** Thumbnail Url */
+            thumbnail_url?: string | null;
+            /** Width */
+            width: number;
+        };
         /** ReadyResponse */
         ReadyResponse: {
             /**
@@ -900,6 +1265,14 @@ export interface components {
              * @constant
              */
             ready: true;
+        };
+        /**
+         * RevealRequest
+         * @description Body of ``POST /curation/quarantine/{asset_id}/reveal``.
+         */
+        RevealRequest: {
+            /** Reviewer */
+            reviewer?: string | null;
         };
         /**
          * ReviewState
@@ -1083,6 +1456,45 @@ export interface components {
             total_ms: number;
         };
         /**
+         * SfwAdjudicationRequest
+         * @description Body of ``POST /curation/sfw/{asset_id}/adjudication``.
+         */
+        SfwAdjudicationRequest: {
+            /** Expected Label Version */
+            expected_label_version: number;
+            /** Note */
+            note?: string | null;
+            /** Reviewer */
+            reviewer?: string | null;
+            /** Safe */
+            safe: boolean;
+            /** Session Id */
+            session_id?: string | null;
+        };
+        /** SfwAdjudicationResponse */
+        SfwAdjudicationResponse: {
+            /** Asset Id */
+            asset_id: string;
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: number;
+            /** Label Version */
+            label_version: number;
+            /**
+             * Review State
+             * @enum {string}
+             */
+            review_state: "unreviewed" | "accepted" | "rejected" | "quarantined";
+            /** Safe */
+            safe: boolean;
+            /** Serving Blockers */
+            serving_blockers?: string[];
+            sfw_human: components["schemas"]["SfwHumanDecision"];
+        };
+        /**
          * SfwHumanDecision
          * @description A human SFW decision. The only thing that can gate display.
          */
@@ -1133,10 +1545,33 @@ export interface components {
          */
         SfwVerdict: "safe" | "unsafe" | "unsure";
         /**
+         * SkipRequest
+         * @description Body of ``POST /curation/queue/skip``.
+         */
+        SkipRequest: {
+            /** Asset Id */
+            asset_id: string;
+            /** Session Id */
+            session_id: string;
+        };
+        /** SkipResponse */
+        SkipResponse: {
+            /** Cursor Asset Id */
+            cursor_asset_id: string;
+            /** Excluded Asset Id */
+            excluded_asset_id: string;
+            /** Remaining */
+            remaining: number;
+            /** Session Id */
+            session_id: string;
+        };
+        /**
          * SnapshotResponse
          * @description Body of ``POST /curation/snapshots``.
          */
         SnapshotResponse: {
+            /** Content Sha256 */
+            content_sha256: string;
             /** Created At */
             created_at: string;
             /** Label Count */
@@ -1363,6 +1798,103 @@ export interface operations {
             };
         };
     };
+    create_crop_api_v1_curation_assets__asset_id__crops_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CropRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CropResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    process_derivative_api_v1_curation_assets__asset_id__process_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DerivativeProcessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_candidate_api_v1_curation_candidates__asset_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationCandidate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     write_label_api_v1_curation_labels_post: {
         parameters: {
             query?: never;
@@ -1401,6 +1933,8 @@ export interface operations {
             query?: {
                 /** @description Filter by scope bucket */
                 scope?: components["schemas"]["ScopeLabel"] | null;
+                /** @description Review session id: enables the cursor/skip queue semantics */
+                session_id?: string | null;
                 /** @description Filter by primary style */
                 style?: components["schemas"]["PrimaryStyle"] | null;
             };
@@ -1446,6 +1980,129 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CurationProgress"];
+                };
+            };
+        };
+    };
+    list_quarantine_api_v1_curation_quarantine_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuarantineCandidate"][];
+                };
+            };
+        };
+    };
+    reveal_quarantined_api_v1_curation_quarantine__asset_id__reveal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevealRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuarantineCandidate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    skip_candidate_api_v1_curation_queue_skip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkipRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkipResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adjudicate_sfw_api_v1_curation_sfw__asset_id__adjudication_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SfwAdjudicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SfwAdjudicationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1792,10 +2449,14 @@ type ReadonlyArray<T> = [
 ] extends [
     unknown[]
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const cropResponseProcessing_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CropResponse"]["processing_state"]> = ["pending", "complete", "failed"];
+export const cropResponseReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CropResponse"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const curationBlockerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationBlocker"]> = ["anatomy", "extraction"];
+export const curationCandidateDerivative_processing_stateAnyOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["derivative_processing_state"]> = ["pending", "complete", "failed"];
 export const curationCandidateOriginValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["origin"]> = ["native_line_art", "extracted_line_art"];
 export const curationCandidateReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const degradationKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Degradation"]["kind"]> = ["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty", "blank_raster", "vector_absent", "vector_sparse"];
+export const derivativeProcessResponseProcessing_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["DerivativeProcessResponse"]["processing_state"]> = ["pending", "complete", "failed"];
 export const galleryKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["GalleryKind"]> = ["fixture", "live"];
 export const healthResponseDeviceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["device"]> = ["cuda", "cpu"];
 export const healthResponseWarmupValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["warmup"]> = ["pending", "complete", "skipped"];
@@ -1807,10 +2468,13 @@ export const learningSplitValues: ReadonlyArray<FlattenedDeepRequired<components
 export const lineArtOriginValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LineArtOrigin"]> = ["native_line_art", "extracted_line_art"];
 export const permissionBasisValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PermissionBasis"]> = ["license_terms", "public_domain", "explicit_consent", "first_party", "unknown"];
 export const primaryStyleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PrimaryStyle"]> = ["manga_anime", "western_ink", "realistic_academic", "cartoon", "gesture_sketch"];
+export const quarantineCandidateDerivative_processing_stateAnyOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["QuarantineCandidate"]["derivative_processing_state"]> = ["pending", "complete", "failed"];
+export const quarantineCandidateReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["QuarantineCandidate"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const reviewStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReviewState"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const scopeLabelValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ScopeLabel"]> = ["eye", "eyebrow", "mouth", "face_head", "hair", "hand", "foot", "upper_body_clothing", "full_body", "multi_character", "unknown"];
 export const searchGroupKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SearchGroup"]["kind"]> = ["best_match", "style", "provisional_scope"];
 export const searchModeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SearchMode"]> = ["insufficient", "provisional", "confident"];
+export const sfwAdjudicationResponseReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwAdjudicationResponse"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
 export const sfwScreeningMethodValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwScreeningMethod"]> = ["none", "source_rating", "opennsfw2", "source_rating+opennsfw2"];
 export const sfwVerdictValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SfwVerdict"]> = ["safe", "unsafe", "unsure"];
 export const strokePointerValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Stroke"]["pointer"]> = ["pen", "mouse", "touch"];

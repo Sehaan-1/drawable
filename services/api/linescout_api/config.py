@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     curation_mode: bool = False  # CURATION_MODE=1 in the spec; exposes /api/v1/curation/*
     fixture_mode: bool = True  # serve deterministic fixture results until models exist
 
+    # Curation safety
+    #: How long an explicit SFW reveal grant stays valid. Viewing quarantined
+    #: or uncertain content through the curation preview route requires a
+    #: fresh grant; grants are never issued implicitly and never apply to the
+    #: public asset routes.
+    curation_reveal_ttl_seconds: int = Field(default=900, ge=1)
+    #: Edge size of the square thumbnail generated for crop derivatives
+    #: (matches the synthetic fixture convention of 64 px).
+    derivative_thumbnail_size: int = Field(default=64, ge=16, le=1024)
+
     # Search contract limits (spec §5, API contracts).
     max_image_bytes: int = 4 * 1024 * 1024  # 4 MiB decoded snapshot PNG, as uploaded
     max_strokes_bytes: int = MAX_COMPRESSED_BYTES  # 256 KiB, gzip-compressed as uploaded

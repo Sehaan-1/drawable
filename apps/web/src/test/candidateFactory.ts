@@ -38,6 +38,8 @@ export function makeCandidate(overrides: Partial<CurationCandidate> = {}): Curat
     parent_asset_id: null,
     artist_id: null,
     leakage_group_id: null,
+    label_version: 0,
+    derivative_processing_state: null,
     ...overrides,
   }
 }

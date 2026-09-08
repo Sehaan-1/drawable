@@ -8,6 +8,7 @@ function makeProgress(overrides: Partial<CurationProgress> = {}): CurationProgre
     reviewed: 0,
     accepted: 0,
     rejected: 0,
+    quarantined: 0,
     remaining: 2000,
     target: 2000,
     by_style: {
@@ -96,6 +97,27 @@ describe('CurateSidebar', () => {
     expect(text).toMatch(/0\s*\/\s*2[,.]?000/)
   })
 
+  it('shows the quarantine toggle with the held-record count', () => {
+    const onToggleQuarantine = vi.fn()
+    render(
+      <CurateSidebar
+        progress={makeProgress()}
+        quarantined={3}
+        style={null}
+        scope={null}
+        onStyle={vi.fn()}
+        onScope={vi.fn()}
+        quarantineMode={false}
+        onToggleQuarantine={onToggleQuarantine}
+      />,
+    )
+    const toggle = screen.getByTestId('quarantine-toggle')
+    expect(toggle.textContent).toContain('3')
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(toggle)
+    expect(onToggleQuarantine).toHaveBeenCalledTimes(1)
+  })
+
   it('exposes a keyboard hint matching the spec', () => {
     render(
       <CurateSidebar
@@ -113,5 +135,6 @@ describe('CurateSidebar', () => {
     expect(text).toContain('2')
     expect(text).toContain('3')
     expect(text).toContain('C')
+    expect(text).toContain('S')
   })
 })

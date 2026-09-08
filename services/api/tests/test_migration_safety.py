@@ -68,6 +68,7 @@ def test_migration_applies_and_is_idempotent(v1_database: sqlite3.Connection) ->
         "0002_contract_v2.sql",
         "0003_eligibility_v3.sql",
         "0004_interaction_identity.sql",
+        "0005_curation_safety.sql",
     ]
     assert migrate(v1_database) == []
 

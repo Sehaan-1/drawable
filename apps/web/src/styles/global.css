@@ -596,3 +596,36 @@ kbd { min-width: 28px; padding: 3px 5px; border: 1px solid var(--border-strong);
 .reference-warning .link-button { margin-left: 6px; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
 .setup-warnings { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
 .setup-warnings li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--warning, #c98a1b); }
+
+/* --- Curation safety (schema v4) -------------------------------------- */
+.quarantine-toggle { height: 34px; width: 100%; display: flex; align-items: center; justify-content: space-between; margin: 12px 0; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--muted); cursor: pointer; }
+.quarantine-toggle:hover, .quarantine-toggle.is-active { background: var(--raised); color: var(--text); }
+.quarantine-toggle span { display: flex; align-items: center; gap: 7px; font-size: 10px; }
+.quarantine-toggle b { font-size: 9px; font-weight: 500; }
+
+.conflict-banner { position: absolute; z-index: 30; top: 14px; left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100% - 40px)); display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid #b35900; border-radius: 7px; background: #3a2a12; color: var(--text); box-shadow: var(--shadow); }
+.conflict-banner > div { display: grid; gap: 2px; }
+.conflict-banner strong { font-size: 11px; }
+.conflict-banner span { color: var(--muted); font-size: 10px; line-height: 1.5; }
+.conflict-banner .button { flex: none; }
+
+.derivative-toast { z-index: 31; top: auto; bottom: 46px; max-width: min(640px, calc(100% - 40px)); }
+
+.quarantine-panel { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); background: var(--stage); }
+.quarantine-head { display: flex; gap: 10px; align-items: flex-start; padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--muted); }
+.quarantine-head h2 { margin: 0; color: var(--text); font-size: 13px; }
+.quarantine-head p { margin: 3px 0 0; font-size: 10px; line-height: 1.5; max-width: 640px; }
+.quarantine-list { margin: 0; padding: 18px; list-style: none; display: grid; gap: 12px; align-content: start; overflow: auto; }
+.quarantine-card { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); }
+.quarantine-card__id { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.quarantine-card__id code { font-size: 10px; }
+.quarantine-card__id span { color: var(--faint); font-size: 9px; text-transform: capitalize; }
+.quarantine-card__meta { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 16px; }
+.quarantine-card__meta dt { color: var(--faint); font-size: 9px; }
+.quarantine-card__meta dd { display: flex; align-items: center; gap: 5px; margin: 2px 0 0; color: var(--muted); font-size: 10px; }
+.quarantine-card__preview { margin: 0; display: flex; align-items: center; gap: 10px; }
+.quarantine-card__preview img { width: 72px; height: 72px; object-fit: contain; border: 1px solid var(--border); border-radius: 4px; background: var(--app); }
+.quarantine-card__preview figcaption { color: var(--faint); font-size: 9px; }
+.quarantine-card__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.candidate-nav__group { display: flex; align-items: center; gap: 7px; }

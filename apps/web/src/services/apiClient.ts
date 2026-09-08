@@ -27,6 +27,12 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly field?: string | null,
+    /**
+     * Structured payload from the API's error envelope (e.g. the live
+     * label version + reconciliation hint carried by a 409
+     * ``label_version_conflict``). Absent when the body had none.
+     */
+    readonly details?: Record<string, unknown> | null,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -36,7 +42,13 @@ export class ApiError extends Error {
 async function parseError(response: Response): Promise<ApiError> {
   try {
     const body = (await response.json()) as Partial<ErrorResponse>
-    if (body.error) return new ApiError(response.status, body.error.code, body.error.message, body.error.field)
+    if (body.error) {
+      const details =
+        body.error.details && typeof body.error.details === 'object'
+          ? (body.error.details as Record<string, unknown>)
+          : null
+      return new ApiError(response.status, body.error.code, body.error.message, body.error.field, details)
+    }
   } catch {
     // fall through to the generic error
   }
