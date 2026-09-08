@@ -161,6 +161,8 @@ async def test_boundary_plus_one_is_413_and_reception_stops() -> None:
     assert inner["called"] is False
     assert probe.pulled == 6
     assert probe.bytes_pulled == 1200
+    assert body["error"]["details"]["max_bytes"] == 1000
+    assert body["error"]["details"]["received_bytes"] == 1200
 
 
 async def test_forged_small_content_length_loses_to_the_byte_counter() -> None:
@@ -185,6 +187,9 @@ async def test_oversized_content_length_is_rejected_without_reading() -> None:
     assert_error_envelope(status, headers, body, "request_too_large", 413)
     assert inner["called"] is False
     assert probe.pulled == 0  # nothing was read at all
+    # Early Content-Length rejection still reports the declared byte count.
+    assert body["error"]["details"]["max_bytes"] == 1000
+    assert body["error"]["details"]["received_bytes"] == 99999
 
 
 @pytest.mark.parametrize(

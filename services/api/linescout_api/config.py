@@ -22,6 +22,17 @@ from linescout_api.preprocessing import MAX_COMPRESSED_BYTES, MAX_DECOMPRESSED_B
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNTHETIC_MANIFEST = REPO_ROOT / "ml" / "fixtures" / "synthetic" / "manifest.json"
 
+# Upper bounds for the multipart search integers (revision, stroke_count,
+# point_count). These are enforced as framework 422 validation errors before
+# the values reach seed strings, ranking arithmetic, or SQLite storage, so an
+# arbitrarily large integer can never be trusted or persisted. They are far
+# above any real drawing (a project is capped at 1e6 points client-side) and
+# sit well below SQLite's 64-bit INTEGER and JavaScript's safe-integer range,
+# so a conforming client can never trip them accidentally.
+MAX_REVISION = 2_000_000_000
+MAX_STROKE_COUNT = 1_000_000
+MAX_POINT_COUNT = 10_000_000
+
 
 class DevicePolicy(StrEnum):
     AUTO = "auto"  # CUDA if available, otherwise CPU with a warning

@@ -86,6 +86,12 @@ export function toSearchResponse(response: ApiSearchResponse, request: SearchReq
     groups: response.groups.map(toReferenceGroup),
     warning: response.warning ?? null,
     timing: response.timing,
+    // Provenance echoed from the server so the dock can disclose approximate
+    // counts and the preprocessing/build that produced this result.
+    countsApproximate: response.counts_approximate,
+    strokeStatus: response.stroke_status,
+    preprocessingVersion: response.preprocessing_version,
+    apiVersion: response.api_version,
   }
 }
 

@@ -58,6 +58,24 @@ class AppState:
     def api_version(self) -> str:
         return __version__
 
+    def readiness_details(self) -> dict[str, object]:
+        """Structured details for a ``503 not_ready`` error response.
+
+        Carries the readiness warnings and structured flags so clients can tell
+        *why* the API is unready without relying on the free-text message. The
+        device/gallery booleans describe capability, never absolute paths.
+        """
+        return {
+            "setup_error": self.setup_error,
+            "warmup": self.warmup,
+            "device_ready": not (
+                self.settings.device is DevicePolicy.CUDA and not self.device.is_cuda
+            ),
+            "fixture_mode": self.settings.fixture_mode,
+            "gallery_loaded": self.gallery is not None,
+            "warnings": list(self.warnings),
+        }
+
 
 def build_state(settings: Settings) -> AppState:
     device = detect_device(settings.device)

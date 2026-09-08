@@ -187,6 +187,13 @@ export function ReferenceDock() {
         <ServiceBadge />
       </div>
       {response?.warning && !error ? <p className="reference-warning" role="note">{response.warning}</p> : null}
+      {response?.countsApproximate && !error && response.mode !== 'insufficient' ? (
+        <p className="reference-warning" role="note" data-testid="approx-counts">
+          {response.strokeStatus === 'absent'
+            ? 'Searching a raster snapshot — no exact vector counts'
+            : 'Vector counts are approximate'}
+        </p>
+      ) : null}
       {selectedAsset ? <ReferenceDetail asset={selectedAsset} /> : null}
       <div className="reference-scroll" ref={scrollRef}>
         {error ? (
