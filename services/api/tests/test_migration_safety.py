@@ -24,7 +24,9 @@ def v1_database(tmp_path: Path) -> sqlite3.Connection:
     """A v1-shaped database with one asset, one event, and one curation label."""
     connection = connect(tmp_path / "v1.sqlite3")
     package = importlib.resources.files("linescout_api") / "migrations"
-    sql1 = next(entry.read_text() for entry in package.iterdir() if entry.name.endswith(".sql"))
+    # The v1 schema by name, not by directory iteration order: iterdir() is
+    # filesystem-dependent and must never decide which migration "v1" is.
+    sql1 = (package / "0001_initial.sql").read_text(encoding="utf-8")
     connection.execute("BEGIN")
     for statement in split_statements(sql1):
         connection.execute(statement)
