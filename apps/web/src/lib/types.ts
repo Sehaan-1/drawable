@@ -1,4 +1,5 @@
-import type { HealthResponse, SearchTiming, StrokeSequence } from '@drawable/contracts'
+import type { Degradation, HealthResponse, SearchTiming, StrokeSequence } from '@drawable/contracts'
+import type { RasterInk } from './rasterInk'
 
 export const LOGICAL_SIZE = 2048
 
@@ -114,12 +115,24 @@ export interface ReferenceGroup {
 
 export type SearchMode = 'empty' | 'insufficient' | 'provisional' | 'confident'
 
+/** One structured way a response is below full quality (mirrors the API). */
+export type SearchDegradation = Degradation
+
 export interface SearchRequest {
   sessionId: string
   revision: number
   generation: number
+  /** Strokes in the delivered vector payload — 0 for a raster-only query. */
   strokeCount: number
   pointCount: number
+  /** Imported raster operations: content the vector counts cannot describe. */
+  rasterCount: number
+  /**
+   * Ink measured on the snapshot that is being searched. Sufficiency is a
+   * raster property, so a service needs this to tell a blank canvas from a
+   * substantive import; `null`/absent means the environment could not measure.
+   */
+  ink?: RasterInk | null
   textHint: string
   selectedStyle: string | null
   /** 512×512 PNG snapshot of visible ink; required by the live service. */
@@ -134,6 +147,11 @@ export interface SearchResponse {
   interpretation: string
   groups: ReferenceGroup[]
   warning?: string | null
+  /**
+   * Canonical quality view (the API's `degradations`). The UI reads the
+   * vector-branch kinds from here instead of re-deriving them from counts.
+   */
+  degradations?: SearchDegradation[]
   timing?: SearchTiming
   /** Server-echoed provenance: false means counts were exactly verified. */
   countsApproximate?: boolean

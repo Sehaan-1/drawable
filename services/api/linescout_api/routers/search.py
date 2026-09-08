@@ -22,11 +22,14 @@ from linescout_api.errors import (
 from linescout_api.preferences import compute_affinities, read_preferences
 from linescout_api.preprocessing import (
     PREPROCESSING_VERSION,
+    RasterSufficiency,
     SnapshotError,
+    VectorBranch,
     decode_snapshot,
     decode_strokes,
     ink_stats,
-    is_insufficient,
+    raster_sufficiency,
+    vector_branch,
 )
 from linescout_api.schemas import (
     Degradation,
@@ -35,7 +38,6 @@ from linescout_api.schemas import (
     SearchMode,
     SearchResponse,
     SearchTiming,
-    StrokeSequence,
     StrokeStatus,
     StyleSelection,
 )
@@ -53,13 +55,6 @@ def _raise_snapshot_error(error: SnapshotError, field: str, limit: int | None = 
     if error.code in ("image_dimensions", "image_format"):
         raise unprocessable(error.code, error.message, field)
     raise bad_request(error.code, error.message, field)
-
-
-def _vector_point_total(stroke_sequence: StrokeSequence | None) -> int | None:
-    """Exact number of points carried by a delivered vector payload, if any."""
-    if stroke_sequence is None:
-        return None
-    return sum(len(stroke.points) for stroke in stroke_sequence.strokes)
 
 
 @router.post(
@@ -179,16 +174,25 @@ async def search(
             "stroke_count",
         )
 
-    stroke_status = StrokeStatus.PRESENT if stroke_sequence is not None else StrokeStatus.ABSENT
-    vector_point_total = _vector_point_total(stroke_sequence)
-    # point_count is not structural: the vector payload is the ground truth,
-    # and a discrepancy is flagged as approximate rather than silently trusted
-    # or used to reject an otherwise well-formed drawing.
-    counts_approximate = (
-        vector_point_total != point_count
-    )  # None != point_count => True when no vector payload
-
     stats = ink_stats(gray)
+    # Two independent verdicts. The raster decides whether there is a drawing
+    # to search at all; the vector payload decides only how much of it the
+    # stroke branch can rank. Absent or sparse vectors never make a drawing
+    # insufficient — they are a degradation the response discloses instead.
+    raster = raster_sufficiency(stats, settings.min_ink_diagonal_ratio)
+    vector = vector_branch(
+        stroke_sequence,
+        stroke_count=stroke_count,
+        point_count=point_count,
+        min_points=settings.min_points_for_search,
+    )
+
+    stroke_status = StrokeStatus.PRESENT if stroke_sequence is not None else StrokeStatus.ABSENT
+    # point_count is not structural: the delivered payload is the ground truth
+    # (`vector.point_count` is its total when there was one), and a discrepancy
+    # is flagged as approximate rather than silently trusted or used to reject
+    # an otherwise well-formed drawing.
+    counts_approximate = not vector.measured or vector.point_count != point_count
     preprocessing_ms = (time.perf_counter() - started) * 1000
 
     def timing(
@@ -226,10 +230,11 @@ async def search(
             index_version=index_version,
         )
 
-    if is_insufficient(
-        stats, point_count, settings.min_points_for_search, settings.min_ink_diagonal_ratio
-    ):
-        response = base(SearchMode.INSUFFICIENT, _degradations(state, mode=SearchMode.INSUFFICIENT))
+    if not raster.sufficient:
+        response = base(
+            SearchMode.INSUFFICIENT,
+            _degradations(state, raster=raster),
+        )
         _log_search(state, session_id, response, stroke_count, point_count)
         return response
 
@@ -263,7 +268,9 @@ async def search(
         )
     retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
 
-    degradations = _degradations(state, mode=mode)
+    # A searchable response still discloses what the query could not give the
+    # stroke branch; the raster verdict is already encoded in `mode` here.
+    degradations = _degradations(state, vector=vector)
     response = base(mode, degradations)
     response.scope_predictions = _top_predictions(predictions)
     response.groups = groups
@@ -272,11 +279,20 @@ async def search(
     return response
 
 
-def _degradations(state: AppState, *, mode: SearchMode) -> list[Degradation]:
+def _degradations(
+    state: AppState,
+    *,
+    raster: RasterSufficiency | None = None,
+    vector: VectorBranch | None = None,
+) -> list[Degradation]:
     """The structured degradation list for this response (see the contract doc).
 
     The list is empty when the response is at full quality: real models, GPU,
-    every retrieval branch live, and a non-empty gallery.
+    every retrieval branch live, a non-empty gallery, and an input that gave
+    every branch something to work with. Server-side kinds describe the API;
+    ``blank_raster``/``vector_absent``/``vector_sparse`` describe *this query*,
+    which is how a raster-only import discloses that the stroke branch had
+    nothing to rank without the response being downgraded to an error.
     """
     items: list[Degradation] = []
     if not state.assets:
@@ -295,6 +311,16 @@ def _degradations(state: AppState, *, mode: SearchMode) -> list[Degradation]:
         items.append(
             Degradation(kind="branch_disabled", detail=f"retrieval branch disabled: {branch}")
         )
+    if raster is not None and raster.blank:
+        items.append(
+            Degradation(
+                kind="blank_raster",
+                detail="snapshot carries no ink: nothing was drawn, or the imported image is blank",
+            )
+        )
+    if vector is not None and (input_degradation := vector.degradation) is not None:
+        kind, detail = input_degradation
+        items.append(Degradation(kind=kind, detail=detail))
     return items
 
 

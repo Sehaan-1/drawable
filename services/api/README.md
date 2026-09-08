@@ -60,6 +60,26 @@ Three distinct layers, smallest-first:
    decompression-bomb guard included) *before* any pixel decoding, so a
    hostile header cannot materialize a giant raster.
 
+## Sufficiency and the vector branch
+
+Two verdicts are computed independently, and only the first one decides whether
+a query is searchable (`preprocessing.py`, `preprocessing_version` 1.1.0):
+
+- **raster sufficiency** — measured on the flattened 512² snapshot: ink is any
+  pixel whose grayscale is below 200; `blank` means there is none at all, and
+  `insufficient` adds "the ink bounding box is narrower than
+  `min_ink_diagonal_ratio` of the snapshot diagonal". Transparency is flattened
+  onto white first, so a fully transparent import is `blank`, not content.
+- **vector branch state** — `absent` / `sparse` / `usable` from the stroke and
+  point counts, with the delivered `strokes` payload outranking the reported
+  `point_count`. It decides what the *stroke branch* can contribute and is
+  disclosed as `vector_absent` / `vector_sparse`; it never vetoes a drawing that
+  has ink, so a PNG or flattened-SVG import stays searchable with zero points.
+
+`blank` is surfaced as the `blank_raster` degradation — the structural fact a
+client needs to show "empty canvas" instead of "keep drawing". See
+[api-contract.md](../../docs/contracts/api-contract.md) for the wire format.
+
 All early rejections use the standard structured error envelope
 (`schema_version`, `request_id`, `retryable`, `error{code,message,field}`):
 `413 request_too_large` / `413 too_many_parts` / `400 invalid_content_length`
@@ -72,7 +92,7 @@ from the middleware, `400 http_400` from the multipart parser (including its
 | Method | Path | Milestone 1 status |
 |---|---|---|
 | `GET` | `/api/v1/health` | Complete |
-| `POST` | `/api/v1/search` | Full multipart validation (400/413/422), insufficient rule, fixture ranking |
+| `POST` | `/api/v1/search` | Full multipart validation (400/413/422), ink-measured sufficiency + separate vector-branch state, fixture ranking |
 | `POST` | `/api/v1/events` | Complete |
 | `GET`/`PUT` | `/api/v1/preferences` | Complete (Laplace + 30-day half-life) |
 | `GET` | `/api/v1/assets/{id}/thumbnail` · `/line-art` | Complete; enabled + SFW assets only |

@@ -480,7 +480,7 @@
       },
       "Degradation": {
         "additionalProperties": false,
-        "description": "One structured way this response is degraded relative to full quality.\n\n``degradations`` on the response is the canonical, machine-readable view;\nthe top-level ``warning`` string is a convenience join kept for older\nclients and may be removed in a future contract version.",
+        "description": "One structured way this response is degraded relative to full quality.\n\n``degradations`` on the response is the canonical, machine-readable view;\nthe top-level ``warning`` string is a convenience join kept for older\nclients and may be removed in a future contract version.\n\nThe kinds split by what is degraded: ``fixture_mode``/``cpu_fallback``/\n``branch_disabled``/``gallery_empty`` describe the *server*, while\n``blank_raster``/``vector_absent``/``vector_sparse`` describe this\n*query's input*. A client that only wants to know whether the stroke\nbranch contributed filters on the input kinds; ``branch_disabled`` means\nthe branch is off for every query, not for this one.",
         "properties": {
           "detail": {
             "title": "Detail",
@@ -491,7 +491,10 @@
               "fixture_mode",
               "cpu_fallback",
               "branch_disabled",
-              "gallery_empty"
+              "gallery_empty",
+              "blank_raster",
+              "vector_absent",
+              "vector_sparse"
             ],
             "title": "Kind",
             "type": "string"

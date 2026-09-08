@@ -1,15 +1,109 @@
 import { useEffect, useRef, useState } from 'react'
-import { countDocumentStrokes } from '../lib/drawing'
-import { buildStrokeSequence, countDocumentPoints } from '../lib/strokeSequence'
+import { buildStrokeSequence, documentCounts } from '../lib/strokeSequence'
+import { inputDegradations, rasterSufficiency } from '../lib/rasterInk'
 import type { DrawingDocument } from '../lib/types'
 import { useDocumentStore } from '../state/documentStore'
-import { useSearchStore } from '../state/searchStore'
+import { useSearchStore, type SearchOwnership } from '../state/searchStore'
 import { useUiStore } from '../state/uiStore'
-import { fixtureServices } from './frontendServices'
+import { fixtureServices, type FrontendServices } from './frontendServices'
 import { cleanupExpiredImports, loadDocument, materializeStagedImport, saveDocument, type LoadedDocument } from './persistence'
 import { useServiceStore } from './serviceRegistry'
-import { prepareSnapshot } from './snapshotClient'
+import { prepareSnapshot, type PreparedSnapshot } from './snapshotClient'
 import { acquireDocumentLease, type DocumentLease } from './documentLock'
+
+/** Idle time between a finished stroke and the next snapshot+search. */
+const SEARCH_DEBOUNCE_MS = 350
+
+function isAbort(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+/**
+ * A snapshot is only usable by the request it was prepared for. The worker
+ * echoes the whole ownership identity, so a snapshot that does not match —
+ * different document *or* revision *or* generation *or* claim token — is
+ * discarded instead of feeding a search nobody asked for any more.
+ */
+function answers(snapshot: PreparedSnapshot, ownership: SearchOwnership) {
+  return (
+    snapshot.token === ownership.token &&
+    snapshot.documentId === ownership.documentId &&
+    snapshot.revision === ownership.revision &&
+    snapshot.generation === ownership.generation
+  )
+}
+
+interface SearchRun {
+  document: DrawingDocument
+  ownership: SearchOwnership
+  services: FrontendServices
+  sessionId: string
+  textHint: string
+  selectedStyle: string | null
+  signal: AbortSignal
+}
+
+/**
+ * One search, end to end, under a single ownership token.
+ *
+ * Every exit writes through the token: a response that lost ownership is
+ * dropped rather than applied, an error that lost ownership is not surfaced,
+ * and the spinner is settled only by whoever still owns it. That is what keeps
+ * a superseded request from clearing a newer request's loading state.
+ */
+async function runSearch({ document, ownership, services, sessionId, textHint, selectedStyle, signal }: SearchRun) {
+  const store = useSearchStore.getState()
+  try {
+    const snapshot = await prepareSnapshot(document, ownership, signal)
+    if (!answers(snapshot, ownership)) return
+    const counts = documentCounts(document.layers)
+    const sequence = buildStrokeSequence(document.layers)
+    // An empty vector payload is not sent at all: `stroke_status` has to mean
+    // "the stroke branch had input", and a 0-stroke payload under a nonzero
+    // stroke_count is exactly the mismatch the API rejects with a 422.
+    const strokes = sequence.strokes.length ? sequence : undefined
+    // Overall sufficiency is a property of the *ink*, so this is the one case
+    // worth short-circuiting locally: a canvas with nothing visible on it
+    // (cleared layers, or an import whose pixels are all transparent) has
+    // nothing for any service to rank, and the vector counts say nothing about
+    // whether that is true. How *little* ink is enough stays the gallery's
+    // call, so anything with ink in it is still sent.
+    if (rasterSufficiency(snapshot.ink).blank) {
+      const degradations = inputDegradations(snapshot.ink, counts.strokeCount, counts.pointCount, strokes ? counts.pointCount : undefined)
+      store.resolve(ownership, {
+        revision: ownership.revision,
+        generation: ownership.generation,
+        mode: 'empty',
+        interpretation: 'Blank canvas',
+        groups: [],
+        degradations,
+        warning: degradations.map((item) => item.detail).join('; ') || null,
+        countsApproximate: strokes === undefined,
+        strokeStatus: strokes ? 'present' : 'absent',
+      })
+      return
+    }
+    const response = await services.search.search({
+      sessionId,
+      revision: ownership.revision,
+      generation: ownership.generation,
+      strokeCount: counts.strokeCount,
+      pointCount: counts.pointCount,
+      rasterCount: counts.rasterCount,
+      ink: snapshot.ink,
+      textHint,
+      selectedStyle,
+      image: snapshot.image,
+      strokes,
+    }, signal)
+    store.resolve(ownership, response)
+  } catch (error) {
+    // An abort is the expected end of a superseded request; the effect cleanup
+    // has already settled loading for it.
+    if (isAbort(error) || signal.aborted) return
+    store.reject(ownership, error instanceof Error ? error.message : 'Reference search failed.')
+  }
+}
 
 export function useWorkspaceLifecycle() {
   const document = useDocumentStore((state) => state.document)
@@ -24,9 +118,7 @@ export function useWorkspaceLifecycle() {
   const textHint = useSearchStore((state) => state.textHint)
   const selectedStyle = useSearchStore((state) => state.selectedStyle)
   const invalidate = useSearchStore((state) => state.invalidate)
-  const setLoading = useSearchStore((state) => state.setLoading)
-  const setResponse = useSearchStore((state) => state.setResponse)
-  const setError = useSearchStore((state) => state.setError)
+  const claim = useSearchStore((state) => state.claim)
   const theme = useUiStore((state) => state.theme)
   const serviceMode = useServiceStore((state) => state.mode)
   const services = useServiceStore((state) => state.services)
@@ -35,7 +127,10 @@ export function useWorkspaceLifecycle() {
   const [restoreCandidate, setRestoreCandidate] = useState<LoadedDocument | null>(null)
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const [notice, setNotice] = useState<string | null>(null)
-  const previousRevision = useRef(document.revision)
+  // Keyed on the *document*, not just its revision: switching to a different
+  // document whose revision happens to be equal must still invalidate the
+  // results of the one it replaced.
+  const previousIdentity = useRef(`${document.id}:${document.revision}`)
   const lease = useRef<DocumentLease | null>(null)
   const activationVersion = useRef(0)
 
@@ -146,52 +241,43 @@ export function useWorkspaceLifecycle() {
   }, [clearTrace, document.trace.assetId, document.trace.imageUrl, hasHydrated, services, setResolvedTraceImage])
 
   useEffect(() => {
-    if (previousRevision.current !== document.revision) {
-      previousRevision.current = document.revision
-      invalidate(false)
-    }
-  }, [document.revision, invalidate])
+    const identity = `${document.id}:${document.revision}`
+    if (previousIdentity.current === identity) return
+    previousIdentity.current = identity
+    // `invalidate` bumps the generation *and* drops the in-flight request with
+    // it, so replacing a document can neither keep the old results nor keep the
+    // old spinner alive on the new one.
+    invalidate(false)
+  }, [document.id, document.revision, invalidate])
 
   useEffect(() => {
     if (drawing || !hasHydrated || serviceMode === 'probing') return
     const controller = new AbortController()
-    const requestRevision = document.revision
-    const requestGeneration = generation
+    // The claim ties this run to the exact drawing state it searches. A mode
+    // switch, a document swap, or a new stroke invalidates it; nothing this
+    // effect started may write state after that.
+    const ownership = claim({ documentId: document.id, revision: document.revision, generation })
     const timer = window.setTimeout(() => {
-      setLoading(true)
-      prepareSnapshot(document, requestGeneration, controller.signal).then((snapshot) => {
-        if (snapshot.revision !== requestRevision || snapshot.generation !== requestGeneration) throw new DOMException('Snapshot superseded', 'AbortError')
-        return services.search.search({
-          sessionId,
-          revision: requestRevision,
-          generation: requestGeneration,
-          strokeCount: countDocumentStrokes(document.layers),
-          pointCount: countDocumentPoints(document.layers),
-          textHint,
-          selectedStyle,
-          image: snapshot.image,
-          strokes: buildStrokeSequence(document.layers),
-        }, controller.signal)
-      }).then((response) => {
-        const current = useSearchStore.getState()
-        const currentDocument = useDocumentStore.getState().document
-        if (!current.drawing && current.generation === response.generation && currentDocument.revision === response.revision) setResponse(response)
-      }).catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return
-        const current = useSearchStore.getState()
-        const currentDocument = useDocumentStore.getState().document
-        if (current.generation !== requestGeneration || currentDocument.revision !== requestRevision) return
-        setError(error instanceof Error ? error.message : 'Reference search failed.')
-      }).finally(() => {
-        const current = useSearchStore.getState()
-        if (current.generation === requestGeneration) setLoading(false)
-      })
-    }, 350)
+      const search = useSearchStore.getState()
+      // Superseded during the debounce (another claim, an invalidate, a mode
+      // switch): stay quiet rather than raise a spinner for a dead request.
+      if (!search.isOwner(ownership)) return
+      // Read the document from the store instead of closing over it, and check
+      // it against the claim: a snapshot must be of the state the ownership
+      // token was issued for, not of whatever render last ran this effect.
+      const current = useDocumentStore.getState().document
+      if (current.id !== ownership.documentId || current.revision !== ownership.revision) return
+      search.begin(ownership)
+      void runSearch({ document: current, ownership, services, sessionId, textHint, selectedStyle, signal: controller.signal })
+    }, SEARCH_DEBOUNCE_MS)
     return () => {
       window.clearTimeout(timer)
       controller.abort()
+      // Settle the spinner this run raised — but only if nobody else has taken
+      // ownership since. Unmount and "restart the search" both land here.
+      useSearchStore.getState().release(ownership)
     }
-  }, [document.revision, drawing, generation, hasHydrated, selectedStyle, serviceMode, services, sessionId, setError, setLoading, setResponse, textHint])
+  }, [claim, document.id, document.revision, drawing, generation, hasHydrated, selectedStyle, serviceMode, services, sessionId, textHint])
 
   useEffect(() => {
     if (theme !== 'system') return

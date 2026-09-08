@@ -109,19 +109,29 @@ export function toReferenceGroup(group: SearchGroup): ReferenceGroup {
 
 export function toSearchResponse(response: ApiSearchResponse, request: SearchRequest): SearchResponse {
   const top = response.scope_predictions[0]
+  // The gallery owns the sufficiency verdict, and that verdict is measured on
+  // raster ink. A blank canvas is a different *state* from "keep drawing" — it
+  // is a property of what is on the canvas at all (nothing, or a fully
+  // transparent import), which is why `blank_raster` maps to `empty` — but no
+  // client-side count gets to override the answer: a vector-less import with
+  // real ink in it has results to show.
+  const blank = (response.degradations ?? []).some((item) => item.kind === 'blank_raster')
   const interpretation =
     response.mode === 'insufficient'
-      ? 'Keep drawing'
+      ? blank
+        ? 'Blank canvas'
+        : 'Keep drawing'
       : top && top.label !== 'unknown'
         ? `${SCOPE_TITLES[top.label]} · ${Math.round(top.confidence * 100)}%`
         : 'Reading early marks'
   return {
     revision: response.revision,
     generation: request.generation,
-    mode: request.strokeCount === 0 ? 'empty' : response.mode,
+    mode: response.mode === 'insufficient' && blank ? 'empty' : response.mode,
     interpretation,
     groups: response.groups.map(toReferenceGroup),
     warning: response.warning ?? null,
+    degradations: response.degradations ?? [],
     timing: response.timing,
     // Provenance echoed from the server so the dock can disclose approximate
     // counts and the preprocessing/build that produced this result.

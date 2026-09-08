@@ -101,10 +101,6 @@ export function renderLayer(
   for (const operation of layer.operations) renderDrawingOperation(context, operation, rasterAssets)
 }
 
-export function countDocumentStrokes(layers: DrawingLayer[]) {
-  return layers.reduce((total, layer) => total + (layer.visible ? layer.operations.length : 0), 0)
-}
-
 export function makeStrokeOperation(
   tool: Exclude<import('./types').Tool, 'hand'>,
   points: DrawPoint[],

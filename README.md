@@ -85,7 +85,7 @@ documented in [`docs/contracts/`](docs/contracts/):
 | Endpoint | Milestone 1 |
 |---|---|
 | `GET /health` | readiness, CUDA/GPU, model + dataset/index versions, gallery size, warnings |
-| `POST /search` | full multipart contract with structured `400/413/422`; unready → `503`; blank input → `200 mode=insufficient` |
+| `POST /search` | full multipart contract with structured `400/413/422`; unready → `503`; too little ink → `200 mode=insufficient` (a canvas with *no* ink also carries the `blank_raster` degradation, which is what a client maps to its empty state) |
 | `POST /events` · `GET/PUT /preferences` | interaction logging, Laplace-smoothed 30-day-half-life style affinity |
 | `GET /assets/{id}/thumbnail` · `/line-art` | servable assets only (`is_servable`: gallery member, display grant, accepted with a quality grade, human SFW approval); a missing file is a 404 for the session, never a manifest rewrite |
 | `/curation/*` | mounted only with `LINESCOUT_CURATION_MODE=1`; progress works, the rest is 501 until Milestone 2 |

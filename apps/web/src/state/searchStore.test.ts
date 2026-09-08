@@ -7,7 +7,7 @@ import {
   writeLocalPins,
 } from '../services/pinStorage'
 import { localPinClient, type PinClient, type PinSnapshot } from '../services/frontendServices'
-import type { ReferenceAsset } from '../lib/types'
+import type { ReferenceAsset, SearchResponse } from '../lib/types'
 
 /**
  * Pins are durable state, namespaced per gallery. The fixture namespace is an
@@ -63,6 +63,14 @@ beforeEach(() => {
     revokedPins: [],
     pinsHydrated: false,
     pinError: null,
+    generation: 0,
+    drawing: false,
+    loading: false,
+    error: null,
+    response: null,
+    owner: null,
+    textHint: '',
+    selectedStyle: null,
   })
 })
 
@@ -192,5 +200,134 @@ describe('legacy migration', () => {
     expect(useSearchStore.getState().pinned.map((item) => item.id)).toEqual(['legacy-1', 'legacy-2'])
     expect(localStorage.getItem(LEGACY_FIXTURE_PINS_KEY)).toBeNull()
     expect(readLocalPins('fixture').map((item) => item.id)).toEqual(['legacy-1', 'legacy-2'])
+  })
+})
+
+describe('search request ownership', () => {
+  const identity = { documentId: 'doc-a', revision: 1, generation: 3 }
+  const forRevision = (revision: number, generation: number) => ({
+    ...identity,
+    revision,
+    generation,
+  })
+  const answer = (over: Partial<SearchResponse> = {}): SearchResponse =>
+    ({
+      revision: identity.revision,
+      generation: identity.generation,
+      mode: 'confident',
+      interpretation: 'Face construction',
+      groups: [],
+      ...over,
+    }) as SearchResponse
+
+  it('gives ownership to the newest claim and settles the superseded request', () => {
+    const stale = useSearchStore.getState().claim(identity)
+    expect(useSearchStore.getState().begin(stale)).toBe(true)
+    expect(useSearchStore.getState().loading).toBe(true)
+
+    // A different document claims the same generation number: the old request
+    // loses the right to write, and its spinner cannot strand the new one.
+    const fresh = useSearchStore.getState().claim(forRevision(2, identity.generation))
+    const state = useSearchStore.getState()
+    expect(state.owner?.token).toBe(fresh.token)
+    expect(state.loading).toBe(false)
+    expect(state.begin(stale)).toBe(false)
+    expect(state.resolve(stale, answer())).toBe(false)
+    expect(state.reject(stale, 'boom')).toBe(false)
+    expect(state.release(stale)).toBe(false)
+    expect(state.response).toBeNull()
+    expect(state.error).toBeNull()
+
+    expect(useSearchStore.getState().resolve(fresh, answer({ revision: 2 }))).toBe(true)
+    expect(useSearchStore.getState().response?.mode).toBe('confident')
+    expect(useSearchStore.getState().loading).toBe(false)
+    expect(useSearchStore.getState().owner).toBeNull()
+  })
+
+  it('distinguishes two claims of an identical drawing state by token', () => {
+    // A retry after a failure has the same document, revision, and generation as
+    // the attempt it replaces — the token is what keeps them apart.
+    const first = useSearchStore.getState().claim(identity)
+    const second = useSearchStore.getState().claim(identity)
+    expect(second.token).not.toBe(first.token)
+    expect(useSearchStore.getState().isOwner(first)).toBe(false)
+    expect(useSearchStore.getState().isOwner(second)).toBe(true)
+    expect(useSearchStore.getState().resolve(first, answer())).toBe(false)
+    expect(useSearchStore.getState().resolve(second, answer())).toBe(true)
+  })
+
+  it('drops an answer whose echoed identity is not the request it owns', () => {
+    const owner = useSearchStore.getState().claim(identity)
+    useSearchStore.getState().begin(owner)
+    // The gallery replied for a different revision: it is not applied, and it
+    // does not clear the spinner either — only a real transition may.
+    expect(useSearchStore.getState().resolve(owner, answer({ revision: 99 }))).toBe(false)
+    expect(useSearchStore.getState().response).toBeNull()
+    expect(useSearchStore.getState().loading).toBe(true)
+    expect(useSearchStore.getState().owner?.token).toBe(owner.token)
+    expect(useSearchStore.getState().resolve(owner, answer({ generation: 77 }))).toBe(false)
+    expect(useSearchStore.getState().resolve(owner, answer())).toBe(true)
+  })
+
+  it('releases only for the owner, so old cleanup cannot unset a newer spinner', () => {
+    const stale = useSearchStore.getState().claim(identity)
+    const current = useSearchStore.getState().claim(forRevision(2, 4))
+    useSearchStore.getState().begin(current)
+    expect(useSearchStore.getState().release(stale)).toBe(false)
+    expect(useSearchStore.getState().loading).toBe(true)
+    expect(useSearchStore.getState().owner?.token).toBe(current.token)
+    expect(useSearchStore.getState().release(current)).toBe(true)
+    expect(useSearchStore.getState().loading).toBe(false)
+    expect(useSearchStore.getState().owner).toBeNull()
+  })
+
+  it('settles ownership and the spinner together on every invalidating transition', () => {
+    const owner = useSearchStore.getState().claim(identity)
+    useSearchStore.getState().begin(owner)
+    const before = useSearchStore.getState().generation
+    expect(useSearchStore.getState().loading).toBe(true)
+
+    expect(useSearchStore.getState().invalidate(true)).toBe(before + 1)
+    expect(useSearchStore.getState().owner).toBeNull()
+    expect(useSearchStore.getState().loading).toBe(false)
+    expect(useSearchStore.getState().drawing).toBe(true)
+    expect(useSearchStore.getState().generation).toBe(before + 1)
+
+    // A query change takes the same route, in a single write, and truncates the
+    // hint — "superseded but still spinning" must never be observable.
+    const afterHint = useSearchStore.getState().claim(forRevision(1, before + 1))
+    useSearchStore.getState().begin(afterHint)
+    useSearchStore.getState().setTextHint('x'.repeat(200))
+    expect(useSearchStore.getState().generation).toBe(before + 2)
+    expect(useSearchStore.getState().textHint).toHaveLength(120)
+    expect(useSearchStore.getState().owner).toBeNull()
+    expect(useSearchStore.getState().loading).toBe(false)
+
+    const afterStyle = useSearchStore.getState().claim(forRevision(1, before + 2))
+    useSearchStore.getState().begin(afterStyle)
+    useSearchStore.getState().setSelectedStyle('Manga / anime')
+    expect(useSearchStore.getState().generation).toBe(before + 3)
+    expect(useSearchStore.getState().selectedStyle).toBe('Manga / anime')
+    expect(useSearchStore.getState().owner).toBeNull()
+    expect(useSearchStore.getState().loading).toBe(false)
+  })
+
+  it('writes the response and the error through the owner only', () => {
+    const owner = useSearchStore.getState().claim(identity)
+    useSearchStore.getState().resolve(owner, answer({ warning: 'degraded' }))
+    expect(useSearchStore.getState().response?.warning).toBe('degraded')
+    expect(useSearchStore.getState().error).toBeNull()
+
+    const retry = useSearchStore.getState().claim(forRevision(2, identity.generation))
+    expect(useSearchStore.getState().begin(retry)).toBe(true)
+    expect(useSearchStore.getState().reject(retry, 'Search failed')).toBe(true)
+    const state = useSearchStore.getState()
+    expect(state.error).toBe('Search failed')
+    expect(state.loading).toBe(false)
+    // The last good answer is kept as provenance (`recordInteraction` reports
+    // its revision) and stays hidden: the dock renders the error ahead of any
+    // response, so a superseded result cannot be mistaken for the current one.
+    expect(state.response?.revision).toBe(1)
+    expect(useSearchStore.getState().reject(retry, 'again')).toBe(false)
   })
 })

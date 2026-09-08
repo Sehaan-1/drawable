@@ -42,31 +42,31 @@ import { toSearchResponse } from './liveServices'
 import type { SearchResponse as ApiSearchResponse } from '@drawable/contracts'
 import type { SearchRequest } from '../lib/types'
 
-describe('live search provenance round trip', () => {
-  const request: SearchRequest = {
-    sessionId: 's', revision: 4, generation: 2, strokeCount: 3, pointCount: 6, textHint: '', selectedStyle: null,
-  }
-  const wire = (over: Partial<ApiSearchResponse>): ApiSearchResponse => ({
-    schema_version: 2,
-    request_id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
-    api_version: '0.1.0-test',
-    revision: 4,
-    canvas_width: 2048,
-    canvas_height: 2048,
-    stroke_status: 'present',
-    counts_approximate: false,
-    preprocessing_version: '1.0.0',
-    mode: 'confident',
-    scope_predictions: [],
-    groups: [],
-    timing: { preprocessing_ms: 1, embedding_ms: 0, retrieval_ms: 1, reranking_ms: 0, total_ms: 2 },
-    warning: null,
-    degradations: [],
-    dataset_version: '2026.09.08-synthetic',
-    index_version: 'abc',
-    ...over,
-  })
+const request: SearchRequest = {
+  sessionId: 's', revision: 4, generation: 2, strokeCount: 3, pointCount: 6, rasterCount: 0, textHint: '', selectedStyle: null,
+}
+const wire = (over: Partial<ApiSearchResponse>): ApiSearchResponse => ({
+  schema_version: 2,
+  request_id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  api_version: '0.1.0-test',
+  revision: 4,
+  canvas_width: 2048,
+  canvas_height: 2048,
+  stroke_status: 'present',
+  counts_approximate: false,
+  preprocessing_version: '1.0.0',
+  mode: 'confident',
+  scope_predictions: [],
+  groups: [],
+  timing: { preprocessing_ms: 1, embedding_ms: 0, retrieval_ms: 1, reranking_ms: 0, total_ms: 2 },
+  warning: null,
+  degradations: [],
+  dataset_version: '2026.09.08-synthetic',
+  index_version: 'abc',
+  ...over,
+})
 
+describe('live search provenance round trip', () => {
   it('surfaces exact-count provenance and server versions on the view model', () => {
     const view = toSearchResponse(wire({ counts_approximate: false, stroke_status: 'present' }), request)
     expect(view.countsApproximate).toBe(false)
@@ -170,5 +170,74 @@ describe('trace resolution', () => {
       new ApiError(404, 'asset_not_found', 'gone'),
     )
     await expect(liveServices.assets?.resolveTrace('ls_a')).resolves.toBeNull()
+  })
+})
+
+describe('live sufficiency and degradation mapping', () => {
+  const blankRaster = { kind: 'blank_raster' as const, detail: 'snapshot carries no ink' }
+  const vectorAbsent = { kind: 'vector_absent' as const, detail: 'no vector stroke data' }
+  const vectorSparse = { kind: 'vector_sparse' as const, detail: 'vector branch degraded' }
+
+  it('maps a blank snapshot onto the empty state instead of "keep drawing"', () => {
+    const view = toSearchResponse(
+      wire({ mode: 'insufficient', degradations: [blankRaster, vectorAbsent] }),
+      request,
+    )
+    expect(view.mode).toBe('empty')
+    expect(view.interpretation).toBe('Blank canvas')
+  })
+
+  it('keeps "keep drawing" for ink that is merely too small', () => {
+    const view = toSearchResponse(wire({ mode: 'insufficient', degradations: [vectorAbsent] }), request)
+    expect(view.mode).toBe('insufficient')
+    expect(view.interpretation).toBe('Keep drawing')
+    // The absent branch is still disclosed on a degraded response.
+    expect(view.degradations?.map((item) => item.kind)).toEqual(['vector_absent'])
+  })
+
+  it('never vetoes a ranked response because the vector branch is thin', () => {
+    // A substantive PNG/SVG import: the server ranked it, so the client shows
+    // those results and surfaces the missing geometry as a structural note —
+    // vector availability never overrides the gallery's sufficiency verdict.
+    const view = toSearchResponse(
+      wire({
+        mode: 'confident',
+        stroke_status: 'absent',
+        counts_approximate: true,
+        groups: [
+          { id: 'best', kind: 'best_match', title: 'Best match', results: [result({})] },
+        ],
+        degradations: [vectorAbsent],
+        warning: vectorAbsent.detail,
+      }),
+      request,
+    )
+    expect(view.mode).toBe('confident')
+    expect(view.groups).toHaveLength(1)
+    expect(view.groups[0]?.results[0]?.id).toBe('ls_synthetic_ac1f55b7390698a7')
+    expect(view.strokeStatus).toBe('absent')
+    expect(view.degradations?.map((item) => item.kind)).toEqual(['vector_absent'])
+    expect(view.warning).toBe(vectorAbsent.detail)
+  })
+
+  it('reports a blank import as empty even when it also lost the vector branch', () => {
+    const view = toSearchResponse(
+      wire({ mode: 'insufficient', degradations: [blankRaster, vectorAbsent], groups: [] }),
+      request,
+    )
+    expect(view.mode).toBe('empty')
+    expect(view.degradations?.map((item) => item.kind)).toEqual(['blank_raster', 'vector_absent'])
+  })
+
+  it('carries sparse-vector disclosure through untouched', () => {
+    const view = toSearchResponse(wire({ mode: 'provisional', degradations: [vectorSparse] }), request)
+    expect(view.mode).toBe('provisional')
+    expect(view.degradations?.[0]?.detail).toBe('vector branch degraded')
+  })
+
+  it('tolerates a server that predates the degradations field', () => {
+    const view = toSearchResponse({ ...wire({ mode: 'confident' }), degradations: undefined }, request)
+    expect(view.degradations).toEqual([])
+    expect(view.mode).toBe('confident')
   })
 })

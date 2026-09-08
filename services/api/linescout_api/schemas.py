@@ -189,9 +189,24 @@ class Degradation(ApiModel):
     ``degradations`` on the response is the canonical, machine-readable view;
     the top-level ``warning`` string is a convenience join kept for older
     clients and may be removed in a future contract version.
+
+    The kinds split by what is degraded: ``fixture_mode``/``cpu_fallback``/
+    ``branch_disabled``/``gallery_empty`` describe the *server*, while
+    ``blank_raster``/``vector_absent``/``vector_sparse`` describe this
+    *query's input*. A client that only wants to know whether the stroke
+    branch contributed filters on the input kinds; ``branch_disabled`` means
+    the branch is off for every query, not for this one.
     """
 
-    kind: Literal["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty"]
+    kind: Literal[
+        "fixture_mode",
+        "cpu_fallback",
+        "branch_disabled",
+        "gallery_empty",
+        "blank_raster",
+        "vector_absent",
+        "vector_sparse",
+    ]
     detail: str
 
 
