@@ -63,7 +63,7 @@ these is optional, and none of them are the author's machine being representativ
 ### The repository pin
 
 The notebook defaults to **`junosapollo/drawable`** at commit
-`407a483f17fd11db50bf675859e5cfb08e298574` (`407a483f17fd`), fetched over
+`7ea9fe102bc0977466476a0abd05cf5833cf41c8` (`7ea9fe102bc0`), fetched over
 `https://github.com/junosapollo/drawable.git` — the unauthenticated transport, because
 nothing that has to be reproducible should depend on a token you happen to have in a
 runtime. `REPO_URL` is a form field for the private-repo case and for a fork; the pin
@@ -77,8 +77,11 @@ when the canonical URL is unreachable, and it cannot change what runs: whatever 
 is checked out by SHA and the checkout is refused if HEAD is not the pin. Content
 addressing is what makes a mirror safe; "a second URL I trust" would not be.
 
-The pin names the commit that contains the finalized pipeline, including the stage
-logic and the SFW policy above; bumping it moves it to whatever commit does. Each bump
+The pin names the commit that contains the finalized pipeline — the stage logic, the
+SFW policy above, and the schema v2 contract the gallery is written against. A pin that
+predates a manifest-contract change is not merely older, it is *wrong*: the notebooks at
+such a pin emit records the current API refuses to read, which is why the pin moved
+again when v2 landed rather than staying put as a documentation courtesy. Each bump
 is verified the same way, against GitHub rather than a fixture:
 
 ```bash
@@ -89,7 +92,7 @@ cd /tmp && PYTHONPATH=/tmp/ls-pin/ml <repo>/ml/.venv/bin/python -c \
 print(run_selfcheck(Path('/tmp/ls-pin')))"
 ```
 
-The first prints `HEAD : 407a483f17fd  (matches the pin)` for both URLs; the second
+The first prints `HEAD : 7ea9fe102bc0  (matches the pin)` for both URLs; the second
 prints `[]`, which is the stronger claim — the pinned commit's own notebook,
 environment spec, checkpoint lock, and docs agree with *each other*, not merely with
 whatever the working tree looks like now. Running it from the repository root instead
