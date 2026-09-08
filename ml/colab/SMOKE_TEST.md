@@ -18,6 +18,7 @@ reading the table at the bottom.
 | Claim | Evidence |
 |---|---|
 | Every notebook cell compiles; the names it imports exist in the package; the dry-run cell executes against the committed fixture | `pytest tests/test_colab_notebook.py` |
+| Reporting cells (extract, measure, dedupe, labels, manifest slice) execute against a real run and assert on their output | `pytest tests/test_colab_pipeline.py` |
 | A checkout is only accepted at the pinned commit; an existing one is verified and never reset under your feet; a dirty or wrong-HEAD tree is refused or recorded as dirty | `pytest tests/test_colab_repro.py` (runs against real throwaway `git` repos) |
 | The notebook installs only pinned `name==version` specs from the plan, and only after presets resolve | same, plus `linescout-repro selfcheck` |
 | `requirements-colab.txt` agrees with `ml/uv.lock`, its names are all in the `[gpu]` extra, and no runtime pin is installed by pip | `linescout-repro selfcheck` |

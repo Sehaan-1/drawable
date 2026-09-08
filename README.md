@@ -4,10 +4,10 @@ A local, line-art reference copilot for character artists: draw on a
 pressure-sensitive canvas and matching references appear after every stroke.
 Everything runs on your machine — no accounts, no cloud, no paid services.
 
-> **Status: Milestone 1 (project foundation).** The canvas is fully usable and
-> the API serves the complete v1 wire contract, but rankings come from a
-> deterministic fixture over a synthetic gallery until the retrieval models
-> land in Milestone 4. See [Roadmap](#roadmap).
+> **Status: Milestone 2 (dataset & curation pipeline).** The canvas is fully usable,
+> the Colab GPU ingestion pipeline produces reproducible schema v2 galleries, and
+> the API serves rankings from a deterministic fixture over a synthetic gallery until
+> the retrieval models land in Milestone 4. See [Roadmap](#roadmap).
 
 ## Quick start
 
@@ -120,9 +120,9 @@ report says what happened rather than what was intended. Details in
 
 | # | Milestone | Status |
 |---|---|---|
-| 1 | Reproducible project foundation | **This branch** |
-| 2 | Dataset and curation pipeline | next |
-| 3 | Headless Clippy baseline | |
+| 1 | Reproducible project foundation | Complete |
+| 2 | Dataset and curation pipeline | **This branch** |
+| 3 | Headless Clippy baseline | next |
 | 4 | LineScout retrieval models | |
 | 5 | Polished canvas and live search | canvas ~70% done |
 | 6 | Preference learning and calibrated ranking | event/preference plumbing done |
