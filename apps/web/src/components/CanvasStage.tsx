@@ -83,14 +83,15 @@ export function CanvasStage() {
 
   useEffect(() => {
     let active = true
-    resolveRasterImages(document).catch(() => new Map<string, CanvasImageSource>()).then((rasterAssets) => {
+    // A gone stored blob degrades the layer to its vector ink; nothing here throws.
+    resolveRasterImages(document).then(({ images }) => {
       if (!active) return
       for (const layer of document.layers) {
         const canvas = layerCanvasRefs.current.get(layer.id)
         const context = canvas?.getContext('2d')
-        if (context) renderLayer(context, layer, rasterAssets)
+        if (context) renderLayer(context, layer, images)
       }
-    })
+    }).catch(() => undefined)
     return () => { active = false }
   }, [document.layers])
 

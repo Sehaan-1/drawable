@@ -14,8 +14,16 @@ function safeTitle(title: string) {
   return title.trim().replaceAll(/[^a-z0-9-_]+/gi, '-').replaceAll(/^-|-$/g, '') || 'drawing'
 }
 
-export async function rasterizeDocument(document: DrawingDocument, transparent: boolean) {
-  const rasterAssets = await resolveRasterImages(document)
+export interface RasterizedDocument {
+  canvas: HTMLCanvasElement
+  /** Imports referenced by visible layers whose stored blob is gone; they are simply not in the picture. */
+  unavailable: string[]
+}
+
+export async function rasterizeDocument(document: DrawingDocument, transparent: boolean): Promise<RasterizedDocument> {
+  // 'visible' scope matches what rasterizeDocument draws, so a hidden layer's
+  // missing blob is never reported as an omission from this picture.
+  const { images, unavailable } = await resolveRasterImages(document, 'visible')
   const output = window.document.createElement('canvas')
   output.width = LOGICAL_SIZE
   output.height = LOGICAL_SIZE
@@ -29,18 +37,24 @@ export async function rasterizeDocument(document: DrawingDocument, transparent: 
     const layerCanvas = window.document.createElement('canvas')
     layerCanvas.width = LOGICAL_SIZE
     layerCanvas.height = LOGICAL_SIZE
-    renderLayer(layerCanvas.getContext('2d')!, layer, rasterAssets)
+    renderLayer(layerCanvas.getContext('2d')!, layer, images)
     context.globalAlpha = layer.opacity
     context.drawImage(layerCanvas, 0, 0)
   }
   context.globalAlpha = 1
-  return output
+  return { canvas: output, unavailable }
 }
 
-export async function exportPng(document: DrawingDocument, transparent: boolean) {
-  const canvas = await rasterizeDocument(document, transparent)
+/**
+ * PNG export writes exactly what the canvas shows — a gone stored blob is not
+ * a reason to refuse the picture — and returns the ids it left out so the
+ * caller can say the file is missing something.
+ */
+export async function exportPng(document: DrawingDocument, transparent: boolean): Promise<string[]> {
+  const { canvas, unavailable } = await rasterizeDocument(document, transparent)
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('PNG export failed.')), 'image/png'))
   download(blob, `${safeTitle(document.title)}.png`)
+  return unavailable
 }
 
 function blobToDataUrl(blob: Blob) {
@@ -56,9 +70,10 @@ function isEraser(operation: DrawingDocument['layers'][number]['operations'][num
   return operation.kind === 'stroke' && operation.tool === 'eraser'
 }
 
-export async function exportSvg(document: DrawingDocument) {
+export async function exportSvg(document: DrawingDocument): Promise<string[]> {
+  const { assets, unavailable } = await loadReferencedRasterAssets(document, 'visible')
   const rasterData = new Map<string, string>()
-  for (const asset of await loadReferencedRasterAssets(document)) rasterData.set(asset.id, await blobToDataUrl(asset.blob))
+  for (const asset of assets) rasterData.set(asset.id, await blobToDataUrl(asset.blob))
   const definitions: string[] = []
   const groups: string[] = []
   for (const layer of [...document.layers].reverse()) {
@@ -70,8 +85,8 @@ export async function exportSvg(document: DrawingDocument) {
         if (!source) return
         const followingErasers = layer.operations.slice(index + 1).filter(isEraser)
         const maskId = `${layer.id}-raster-${index}`
-        if (followingErasers.length) definitions.push(`<mask id="${maskId}"><rect width="2048" height="2048" fill="white"/>${followingErasers.map((eraser) => `<path d="${outlineToPath(strokeOutline(eraser))}" fill="black"/>`).join('')}</mask>`)
-        draws.push(`<image href="${source}" x="${operation.x}" y="${operation.y}" width="${operation.width}" height="${operation.height}"${followingErasers.length ? ` mask="url(#${maskId})"` : ''}/>`)
+        if (followingErasers.length) definitions.push(`<mask id=\"${maskId}\"><rect width=\"2048\" height=\"2048\" fill=\"white\"/>${followingErasers.map((eraser) => `<path d=\"${outlineToPath(strokeOutline(eraser))}\" fill=\"black\"/>`).join('')}</mask>`)
+        draws.push(`<image href=\"${source}\" x=\"${operation.x}\" y=\"${operation.y}\" width=\"${operation.width}\" height=\"${operation.height}\"${followingErasers.length ? ` mask=\"url(#${maskId})\"` : ''}/>`)
         return
       }
       if (operation.tool === 'eraser') return
@@ -79,15 +94,16 @@ export async function exportSvg(document: DrawingDocument) {
       if (!drawPath) return
       const followingErasers = layer.operations.slice(index + 1).filter(isEraser)
       if (followingErasers.length === 0) {
-        draws.push(`<path d="${drawPath}"/>`)
+        draws.push(`<path d=\"${drawPath}\"/>`)
         return
       }
       const maskId = `${layer.id}-draw-${index}`
-      definitions.push(`<mask id="${maskId}"><rect width="2048" height="2048" fill="white"/>${followingErasers.map((eraser) => `<path d="${outlineToPath(strokeOutline(eraser))}" fill="black"/>`).join('')}</mask>`)
-      draws.push(`<path d="${drawPath}" mask="url(#${maskId})"/>`)
+      definitions.push(`<mask id=\"${maskId}\"><rect width=\"2048\" height=\"2048\" fill=\"white\"/>${followingErasers.map((eraser) => `<path d=\"${outlineToPath(strokeOutline(eraser))}\" fill=\"black\"/>`).join('')}</mask>`)
+      draws.push(`<path d=\"${drawPath}\" mask=\"url(#${maskId})\"/>`)
     })
-    groups.push(`<g opacity="${layer.opacity}" fill="#111214">${draws.join('')}</g>`)
+    groups.push(`<g opacity=\"${layer.opacity}\" fill=\"#111214\">${draws.join('')}</g>`)
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2048 2048"><defs>${definitions.join('')}</defs>${groups.join('')}</svg>`
+  const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 2048 2048\"><defs>${definitions.join('')}</defs>${groups.join('')}</svg>`
   download(new Blob([svg], { type: 'image/svg+xml' }), `${safeTitle(document.title)}.svg`)
+  return unavailable
 }

@@ -31,3 +31,36 @@ if (typeof PointerEvent === 'undefined') {
   // synthetic event system can read clientX/clientY in tests.
   globalThis.PointerEvent = PointerEventPolyfill
 }
+
+// jsdom's Blob has no ``text()``/``arrayBuffer()``: its FileReader can read the
+// bytes, so the polyfills go through it. Project export re-parses what it just
+// wrote (checksums and all), which needs both.
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.arrayBuffer !== 'function') {
+  Blob.prototype.arrayBuffer = function () {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as ArrayBuffer)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsArrayBuffer(this)
+    })
+  }
+}
+if (typeof Blob !== 'undefined' && typeof Blob.prototype.text !== 'function') {
+  Blob.prototype.text = function () {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error)
+      reader.readAsText(this)
+    })
+  }
+}
+
+// jsdom's Crypto stops at getRandomValues/randomUUID; Node ships the standards
+//-compliant SubtleCrypto the project round-trip needs for SHA-256. The module
+// specifier is computed so the web project's types (no @types/node) stay clean.
+if (typeof crypto !== 'undefined' && !crypto.subtle) {
+  const nodeCrypto = 'node:' + 'crypto'
+  const { webcrypto } = (await import(/* @vite-ignore */ nodeCrypto)) as { webcrypto: { subtle: SubtleCrypto } }
+  Object.defineProperty(globalThis.crypto, 'subtle', { value: webcrypto.subtle })
+}

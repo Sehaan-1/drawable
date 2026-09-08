@@ -107,7 +107,7 @@ function debounce() {
 }
 
 /** Answer one request's snapshot; the hook then decides whether to search. */
-function snapshot(run: Run) {
+function snapshot(run: Run, unavailable: string[] = []) {
   return act(async () => {
     run.snapshot.resolve({
       token: run.ownership.token,
@@ -117,6 +117,7 @@ function snapshot(run: Run) {
       image: new Blob(['snapshot']),
       ink: snapshotInk,
       worker: true,
+      unavailable,
     })
     await Promise.resolve()
     await Promise.resolve()
@@ -542,10 +543,65 @@ describe('raster sufficiency and the vector branch', () => {
         image: new Blob(['snapshot']),
         ink: snapshotInk,
         worker: true,
+        unavailable: [],
       })
       await Promise.resolve()
       await Promise.resolve()
     })
     expect(clients.search).not.toHaveBeenCalled()
+  })
+})
+
+describe('a stored import blob that is gone', () => {
+  /** The hook composes the warning; the gallery's own note must survive the append. */
+  async function succeedWithWarning(run: Run, warning: string | null) {
+    await act(async () => {
+      run.response.resolve({
+        revision: run.ownership.revision,
+        generation: run.ownership.generation,
+        mode: 'confident',
+        interpretation: `run ${run.ownership.token}`,
+        groups: [],
+        warning,
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  it('searches the surviving ink and says what was left out on the warning channel', async () => {
+    await mounted()
+    const run = lastRun()
+    await snapshot(run, ['raster-gone'])
+    // A degraded input, never a veto: the request still goes out.
+    expect(clients.search).toHaveBeenCalledOnce()
+    await succeedWithWarning(run, 'gallery-side note')
+    const warning = useSearchStore.getState().response?.warning
+    expect(warning).toContain('gallery-side note')
+    expect(warning).toContain('One imported artwork is no longer stored on this device')
+    // The omission is not a degradations kind: that list is the gallery's
+    // attestation about a query it ranked, and it knows nothing about this
+    // device's storage.
+    expect(useSearchStore.getState().response?.degradations ?? []).not.toContainEqual(
+      expect.objectContaining({ detail: expect.stringContaining('no longer stored') }),
+    )
+  })
+
+  it('keeps the omission visible next to a blank-canvas verdict that never reaches the gallery', async () => {
+    snapshotInk = BLANK
+    await mounted()
+    await snapshot(lastRun(), ['raster-gone'])
+    expect(clients.search).not.toHaveBeenCalled()
+    const response = useSearchStore.getState().response
+    expect(response?.mode).toBe('empty')
+    expect(response?.warning).toContain('snapshot carries no ink')
+    expect(response?.warning).toContain('One imported artwork is no longer stored on this device')
+  })
+
+  it('mentions nothing when every referenced import resolved', async () => {
+    await mounted()
+    const run = lastRun()
+    await succeed(run)
+    expect(useSearchStore.getState().response?.warning ?? null).toBeNull()
   })
 })
