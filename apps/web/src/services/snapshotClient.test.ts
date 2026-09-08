@@ -98,8 +98,8 @@ function echoOf(data: Record<string, unknown>, id: string): Reply {
   }
 }
 
-const resolveRasterBitmapsMock = vi.fn<() => Promise<Array<{ id: string; bitmap: ImageBitmap }>>>()
-const rasterizeMock = vi.fn<() => Promise<CanvasImageSource>>()
+const resolveRasterBitmapsMock = vi.fn<() => Promise<{ bitmaps: Array<{ id: string; bitmap: ImageBitmap }>; unavailable: string[] }>>()
+const rasterizeMock = vi.fn<() => Promise<{ canvas: HTMLCanvasElement; unavailable: string[] }>>()
 
 vi.mock('./rasterAssets', () => ({
   resolveRasterBitmaps: () => resolveRasterBitmapsMock(),
@@ -109,13 +109,13 @@ vi.mock('./rasterAssets', () => ({
 vi.mock('../lib/exportDocument', () => ({
   rasterizeDocument: () => rasterizeMock(),
 }))
-const rasterizeImagesMock = vi.fn<() => Promise<Map<string, CanvasImageSource>>>()
+const rasterizeImagesMock = vi.fn<() => Promise<{ images: Map<string, CanvasImageSource>; unavailable: string[] }>>()
 
 beforeEach(() => {
   FakeWorker.instances = []
-  resolveRasterBitmapsMock.mockReset().mockResolvedValue([])
-  rasterizeMock.mockReset().mockImplementation(async () => ({ width: 2048, height: 2048 }) as unknown as CanvasImageSource)
-  rasterizeImagesMock.mockReset().mockResolvedValue(new Map())
+  resolveRasterBitmapsMock.mockReset().mockResolvedValue({ bitmaps: [], unavailable: [] })
+  rasterizeMock.mockReset().mockImplementation(async () => ({ canvas: { width: 2048, height: 2048 } as unknown as HTMLCanvasElement, unavailable: [] }))
+  rasterizeImagesMock.mockReset().mockResolvedValue({ images: new Map(), unavailable: [] })
   vi.resetModules()
 })
 
@@ -250,7 +250,7 @@ describe('snapshot cancellation', () => {
     ]
     resolveRasterBitmapsMock.mockImplementation(async () => {
       await gate.promise
-      return assets
+      return { bitmaps: assets, unavailable: [] }
     })
     const { prepareSnapshot } = await loadClient()
     const controller = new AbortController()
@@ -264,7 +264,7 @@ describe('snapshot cancellation', () => {
 
   it('transfers the decoded bitmaps to the worker for rendering', async () => {
     const bitmap = fakeBitmap()
-    resolveRasterBitmapsMock.mockResolvedValue([{ id: 'asset-a', bitmap }])
+    resolveRasterBitmapsMock.mockResolvedValue({ bitmaps: [{ id: 'asset-a', bitmap }], unavailable: [] })
     const { prepareSnapshot, worker } = await loadClient()
     const pending = prepareSnapshot({ ...document_, revision: 9 }, ownership(), new AbortController().signal)
     await flush()
@@ -286,5 +286,34 @@ describe('snapshot measurement without a 2D surface', () => {
     expect(snapshot.ink).toBeNull()
     // `revision` is the document's own, not the caller's copy of it.
     expect(snapshot).toMatchObject({ token: 42, documentId: 'doc-a', revision: 9, generation: 3 })
+  })
+})
+
+describe('stored import blobs that are gone', () => {
+  it('sends only surviving bitmaps to the worker and carries the omission on the snapshot', async () => {
+    const bitmap = fakeBitmap()
+    resolveRasterBitmapsMock.mockResolvedValue({
+      bitmaps: [{ id: 'raster-kept', bitmap }],
+      unavailable: ['raster-gone'],
+    })
+    const { prepareSnapshot, worker } = await loadClient()
+    const pending = prepareSnapshot(document_, ownership(), new AbortController().signal)
+    await flush()
+    const instance = worker()
+    // The search renders the surviving ink; the gap is data, not a failure.
+    expect(instance.render?.rasterAssets).toEqual([{ id: 'raster-kept', bitmap }])
+    instance.reply(echoOf(instance.render!, instance.render!.id as string))
+    await expect(pending).resolves.toMatchObject({ unavailable: ['raster-gone'] })
+  })
+
+  it('carries the omission through the main-thread fallback too', async () => {
+    rasterizeMock.mockResolvedValue({
+      canvas: { width: 2048, height: 2048 } as unknown as HTMLCanvasElement,
+      unavailable: ['raster-gone'],
+    })
+    const { prepareSnapshot } = await loadClient(false)
+    const snapshot = await prepareSnapshot(document_, ownership(), new AbortController().signal)
+    expect(snapshot.worker).toBe(false)
+    expect(snapshot.unavailable).toEqual(['raster-gone'])
   })
 })

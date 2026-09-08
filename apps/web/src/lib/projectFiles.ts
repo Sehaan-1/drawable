@@ -9,7 +9,7 @@ import {
   type PreparedImport,
   type StoredRasterAsset,
 } from './types'
-import { loadReferencedRasterAssets } from '../services/rasterAssets'
+import { loadReferencedRasterAssets, unavailableArtworkSummary } from '../services/rasterAssets'
 
 export const PROJECT_EXTENSION = '.drawable'
 export const PROJECT_MIME = 'application/vnd.drawable.project+json'
@@ -205,11 +205,11 @@ async function validateEmbeddedAssets(rawAssets: unknown, document: ReturnType<t
   return assets
 }
 
-async function parseProject(file: File): Promise<PreparedImport> {
-  if (file.size > MAX_PROJECT_BYTES) throw new Error('Drawable projects must be 50 MiB or smaller.')
+async function parseProjectSource(source: string, byteLength: number): Promise<PreparedImport> {
+  if (byteLength > MAX_PROJECT_BYTES) throw new Error('Drawable projects must be 50 MiB or smaller.')
   let raw: unknown
   try {
-    raw = JSON.parse(await file.text())
+    raw = JSON.parse(source)
   } catch {
     throw new Error('This is not a valid drawable project file.')
   }
@@ -229,6 +229,10 @@ async function parseProject(file: File): Promise<PreparedImport> {
     ...validated,
   }
   return { document, activeLayerId, assets, sourceKind: 'project' }
+}
+
+async function parseProject(file: File): Promise<PreparedImport> {
+  return parseProjectSource(await file.text(), file.size)
 }
 
 function validateSvg(source: string) {
@@ -331,9 +335,60 @@ export async function prepareImport(file: File) {
   throw new Error('Choose a .drawable, PNG, or SVG file.')
 }
 
-export async function exportDrawableProject(document: DrawingDocument, activeLayerId: string) {
-  const storedAssets = await loadReferencedRasterAssets(document)
-  const assets: EmbeddedProjectAsset[] = await Promise.all(storedAssets.map(async (asset) => ({
+/**
+ * Raised when a project export would bake a dangling reference into an
+ * "editable" file. The drawing references artwork this device no longer
+ * stores; a `.drawable` written without it would be rejected by the importer
+ * itself, so the export refuses and names the ids. The caller may still opt
+ * in to omission explicitly (see `ProjectExportOptions.omitUnavailable`).
+ */
+export class MissingProjectArtworkError extends Error {
+  readonly unavailable: string[]
+
+  constructor(unavailable: string[]) {
+    super(
+      `${unavailableArtworkSummary(unavailable)} (${unavailable.join(', ')}). ` +
+        'An editable project could not be reopened without it, so nothing was saved. ' +
+        'Export a copy without the missing artwork, or cancel.',
+    )
+    this.name = 'MissingProjectArtworkError'
+    this.unavailable = unavailable
+  }
+}
+
+export interface ProjectExportOptions {
+  /**
+   * Drop raster operations whose stored artwork is gone instead of refusing.
+   * This is a destructive choice about an editable file — silently removable
+   * artwork does not round-trip back onto the canvas — so it is never the
+   * default and never inferred; the caller must pass it after telling the
+   * user.
+   */
+  omitUnavailable?: boolean
+}
+
+export interface ProjectExportResult {
+  /** Imports deliberately left out; non-empty only when the caller opted in to omission. */
+  omitted: string[]
+}
+
+export async function exportDrawableProject(document: DrawingDocument, activeLayerId: string, options: ProjectExportOptions = {}): Promise<ProjectExportResult> {
+  // 'all' scope: a `.drawable` is the durable form, so hidden layers' artwork
+  // belongs in the file just as much as the visible ink's.
+  const { assets: storedAssets, unavailable } = await loadReferencedRasterAssets(document, 'all')
+  if (unavailable.length && !options.omitUnavailable) throw new MissingProjectArtworkError(unavailable)
+  const missing = new Set(unavailable)
+  // Omitting from a project means dropping both sides. Removing a dead raster
+  // op leaves its blob unreferenced, which the importer rejects just as
+  // loudly as a dangling reference — so ops and orphaned assets go in one
+  // pass.
+  const layers = structuredClone(document.layers).map((layer) => ({
+    ...layer,
+    operations: layer.operations.filter((operation) => operation.kind !== 'raster' || !missing.has(operation.assetId)),
+  }))
+  const referenced = new Set(layers.flatMap((layer) => layer.operations.flatMap((operation) => operation.kind === 'raster' ? [operation.assetId] : [])))
+  const keptAssets = storedAssets.filter((asset) => referenced.has(asset.id))
+  const assets: EmbeddedProjectAsset[] = await Promise.all(keptAssets.map(async (asset) => ({
     id: asset.id,
     mimeType: asset.mimeType,
     width: asset.width,
@@ -349,7 +404,7 @@ export async function exportDrawableProject(document: DrawingDocument, activeLay
     exportedAt: new Date().toISOString(),
     document: {
       title: document.title,
-      layers: structuredClone(document.layers),
+      layers,
       trace: {
         assetId: document.trace.assetId,
         visible: document.trace.visible,
@@ -360,7 +415,15 @@ export async function exportDrawableProject(document: DrawingDocument, activeLay
     activeLayerId,
     assets,
   }
-  const blob = new Blob([JSON.stringify(project)], { type: PROJECT_MIME })
+  const serialized = JSON.stringify(project)
+  const blob = new Blob([serialized], { type: PROJECT_MIME })
   if (blob.size > MAX_PROJECT_BYTES) throw new Error('This project is larger than the 50 MiB project limit.')
+  if (unavailable.length) {
+    // Don't trust the pruned shape: the file only downloads once the importer
+    // itself has accepted it back — ops and embedded assets consistent,
+    // checksums verified, nothing dangling and nothing orphaned.
+    await parseProjectSource(serialized, blob.size)
+  }
   download(blob, `${safeTitle(document.title)}${PROJECT_EXTENSION}`)
+  return { omitted: unavailable.length ? [...unavailable] : [] }
 }

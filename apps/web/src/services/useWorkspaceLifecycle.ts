@@ -9,6 +9,7 @@ import { fixtureServices, type FrontendServices } from './frontendServices'
 import { cleanupExpiredImports, loadDocument, materializeStagedImport, saveDocument, type LoadedDocument } from './persistence'
 import { useServiceStore } from './serviceRegistry'
 import { prepareSnapshot, type PreparedSnapshot } from './snapshotClient'
+import { unavailableArtworkSummary } from './rasterAssets'
 import { acquireDocumentLease, type DocumentLease } from './documentLock'
 
 /** Idle time between a finished stroke and the next snapshot+search. */
@@ -56,6 +57,14 @@ async function runSearch({ document, ownership, services, sessionId, textHint, s
   try {
     const snapshot = await prepareSnapshot(document, ownership, signal)
     if (!answers(snapshot, ownership)) return
+    // An import whose stored blob is gone is a degraded input, never a veto:
+    // the search runs on the surviving ink and the omission travels on the
+    // response's `warning`. It deliberately does *not* become a `degradations`
+    // kind — that list is the gallery's attestation about a query it ranked,
+    // and the gallery knows nothing about this device's storage.
+    const omission = snapshot.unavailable.length
+      ? `${unavailableArtworkSummary(snapshot.unavailable)}; the search used the surviving visible marks.`
+      : null
     const counts = documentCounts(document.layers)
     const sequence = buildStrokeSequence(document.layers)
     // An empty vector payload is not sent at all: `stroke_status` has to mean
@@ -70,6 +79,8 @@ async function runSearch({ document, ownership, services, sessionId, textHint, s
     // call, so anything with ink in it is still sent.
     if (rasterSufficiency(snapshot.ink).blank) {
       const degradations = inputDegradations(snapshot.ink, counts.strokeCount, counts.pointCount, strokes ? counts.pointCount : undefined)
+      const details = degradations.map((item) => item.detail)
+      if (omission) details.push(omission)
       store.resolve(ownership, {
         revision: ownership.revision,
         generation: ownership.generation,
@@ -77,7 +88,7 @@ async function runSearch({ document, ownership, services, sessionId, textHint, s
         interpretation: 'Blank canvas',
         groups: [],
         degradations,
-        warning: degradations.map((item) => item.detail).join('; ') || null,
+        warning: details.join('; ') || null,
         countsApproximate: strokes === undefined,
         strokeStatus: strokes ? 'present' : 'absent',
       })
@@ -96,7 +107,9 @@ async function runSearch({ document, ownership, services, sessionId, textHint, s
       image: snapshot.image,
       strokes,
     }, signal)
-    store.resolve(ownership, response)
+    store.resolve(ownership, omission
+      ? { ...response, warning: [response.warning, omission].filter((part): part is string => Boolean(part)).join('; ') }
+      : response)
   } catch (error) {
     // An abort is the expected end of a superseded request; the effect cleanup
     // has already settled loading for it.

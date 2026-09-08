@@ -15,12 +15,12 @@ function LayerThumbnail({ layer }: { layer: DrawingLayer }) {
     const context = canvas?.getContext('2d')
     if (!canvas || !context) return
     let active = true
-    resolveRasterImages(useDocumentStore.getState().document).then((assets) => {
+    resolveRasterImages(useDocumentStore.getState().document).then(({ images }) => {
       if (!active) return
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.save()
       context.scale(canvas.width / 2048, canvas.height / 2048)
-      for (const operation of layer.operations) renderDrawingOperation(context, operation, assets)
+      for (const operation of layer.operations) renderDrawingOperation(context, operation, images)
       context.restore()
     }).catch(() => undefined)
     return () => { active = false }

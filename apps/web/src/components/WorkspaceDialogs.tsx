@@ -6,7 +6,8 @@ import { useUiStore } from '../state/uiStore'
 import { useDocumentStore } from '../state/documentStore'
 import { exportPng, exportSvg } from '../lib/exportDocument'
 import type { DrawingDocument, ThemeChoice } from '../lib/types'
-import { exportDrawableProject, prepareImport } from '../lib/projectFiles'
+import { exportDrawableProject, MissingProjectArtworkError, prepareImport } from '../lib/projectFiles'
+import { unavailableArtworkSummary } from '../services/rasterAssets'
 import { stageImport } from '../services/persistence'
 
 export function WorkspaceDialogs() {
@@ -29,16 +30,35 @@ export function WorkspaceDialogs() {
   const document = useDocumentStore((state) => state.document)
   const activeLayerId = useDocumentStore((state) => state.activeLayerId)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [exportNotice, setExportNotice] = useState<string | null>(null)
+  // Asset ids a refused project export named — present only while the dialog
+  // offers their explicit omission.
+  const [missingArtwork, setMissingArtwork] = useState<string[] | null>(null)
 
-  const runExport = async (action: () => Promise<void>) => {
+  /**
+   * Export actions resolve with the ids of imported artwork the file was
+   * saved *without*. A clean export closes the dialog; an omission keeps it
+   * open so the gap can never be invisible.
+   */
+  const runExport = async (action: () => Promise<string[]>, label: string) => {
     setExportError(null)
+    setExportNotice(null)
+    setMissingArtwork(null)
     try {
-      await action()
-      setExportOpen(false)
+      const unavailable = await action()
+      if (unavailable.length) {
+        setExportNotice(`${unavailableArtworkSummary(unavailable)}; the ${label} was saved without ${unavailable.length === 1 ? 'it' : 'them'}.`)
+      } else {
+        setExportOpen(false)
+      }
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'The drawing could not be exported.')
+      if (error instanceof MissingProjectArtworkError) setMissingArtwork(error.unavailable)
+      else setExportError(error instanceof Error ? error.message : 'The drawing could not be exported.')
     }
   }
+
+  const exportProject = (omitUnavailable: boolean) =>
+    runExport(async () => (await exportDrawableProject(document, activeLayerId, { omitUnavailable })).omitted, 'project file')
 
   return (
     <>
@@ -55,13 +75,26 @@ export function WorkspaceDialogs() {
         </div>
       </AppDialog>
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
-      <AppDialog open={exportOpen} onOpenChange={(open) => { setExportOpen(open); if (open) setExportError(null) }} title="Export drawing" description="The reference trace image is never embedded.">
+      <AppDialog open={exportOpen} onOpenChange={(open) => { setExportOpen(open); if (open) { setExportError(null); setExportNotice(null); setMissingArtwork(null) } }} title="Export drawing" description="The reference trace image is never embedded.">
         <div className="export-options">
-          <ExportOption title="drawable project · Editable" detail="Layers, strokes, and imported artwork" onClick={() => runExport(() => exportDrawableProject(document, activeLayerId))} />
-          <ExportOption title="PNG · White background" detail="2048 × 2048 raster" onClick={() => runExport(() => exportPng(document, false))} />
-          <ExportOption title="PNG · Transparent" detail="2048 × 2048 raster" onClick={() => runExport(() => exportPng(document, true))} />
-          <ExportOption title="SVG" detail="Vector strokes, imported artwork, and erase masks" onClick={() => runExport(() => exportSvg(document))} />
+          <ExportOption title="drawable project · Editable" detail="Layers, strokes, and imported artwork" onClick={() => exportProject(false)} />
+          <ExportOption title="PNG · White background" detail="2048 × 2048 raster" onClick={() => runExport(() => exportPng(document, false), 'PNG')} />
+          <ExportOption title="PNG · Transparent" detail="2048 × 2048 raster" onClick={() => runExport(() => exportPng(document, true), 'PNG')} />
+          <ExportOption title="SVG" detail="Vector strokes, imported artwork, and erase masks" onClick={() => runExport(() => exportSvg(document), 'SVG')} />
+          {missingArtwork ? (
+            <div className="export-missing" role="alert">
+              <p>
+                {unavailableArtworkSummary(missingArtwork)} ({missingArtwork.join(', ')}). An editable
+                project without it could not be reopened, so nothing was saved. You can export a copy
+                without the missing artwork instead — that choice cannot be undone in the exported file.
+              </p>
+              <Button className="export-omit" onClick={() => void exportProject(true)}>
+                <Download size={16} />Export project without missing artwork
+              </Button>
+            </div>
+          ) : null}
           {exportError ? <p className="dialog-error" role="alert">{exportError}</p> : null}
+          {exportNotice ? <p className="dialog-notice" role="status">{exportNotice}</p> : null}
         </div>
       </AppDialog>
       <AppDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} title="Keyboard shortcuts">

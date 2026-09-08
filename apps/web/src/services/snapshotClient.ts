@@ -13,6 +13,10 @@ import { resolveRasterBitmaps } from './rasterAssets'
  * `ink` is the measurement the sufficiency rule is based on (see
  * `lib/rasterInk.ts`); `null` means the environment gave us no readable pixels,
  * which is deliberately *not* the same as "blank".
+ *
+ * `unavailable` names imports whose stored blob is gone: they are not in the
+ * rendered snapshot, so a search on this snapshot is a search of the surviving
+ * ink, and the omission belongs on the response's `warning`.
  */
 export interface PreparedSnapshot {
   token: number
@@ -22,10 +26,13 @@ export interface PreparedSnapshot {
   image: Blob
   ink: RasterInk | null
   worker: boolean
+  unavailable: string[]
 }
 
 interface PendingSnapshot {
-  resolve: (value: PreparedSnapshot) => void
+  // The worker echoes identity, image, and ink; the *requester's* side adds
+  // `unavailable`, which only it knows (it resolved the bitmaps).
+  resolve: (value: Omit<PreparedSnapshot, 'unavailable'>) => void
   reject: (reason: unknown) => void
 }
 
@@ -84,13 +91,13 @@ function contextInk(context: CanvasRenderingContext2D | OffscreenCanvasRendering
 const SNAPSHOT_SIZE = 512
 
 async function mainThreadFallback(document: DrawingDocument, identity: SnapshotIdentity): Promise<PreparedSnapshot> {
-  const source = await rasterizeDocument(document, false)
+  const { canvas: source, unavailable } = await rasterizeDocument(document, false)
   const target = globalThis.document.createElement('canvas')
   target.width = SNAPSHOT_SIZE
   target.height = SNAPSHOT_SIZE
   const context = target.getContext('2d')
   context?.drawImage(source, 0, 0, SNAPSHOT_SIZE, SNAPSHOT_SIZE)
-  return { ...identity, image: await canvasBlob(target), ink: contextInk(context, SNAPSHOT_SIZE, SNAPSHOT_SIZE), worker: false }
+  return { ...identity, image: await canvasBlob(target), ink: contextInk(context, SNAPSHOT_SIZE, SNAPSHOT_SIZE), worker: false, unavailable }
 }
 
 /** Tell the worker to drop a request so a cancelled snapshot stops costing work. */
@@ -115,9 +122,11 @@ export async function prepareSnapshot(document: DrawingDocument, ownership: Sear
   }
   if (signal.aborted) throw new DOMException('Snapshot cancelled', 'AbortError')
   if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return mainThreadFallback(document, identity)
-  const rasterAssets = await resolveRasterBitmaps(document)
+  // 'visible' scope: the snapshot is of the visible ink, so a hidden layer's
+  // missing blob is not an omission from this search.
+  const { bitmaps, unavailable } = await resolveRasterBitmaps(document, 'visible')
   if (signal.aborted) {
-    for (const asset of rasterAssets) asset.bitmap.close()
+    for (const asset of bitmaps) asset.bitmap.close()
     throw new DOMException('Snapshot cancelled', 'AbortError')
   }
   const id = crypto.randomUUID()
@@ -133,9 +142,9 @@ export async function prepareSnapshot(document: DrawingDocument, ownership: Sear
     }
     signal.addEventListener('abort', onAbort, { once: true })
     pending.set(id, {
-      resolve: (value) => { signal.removeEventListener('abort', onAbort); resolve(value) },
+      resolve: (value) => { signal.removeEventListener('abort', onAbort); resolve({ ...value, unavailable }) },
       reject: (error) => { signal.removeEventListener('abort', onAbort); reject(error) },
     })
-    snapshotWorker().postMessage({ id, ...identity, document, rasterAssets }, rasterAssets.map((asset) => asset.bitmap))
+    snapshotWorker().postMessage({ id, ...identity, document, rasterAssets: bitmaps }, bitmaps.map((asset) => asset.bitmap))
   })
 }
