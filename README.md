@@ -70,6 +70,15 @@ scripts/             setup, checks, contract export, smoke test, dev runner
 data/                Local datasets, indexes, models, SQLite — never committed
 ```
 
+### Contracts (schema v2)
+
+The dataset manifest, API wire, and their v1→v2 migration are frozen and
+documented in [`docs/contracts/`](docs/contracts/):
+
+- [manifest-v2.md](docs/contracts/manifest-v2.md) — field/invariant matrix (scopes, splits, permissions, SFW, review, identity)
+- [api-contract.md](docs/contracts/api-contract.md) — search/events/curation wire, degradations, structured errors, pins
+- [migration-v1-to-v2.md](docs/contracts/migration-v1-to-v2.md) — full field mapping; no old asset gains permission or human approval
+
 ### API surface (`/api/v1`)
 
 | Endpoint | Milestone 1 |
@@ -77,7 +86,7 @@ data/                Local datasets, indexes, models, SQLite — never committed
 | `GET /health` | readiness, CUDA/GPU, model + dataset/index versions, gallery size, warnings |
 | `POST /search` | full multipart contract with structured `400/413/422`; unready → `503`; blank input → `200 mode=insufficient` |
 | `POST /events` · `GET/PUT /preferences` | interaction logging, Laplace-smoothed 30-day-half-life style affinity |
-| `GET /assets/{id}/thumbnail` · `/line-art` | enabled + SFW assets only; missing files auto-disable the asset |
+| `GET /assets/{id}/thumbnail` · `/line-art` | servable assets only (`is_servable`: gallery member, display grant, accepted with a quality grade, human SFW approval); a missing file is a 404 for the session, never a manifest rewrite |
 | `/curation/*` | mounted only with `LINESCOUT_CURATION_MODE=1`; progress works, the rest is 501 until Milestone 2 |
 
 Interactive docs: <http://127.0.0.1:8000/api/v1/docs>.

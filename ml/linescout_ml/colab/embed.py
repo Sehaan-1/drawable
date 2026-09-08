@@ -6,7 +6,7 @@ assets under ``indexes/<dataset_version>/<encoder_key>/``:
 ```
 indexes/2026.09.06-colab1/
   mobileclip2_s2/
-    index.json          # model card, dims, shard list, counts
+    index.json          # model card, dims, shard list, counts, artifact entries
     shard-000000.npz    # asset_ids (str) + features (float32, L2-normalised)
     shard-000001.npz
   dinov2_vits14/
@@ -17,10 +17,13 @@ Three properties matter on a free Colab tier and shaped this layout:
 
 * **Resumable.** ``existing_ids()`` reads the shard index, so a restarted
   runtime embeds only what is missing instead of re-running the whole gallery.
+  Entries are stamped with the artifact they were computed from, and a stamp
+  that no longer matches (the asset was re-extracted) does **not** count as
+  done — stale vectors are re-embedded, never reused.
 * **Sharded.** A disconnect loses at most one shard, and the index is rewritten
   atomically after each shard lands, so a partial file is never referenced.
-* **Self-describing.** ``index.json`` carries the full model card (including the
-  licence string) next to the features it produced, which is what makes an
+* **Self-describing.** ``index.json`` carries the full model card (including
+  the licence string) next to the features it produced, which is what makes an
   index buildable later without guessing which checkpoint generated it.
 
 Features come from the *line art*, not the original: that is the image the API
@@ -38,6 +41,7 @@ from pathlib import Path
 import numpy as np
 
 from linescout_ml.colab.models import MODEL_CARDS, ModelCard
+from linescout_ml.embeddings import ArtifactStamp, EmbeddingEntry, EmbeddingIndex
 
 INDEX_FILENAME = "index.json"
 SHARD_TEMPLATE = "shard-{index:06d}.npz"
@@ -71,8 +75,31 @@ def _as_int(value: object) -> int:
     return int(value) if isinstance(value, int) else 0
 
 
+def _entries_from_index(index: dict[str, object]) -> dict[str, EmbeddingEntry]:
+    """Per-asset artifact bindings recorded by :meth:`EmbeddingStore.append`."""
+    raw = index.get("entries", {})
+    if not isinstance(raw, dict):
+        return {}
+    entries: dict[str, EmbeddingEntry] = {}
+    for asset_id, value in raw.items():
+        if not isinstance(value, dict):
+            continue
+        try:
+            entries[asset_id] = EmbeddingEntry.model_validate(value)
+        except ValueError:
+            continue  # a malformed entry is treated as absent, never as valid
+    return entries
+
+
 class EmbeddingStore:
-    """Append-only feature shards plus their index."""
+    """Append-only feature shards plus their index.
+
+    Every appended entry is stamped with the artifact it was computed from
+    (``processing_revision`` + ``line_art_checksum``), implementing the frozen
+    vector-payload rule from :mod:`linescout_ml.embeddings`: a vector whose
+    artifact binding no longer matches the asset is stale, and stale means
+    re-embed — never serve.
+    """
 
     def __init__(self, root: Path, card: ModelCard) -> None:
         self.root = root
@@ -119,25 +146,51 @@ class EmbeddingStore:
             )
         return refs
 
-    def existing_ids(self) -> set[str]:
-        """Asset ids that already have a stored feature vector."""
-        ids: set[str] = set()
-        for shard in self.shards():
-            path = self.root / shard.path
-            if not path.is_file():
-                continue
-            with np.load(path, allow_pickle=False) as data:
-                stored = data["asset_ids"] if "asset_ids" in data else np.array([])
-            ids.update(str(value) for value in stored.tolist())
-        return ids
+    def load_entries(self) -> dict[str, EmbeddingEntry]:
+        """The per-asset artifact bindings recorded so far."""
+        return _entries_from_index(self._read_index())
 
-    def append(self, asset_ids: list[str], features: np.ndarray) -> ShardRef:
+    def existing_ids(self, artifacts: dict[str, ArtifactStamp] | None = None) -> set[str]:
+        """Asset ids that already have a *usable* stored feature vector.
+
+        Without ``artifacts``, every recorded id counts (legacy behaviour).
+        With it, an id only counts when its entry's artifact stamp matches the
+        current one — stale entries are re-embedded, never reused.
+        """
+        if artifacts is None:
+            ids: set[str] = set()
+            for shard in self.shards():
+                path = self.root / shard.path
+                if not path.is_file():
+                    continue
+                with np.load(path, allow_pickle=False) as data:
+                    stored = data["asset_ids"] if "asset_ids" in data else np.array([])
+                ids.update(str(value) for value in stored.tolist())
+            return ids
+        entries = self.load_entries()
+        return {
+            asset_id
+            for asset_id, stamp in artifacts.items()
+            if asset_id in entries
+            and entries[asset_id].artifact.processing_revision == stamp.processing_revision
+            and entries[asset_id].artifact.line_art_checksum == stamp.line_art_checksum
+        }
+
+    def append(
+        self,
+        asset_ids: list[str],
+        features: np.ndarray,
+        stamps: list[ArtifactStamp] | None = None,
+    ) -> ShardRef:
         """Write one shard and extend the index. Both writes are atomic."""
         if len(asset_ids) != features.shape[0]:
             msg = f"{len(asset_ids)} ids but features shaped {features.shape}"
             raise EmbeddingStoreError(msg)
         if features.ndim != 2:
             msg = f"features must be 2-D, got shape {features.shape}"
+            raise EmbeddingStoreError(msg)
+        if stamps is not None and len(stamps) != len(asset_ids):
+            msg = f"{len(asset_ids)} ids but {len(stamps)} artifact stamps"
             raise EmbeddingStoreError(msg)
 
         dim = int(features.shape[1])
@@ -160,6 +213,10 @@ class EmbeddingStore:
         index = self._read_index()
         shards = [{"path": shard.path, "count": shard.count} for shard in existing]
         shards.append({"path": name, "count": len(asset_ids)})
+        entries = _entries_from_index(index)
+        if stamps is not None:
+            for asset_id, stamp in zip(asset_ids, stamps, strict=True):
+                entries[asset_id] = EmbeddingEntry(artifact=stamp, shard=name)
         payload = {
             "schema_version": 1,
             "spec": {
@@ -179,6 +236,9 @@ class EmbeddingStore:
             "created_at": index.get("created_at") or _now(),
             "updated_at": _now(),
             "shards": shards,
+            "entries": {
+                asset_id: entry.model_dump() for asset_id, entry in sorted(entries.items())
+            },
         }
         _atomic_write_text(self.index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return ShardRef(path=name, count=len(asset_ids))
@@ -202,6 +262,10 @@ class EmbeddingStore:
             msg = f"shards hold {features.shape[0]} rows for {len(ids)} ids"
             raise EmbeddingStoreError(msg)
         return ids, features
+
+    def embedding_index(self) -> EmbeddingIndex:
+        """The shard index as the contract's :class:`EmbeddingIndex`."""
+        return EmbeddingIndex(embedder=self.card.key, entries=self.load_entries())
 
 
 def chunked(items: list[str], size: int) -> list[list[str]]:

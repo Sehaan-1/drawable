@@ -85,9 +85,11 @@ describe('writeLabel', () => {
       asset_id: 'a',
       expected_review_state: 'unreviewed',
       decision: 'keep',
+      primary_scope: 'eye',
+      secondary_scopes: [],
+      blockers: [],
       quality: 3,
-      malformed_anatomy: false,
-      poor_extraction: false,
+      sfw_safe: true,
     })
     const [url, init] = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] ?? []
     expect(url).toBe('/api/v1/curation/labels')

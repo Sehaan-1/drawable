@@ -1,7 +1,49 @@
 import { create } from 'zustand'
 import type { ReferenceAsset, SearchResponse } from '../lib/types'
 
+/**
+ * Pinned references are durable *local application state*, fully independent
+ * of learning: the API's preference profile never sees them. The fixture
+ * gallery and the live gallery use separate namespaces so a pin made against
+ * synthetic fixtures can never leak into a real-gallery session, and the
+ * `:version` suffix lets the storage format evolve without a risky rewrite.
+ */
+
+export type GalleryKind = 'fixture' | 'live'
+
+export const PINS_VERSION = 1
+const LEGACY_PINS_KEY = 'drawable-fixture-pins'
+
+export function pinsKey(kind: GalleryKind): string {
+  return `drawable-pins:${kind}:${PINS_VERSION}`
+}
+
+function readPins(kind: GalleryKind): ReferenceAsset[] {
+  const key = pinsKey(kind)
+  if (localStorage.getItem(key) === null && kind === 'fixture') {
+    // One-time migration: the pre-v2 app stored fixture pins under a single
+    // un-namespaced key, so they can only ever belong to the fixture
+    // namespace — never to whichever gallery is read first.
+    const legacy = localStorage.getItem(LEGACY_PINS_KEY)
+    if (legacy !== null) {
+      localStorage.setItem(key, legacy)
+      localStorage.removeItem(LEGACY_PINS_KEY)
+    }
+  }
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? '[]') as ReferenceAsset[]
+  } catch {
+    return []
+  }
+}
+
+function writePins(kind: GalleryKind, pinned: ReferenceAsset[]): void {
+  localStorage.setItem(pinsKey(kind), JSON.stringify(pinned))
+}
+
 interface SearchState {
+  /** Which gallery namespace pins are read from / written to. */
+  gallery: GalleryKind
   generation: number
   drawing: boolean
   loading: boolean
@@ -11,6 +53,8 @@ interface SearchState {
   selectedStyle: string | null
   selectedAsset: ReferenceAsset | null
   pinned: ReferenceAsset[]
+  /** Switch the pin namespace and reload pins for that gallery. */
+  setGallery: (kind: GalleryKind) => void
   invalidate: (drawing?: boolean) => number
   setDrawing: (drawing: boolean) => void
   setLoading: (loading: boolean) => void
@@ -22,12 +66,8 @@ interface SearchState {
   togglePin: (asset: ReferenceAsset) => void
 }
 
-function readPins(): ReferenceAsset[] {
-  try { return JSON.parse(localStorage.getItem('drawable-fixture-pins') ?? '[]') as ReferenceAsset[] }
-  catch { return [] }
-}
-
 export const useSearchStore = create<SearchState>((set, get) => ({
+  gallery: 'fixture',
   generation: 0,
   drawing: false,
   loading: false,
@@ -36,7 +76,11 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   textHint: '',
   selectedStyle: null,
   selectedAsset: null,
-  pinned: readPins(),
+  pinned: readPins('fixture'),
+  setGallery: (kind) => {
+    if (get().gallery === kind) return
+    set({ gallery: kind, pinned: readPins(kind) })
+  },
   invalidate: (drawing = get().drawing) => {
     const generation = get().generation + 1
     set({ generation, drawing })
@@ -52,7 +96,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   togglePin: (asset) => set((state) => {
     const exists = state.pinned.some((item) => item.id === asset.id)
     const pinned = exists ? state.pinned.filter((item) => item.id !== asset.id) : [asset, ...state.pinned]
-    localStorage.setItem('drawable-fixture-pins', JSON.stringify(pinned))
+    writePins(state.gallery, pinned)
     return { pinned }
   }),
 }))

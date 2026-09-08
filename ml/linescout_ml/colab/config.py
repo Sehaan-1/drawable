@@ -30,7 +30,12 @@ from pydantic import (
     model_validator,
 )
 
-from linescout_ml.taxonomy import LineArtOrigin, PrimaryStyle, ScopeLabel
+from linescout_ml.taxonomy import (
+    LineArtOrigin,
+    PermissionBasis,
+    PrimaryStyle,
+    ScopeLabel,
+)
 
 #: Line-art extractors we support. Both are served by ``controlnet_aux`` from
 #: Hugging Face-hosted weights, so no Google Drive checkpoint hunting:
@@ -58,18 +63,23 @@ Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 
 
 class SplitFractions(BaseModel):
-    """Share of *source works* assigned to each split. Must total 1.0."""
+    """Share of *source works* assigned to each learning split. Must total 1.0.
+
+    ``unassigned`` works get ``learning_split=none`` (no training assignment)
+    while remaining gallery candidates — the v2 replacement for v1's
+    ``gallery_only`` split. The default keeps the 70/15/15 learning policy.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     train: Annotated[float, Field(ge=0.0, le=1.0)] = 0.70
     validation: Annotated[float, Field(ge=0.0, le=1.0)] = 0.15
     test: Annotated[float, Field(ge=0.0, le=1.0)] = 0.15
-    gallery_only: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    unassigned: Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
 
     @model_validator(mode="after")
     def _sums_to_one(self) -> Self:
-        total = self.train + self.validation + self.test + self.gallery_only
+        total = self.train + self.validation + self.test + self.unassigned
         if abs(total - 1.0) > 1e-6:
             msg = f"split fractions must sum to 1.0, got {total:.4f}"
             raise ValueError(msg)
@@ -77,7 +87,14 @@ class SplitFractions(BaseModel):
 
 
 class SourceSpec(BaseModel):
-    """One raw dataset directory and the provenance claims attached to it."""
+    """One raw dataset directory and the provenance claims attached to it.
+
+    Permission fields follow the frozen v2 contract: the operator records what
+    the source's terms actually permit. Every use defaults to **denied** and
+    ``basis`` defaults to ``unknown`` — unknown permission grants nothing, so
+    a source with unverified terms ingests assets that are not servable and
+    not trainable until the permission decision is recorded.
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -87,6 +104,26 @@ class SourceSpec(BaseModel):
     root: Path
     #: Licence identifier recorded verbatim in the manifest. Never defaulted.
     license_id: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+
+    # ------------------------------------------------------------------
+    # Permission provenance (v2). Uses stay denied until proven otherwise.
+    # ------------------------------------------------------------------
+    permission_basis: PermissionBasis = PermissionBasis.UNKNOWN
+    permission_url: Annotated[str, StringConstraints(max_length=2048)] | None = None
+    attribution: Annotated[str, StringConstraints(max_length=256)] | None = None
+    attribution_required: bool = False
+    allowed_display: bool = False
+    allowed_training: bool = False
+    allowed_trace: bool = False
+
+    #: Artist identity as declared by the source, when the whole source
+    #: shares one artist. ``None`` = unknown — never invented.
+    default_artist_id: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
+
+    #: How the leakage group is derived. ``work`` (default) keeps the
+    #: one-work-one-split rule; ``artist`` groups by artist when known;
+    #: ``source`` puts the whole source in one group (maximum protection).
+    leakage_grouping: Literal["work", "artist", "source"] = "work"
 
     # Labels written before human curation. The curation UI is expected to
     # correct both; they only have to be valid to pass manifest validation.
@@ -127,6 +164,27 @@ class SourceSpec(BaseModel):
             raise ValueError(msg)
         if ScopeLabel.UNKNOWN in self.default_scopes:
             msg = "'unknown' is a query-only scope and cannot be stored on an asset"
+            raise ValueError(msg)
+        # Uses require a known permission basis; trace requires display.
+        if self.permission_basis is PermissionBasis.UNKNOWN and (
+            self.allowed_display or self.allowed_training or self.allowed_trace
+        ):
+            msg = (
+                f"source {self.name!r} claims allowed uses with an unknown permission "
+                "basis; record the basis (and where it is documented) first"
+            )
+            raise ValueError(msg)
+        if self.allowed_trace and not self.allowed_display:
+            msg = f"source {self.name!r}: trace use requires display use"
+            raise ValueError(msg)
+        if self.attribution_required and not self.attribution:
+            msg = f"source {self.name!r}: attribution_required needs an attribution line"
+            raise ValueError(msg)
+        if self.leakage_grouping == "artist" and self.default_artist_id is None:
+            msg = (
+                f"source {self.name!r}: leakage_grouping='artist' needs a "
+                "default_artist_id; falling back to work grouping is not silent"
+            )
             raise ValueError(msg)
         return self
 
@@ -217,6 +275,10 @@ class PipelineConfig(BaseModel):
 
     #: Recorded on every asset so a rebuild is attributable.
     pipeline_version: Annotated[str, StringConstraints(min_length=1, max_length=32)] = "colab-m2-1"
+    #: Version of the labeling contract (prompt sets, models, taxonomy) behind
+    #: the automated labels. Bump it whenever the labeler changes; automated
+    #: labels from a different version are stale, human decisions are not.
+    label_version: Annotated[str, StringConstraints(min_length=1, max_length=32)] = "auto-1"
 
     # Reproducibility. Everything here is *recorded* from the runtime rather than
     # assumed: the notebook fills in the git facts after verifying HEAD, and the

@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from linescout_ml import colab
 from linescout_ml.colab import read_manifest, repro
+from linescout_ml.manifest import is_servable
 
 NOTEBOOK_PATH = Path(__file__).resolve().parents[1] / "colab" / "linescout_gpu_pipeline.ipynb"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -431,7 +432,7 @@ def test_the_dry_run_cell_executes_end_to_end(tmp_path: Path) -> None:
         for relative in (record.original_path, record.line_art_path, record.thumbnail_path):
             assert relative in names, f"{relative} is missing from the export zip"
         assert record.review.state.value == "unreviewed"
-        assert record.enabled is False
+        assert is_servable(record) is False
 
 
 def test_dry_run_cell_output_matches_the_documented_claims(tmp_path: Path) -> None:
@@ -763,3 +764,61 @@ def test_the_configuration_hints_only_name_values_the_model_accepts() -> None:
     assert re.search(r'"sfw_method":.*#.*manual', config, re.S), (
         "the manual option went undocumented"
     )
+
+
+# --------------------------------------------------- the merged-package surface
+#
+# A notebook cell that references a name the package no longer exports is invisible to
+# every check above: the cell compiles, the module imports, and the only way to find it
+# is to run a forty-minute GPU session. These two assertions read like lints and are
+# not — they are the reason a contract change in `linescout_ml` cannot silently strand
+# the Colab entry point.
+
+
+def _cells_with_objects() -> dict[str, object]:
+    """Live objects for the globals the cells reach into."""
+    from linescout_ml.colab import PipelineConfig, PipelineRunner, preset_source
+
+    config = PipelineConfig(
+        dataset_version="2026.09.08-notebooktest",
+        output_root=Path("/tmp/linescout-notebook-surface/gallery"),
+        sources=[
+            preset_source(
+                "synthetic", root=Path("/tmp/linescout-notebook-surface/src"), license_id="x"
+            )
+        ],
+    )
+    return {
+        "MANIFEST": read_manifest(REPO_ROOT / "ml" / "fixtures" / "synthetic" / "manifest.json"),
+        "CONFIG": config,
+        "RUNNER": PipelineRunner(config),
+    }
+
+
+def test_the_cells_touch_no_attribute_the_package_no_longer_exports() -> None:
+    objects = _cells_with_objects()
+    code = "\n".join(code_sources())
+    missing = [
+        f"{name}.{attribute}"
+        for name, obj in objects.items()
+        for attribute in sorted({*re.findall(rf"\b{name}\.([a-zA-Z_]\w*)", code)})
+        if not hasattr(obj, attribute)
+    ]
+    assert not missing, (
+        f"the notebook reaches for {missing}; `linescout_ml` does not export them, so the "
+        "cell would raise the first time a GPU session ran it"
+    )
+
+
+def test_the_cells_read_no_summary_key_summarise_stopped_writing() -> None:
+    """Same hazard one level down: a renamed dict key is a KeyError with no hint."""
+    from linescout_ml.colab import summarise
+
+    keys = set(summarise(_cells_with_objects()["MANIFEST"].records))
+    stale = []
+    for position, text in enumerate(code_sources()):
+        for variable in re.findall(r"^(\w+) = summarise\(", text, re.M):
+            for key in re.findall(rf"\b{variable}\[['\"](\w+)['\"]\]", text):
+                if key not in keys:
+                    stale.append(f"cell {position}: {variable}[{key!r}]")
+    assert not stale, f"summarise() no longer writes {stale}"

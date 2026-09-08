@@ -328,11 +328,12 @@ Colab disconnects idle and heavy sessions, so nothing is a long transaction:
 ## Labels are provisional
 
 Zero-shot CLIP labels are a starting point, not a verdict. Every record keeps
-`labels.labelled_by` (`zero_shot` or `source_default`) and the raw probabilities,
-and every freshly ingested asset arrives `review.state="unreviewed"` with
-`enabled=false` so production search cannot serve it until a human accepts it.
-The curation UI renders candidates through dedicated preview routes. Assets that
-fail the SFW gate are written `quarantined` + `enabled=false`, which the
+`labels.labelled_by` (`zero_shot` or `source_default`) and the raw probabilities, and
+every freshly ingested asset arrives `review.state="unreviewed"` with no `sfw_human`
+approval and no quality grade — which is enough to keep it out of search, because
+serving is the derived `is_servable` predicate in v2 and not a stored flag. The curation
+UI renders such assets through dedicated preview routes. Assets that fail the SFW screen
+(`unsafe`, or `unsure` under the confidence floor) are written `quarantined`, which the
 manifest enforces as an invariant.
 
 The SFW screen runs on the **original**, not the line art, because extraction

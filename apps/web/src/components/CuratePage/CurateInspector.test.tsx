@@ -2,34 +2,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { CurateInspector, type ReviewFormState } from './CurateInspector'
 import type { CurationCandidate } from './types'
-
-function makeCandidate(overrides: Partial<CurationCandidate> = {}): CurationCandidate {
-  return {
-    asset_id: 'ls_synthetic_ac1f55b7390698a7',
-    primary_style: 'manga_anime',
-    scopes: ['eye'],
-    width: 256,
-    height: 256,
-    thumbnail_url: '/api/v1/assets/ls_synthetic_ac1f55b7390698a7/thumbnail',
-    line_art_url: '/api/v1/assets/ls_synthetic_ac1f55b7390698a7/line-art',
-    origin: 'native_line_art',
-    crop: null,
-    review_state: 'unreviewed',
-    quality_score: 0.85,
-    sfw_safe: true,
-    sfw_confidence: 0.99,
-    source_work_id: 'synthetic-work-000',
-    ...overrides,
-  }
-}
+import { makeCandidate } from '../../test/candidateFactory'
 
 const baseForm: ReviewFormState = {
   primaryStyle: 'manga_anime',
-  scopes: ['eye'],
+  primaryScope: 'eye',
+  secondaryScopes: [],
   quality: null,
   note: '',
-  malformedAnatomy: false,
-  poorExtraction: false,
+  blockers: [],
+  sfwSafe: null,
 }
 
 describe('CurateInspector', () => {
@@ -103,7 +85,7 @@ describe('CurateInspector', () => {
     expect(onReject).toHaveBeenCalled()
   })
 
-  it('toggles a scope chip and notifies the parent', () => {
+  it('toggles a secondary scope chip and notifies the parent', () => {
     const onFormChange = vi.fn()
     render(
       <CurateInspector
@@ -120,7 +102,27 @@ describe('CurateInspector', () => {
     fireEvent.click(screen.getByTestId('scope-chip-full_body'))
     const last = onFormChange.mock.calls.at(-1)?.[0] as ReviewFormState | undefined
     expect(last).toBeTruthy()
-    expect(last?.scopes).toEqual(['eye', 'full_body'])
+    expect(last?.secondaryScopes).toEqual(['full_body'])
+  })
+
+  it('changes the primary scope via the select and drops it from secondaries', () => {
+    const onFormChange = vi.fn()
+    render(
+      <CurateInspector
+        candidate={makeCandidate()}
+        pendingForm={{ ...baseForm, secondaryScopes: ['face_head'] }}
+        onFormChange={onFormChange}
+        onKeep={vi.fn()}
+        onReject={vi.fn()}
+        onSnapshot={vi.fn()}
+        busy={false}
+        snapshotPending={false}
+      />,
+    )
+    fireEvent.change(screen.getByTestId('primary-scope-select'), { target: { value: 'face_head' } })
+    const last = onFormChange.mock.calls.at(-1)?.[0] as ReviewFormState | undefined
+    expect(last?.primaryScope).toBe('face_head')
+    expect(last?.secondaryScopes).toEqual([])
   })
 
   it('changes the primary style via the select', () => {
@@ -161,7 +163,7 @@ describe('CurateInspector', () => {
     expect(last?.quality).toBe(3)
   })
 
-  it('toggles malformed_anatomy and poor_extraction flags', () => {
+  it('toggles the anatomy blocker and disables Keep while blocked', () => {
     const onFormChange = vi.fn()
     render(
       <CurateInspector
@@ -175,9 +177,12 @@ describe('CurateInspector', () => {
         snapshotPending={false}
       />,
     )
-    fireEvent.click(screen.getByTestId('flag-malformed'))
+    fireEvent.click(screen.getByTestId('blocker-anatomy'))
     const last = onFormChange.mock.calls.at(-1)?.[0] as ReviewFormState | undefined
-    expect(last?.malformedAnatomy).toBe(true)
+    expect(last?.blockers).toEqual(['anatomy'])
+    // A blocked asset can only be rejected, never kept.
+    expect(screen.getByTestId('keep-button')).toBeDisabled()
+    expect(screen.getByTestId('reject-button')).toBeEnabled()
   })
 
   it('disables the action buttons while a mutation is busy', () => {
@@ -211,5 +216,92 @@ describe('CurateInspector', () => {
       />,
     )
     expect(screen.getByText(/curation queue is empty/i)).toBeInTheDocument()
+  })
+})
+
+describe('CurateInspector v2 keep preconditions', () => {
+  it('disables Keep while the primary scope is unknown', () => {
+    render(
+      <CurateInspector
+        candidate={makeCandidate({ primary_scope: 'unknown' })}
+        pendingForm={{ ...baseForm, primaryScope: 'unknown', quality: 3 }}
+        onFormChange={vi.fn()}
+        onKeep={vi.fn()}
+        onReject={vi.fn()}
+        onSnapshot={vi.fn()}
+        busy={false}
+        snapshotPending={false}
+      />,
+    )
+    expect(screen.getByTestId('keep-button')).toBeDisabled()
+    fireEvent.change(screen.getByTestId('primary-scope-select'), { target: { value: 'eye' } })
+  })
+
+  it('records the human SFW decision as tri-state', () => {
+    const onFormChange = vi.fn()
+    render(
+      <CurateInspector
+        candidate={makeCandidate()}
+        pendingForm={{ ...baseForm, quality: 3 }}
+        onFormChange={onFormChange}
+        onKeep={vi.fn()}
+        onReject={vi.fn()}
+        onSnapshot={vi.fn()}
+        busy={false}
+        snapshotPending={false}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('sfw-safe'))
+    let last = onFormChange.mock.calls.at(-1)?.[0] as ReviewFormState | undefined
+    expect(last?.sfwSafe).toBe(true)
+    fireEvent.click(screen.getByTestId('sfw-unsafe'))
+    last = onFormChange.mock.calls.at(-1)?.[0] as ReviewFormState | undefined
+    expect(last?.sfwSafe).toBe(false)
+    fireEvent.click(screen.getByTestId('sfw-unset'))
+    last = onFormChange.mock.calls.at(-1)?.[0] as ReviewFormState | undefined
+    expect(last?.sfwSafe).toBeNull()
+  })
+
+  it('renders a human-flagged candidate with an error tone', () => {
+    render(
+      <CurateInspector
+        candidate={makeCandidate({ sfw_human: { safe: false, reviewer: 'local' } })}
+        pendingForm={baseForm}
+        onFormChange={vi.fn()}
+        onKeep={vi.fn()}
+        onReject={vi.fn()}
+        onSnapshot={vi.fn()}
+        busy={false}
+        snapshotPending={false}
+      />,
+    )
+    expect(screen.getByTestId('sfw-check').textContent).toContain('Human flagged')
+  })
+
+  it('names the permission basis and allowed uses', () => {
+    render(
+      <CurateInspector
+        candidate={makeCandidate({
+          permissions: {
+            license_id: 'x',
+            basis: 'unknown',
+            permission_url: null,
+            attribution: null,
+            attribution_required: false,
+          },
+          allowed_uses: { display: false, training: false, trace: false },
+        })}
+        pendingForm={baseForm}
+        onFormChange={vi.fn()}
+        onKeep={vi.fn()}
+        onReject={vi.fn()}
+        onSnapshot={vi.fn()}
+        busy={false}
+        snapshotPending={false}
+      />,
+    )
+    const text = screen.getByTestId('permission-basis').textContent ?? ''
+    expect(text).toContain('Unknown')
+    expect(text).toContain('no uses allowed')
   })
 })

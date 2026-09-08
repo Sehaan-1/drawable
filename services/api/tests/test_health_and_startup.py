@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from uuid import UUID
 
@@ -83,8 +84,8 @@ def test_health_reports_every_spec_field(client: TestClient) -> None:
     assert body["ready"] is True
     assert body["fixture_mode"] is True
     assert body["gallery_size"] == 23  # 24 synthetic records, one disabled
-    assert body["dataset_version"] == "2026.09.06-synthetic"
-    assert body["schema_version"] >= 1
+    assert body["dataset_version"] == "2026.09.08-synthetic"
+    assert body["schema_version"] == 2  # the v2 contract migration
     assert {model["name"] for model in body["models"]} == {
         "semantic",
         "structural",
@@ -126,7 +127,9 @@ def test_missing_manifest_fails_readiness_with_setup_error(tmp_path: Path) -> No
 
 def test_invalid_manifest_fails_readiness(tmp_path: Path) -> None:
     data = json.loads(SYNTHETIC_MANIFEST.read_text(encoding="utf-8"))
-    data["records"][0]["sfw"]["safe"] = False  # enabled + unsafe is a hard violation
+    # A use granted without a permission basis is a hard v2 violation.
+    data["records"][0]["permissions"]["basis"] = "unknown"
+    data["records"][0]["allowed_uses"]["display"] = True
     broken = tmp_path / "manifest.json"
     broken.write_text(json.dumps(data), encoding="utf-8")
     with TestClient(create_app(make_settings(tmp_path, gallery_manifest=broken))) as client:
@@ -211,101 +214,104 @@ def test_manifest_ids_and_sqlite_ids_are_one_to_one(tmp_path: Path) -> None:
         connection.close()
 
 
-def test_sqlite_refuses_enabled_unsafe_assets(tmp_path: Path) -> None:
-    import sqlite3
+def _insert_v2_asset(connection: sqlite3.Connection, **overrides: object) -> None:
+    """Insert a minimal, fully-granted v2 asset row, applying named overrides."""
+    columns = (
+        "asset_id, source_dataset, source_item_id, source_work_id, license_id,"
+        " permission_basis, allowed_display, allowed_training, allowed_trace,"
+        " original_path, line_art_path, thumbnail_path, origin, primary_style,"
+        " primary_scope, secondary_scopes_json, person_count, width, height,"
+        " text_coverage, ink_coverage, phash, quality_score, review_state,"
+        " review_quality, blockers_json, learning_split, gallery_member, gold_member,"
+        " pipeline_version, processing_revision, label_version,"
+        " source_checksum, line_art_checksum, thumbnail_checksum, sfw_human_safe, enabled"
+    )
+    values: list[object] = [
+        "ls_x_0000000000000000",
+        "s",
+        "i",
+        "w",
+        "l",
+        "first_party",
+        1,
+        1,
+        1,
+        "o",
+        "la",
+        "t",
+        "native_line_art",
+        "cartoon",
+        "eye",
+        "[]",
+        1,
+        300,
+        300,
+        0,
+        0.1,
+        "0000000000000000",
+        0.5,
+        "accepted",
+        3,
+        "[]",
+        "train",
+        1,
+        0,
+        "p",
+        1,
+        "1",
+        "a" * 64,
+        "b" * 64,
+        "c" * 64,
+        1,
+        1,
+    ]
+    names = [name.strip() for name in columns.split(",")]
+    row = dict(zip(names, values, strict=True))
+    row.update(overrides)
+    ordered = [row[name] for name in names]
+    placeholders = ",".join("?" * len(names))
+    connection.execute(
+        f"INSERT INTO assets ({columns}) VALUES ({placeholders})",
+        ordered,  # noqa: S608
+    )
 
+
+def test_sqlite_refuses_enabled_without_human_sfw_approval(tmp_path: Path) -> None:
+    """enabled=1 with no human SFW decision must not insert (no gain by default)."""
     import pytest
 
     connection = connect(tmp_path / "c.sqlite3")
     migrate(connection)
     with pytest.raises(sqlite3.IntegrityError):
-        columns = (
-            "asset_id, source_dataset, source_item_id, source_work_id, license_id,"
-            " original_path, line_art_path, thumbnail_path, origin, primary_style, scopes_json,"
-            " person_count, sfw_safe, sfw_confidence, sfw_method, width, height, text_coverage,"
-            " ink_coverage, phash, quality_score, review_state, split, enabled, pipeline_version,"
-            " source_checksum, line_art_checksum, thumbnail_checksum"
-        )
-        values = (
-            "ls_x_0000000000000000",
-            "s",
-            "i",
-            "w",
-            "l",
-            "o",
-            "l",
-            "t",
-            "native_line_art",
-            "cartoon",
-            '["eye"]',
-            1,
-            0,
-            0.9,
-            "manual",
-            300,
-            300,
-            0,
-            0.1,
-            "0000000000000000",
-            0.5,
-            "accepted",
-            "train",
-            1,
-            "p",
-            "a" * 64,
-            "b" * 64,
-            "c" * 64,
-        )
-        placeholders = ",".join("?" * len(values))
-        connection.execute(f"INSERT INTO assets ({columns}) VALUES ({placeholders})", values)  # noqa: S608
+        _insert_v2_asset(connection, sfw_human_safe=None)
     connection.close()
 
 
 def test_sqlite_refuses_enabled_unreviewed_assets(tmp_path: Path) -> None:
-    import sqlite3
-
     import pytest
 
     connection = connect(tmp_path / "c.sqlite3")
     migrate(connection)
     with pytest.raises(sqlite3.IntegrityError):
-        columns = (
-            "asset_id, source_dataset, source_item_id, source_work_id, license_id,"
-            " original_path, line_art_path, thumbnail_path, origin, primary_style, scopes_json,"
-            " person_count, sfw_safe, sfw_confidence, sfw_method, width, height, text_coverage,"
-            " ink_coverage, phash, quality_score, review_state, split, enabled, pipeline_version,"
-            " source_checksum, line_art_checksum, thumbnail_checksum"
-        )
-        values = (
-            "ls_x_0000000000000000",
-            "s",
-            "i",
-            "w",
-            "l",
-            "o",
-            "l",
-            "t",
-            "native_line_art",
-            "cartoon",
-            '["eye"]',
-            1,
-            1,
-            0.9,
-            "manual",
-            300,
-            300,
-            0,
-            0.1,
-            "0000000000000000",
-            0.5,
-            "unreviewed",
-            "train",
-            1,
-            "p",
-            "a" * 64,
-            "b" * 64,
-            "c" * 64,
-        )
-        placeholders = ",".join("?" * len(values))
-        connection.execute(f"INSERT INTO assets ({columns}) VALUES ({placeholders})", values)  # noqa: S608
+        _insert_v2_asset(connection, review_state="unreviewed", review_quality=None)
+    connection.close()
+
+
+def test_sqlite_refuses_enabled_blocked_assets(tmp_path: Path) -> None:
+    import pytest
+
+    connection = connect(tmp_path / "c.sqlite3")
+    migrate(connection)
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_v2_asset(connection, blockers_json='["anatomy"]')
+    connection.close()
+
+
+def test_sqlite_refuses_display_without_known_permission(tmp_path: Path) -> None:
+    import pytest
+
+    connection = connect(tmp_path / "c.sqlite3")
+    migrate(connection)
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_v2_asset(connection, permission_basis="unknown")
     connection.close()
