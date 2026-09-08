@@ -6,10 +6,24 @@
  * candidate payload). The line-art URL is what gets exported with the
  * snapshot, so we expose a toggle for reviewers who want to verify the
  * extraction quality against the original.
+ *
+ * A crop rectangle is no longer persisted with the label: committing a crop
+ * cuts an **immutable child derivative** with its own files, processing, and
+ * review state (``onCreateDerivative``). Skip advances the session queue
+ * without a label.
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Crop, Image as ImageIcon, PenLine, RotateCcw } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Crop,
+  Image as ImageIcon,
+  PenLine,
+  RotateCcw,
+  Scissors,
+  SkipForward,
+} from 'lucide-react'
 import { Button, IconButton } from '../primitives'
 import { CropOverlay, type PixelRect, defaultCrop } from './CropOverlay'
 import type { CurationCandidate } from './types'
@@ -25,7 +39,12 @@ export interface CurateStageProps {
   onCropCommit: (next: PixelRect) => void
   onPrev: () => void
   onNext: () => void
+  onSkip?: () => void
   onReset: () => void
+  /** Cut an immutable crop derivative from the current rectangle. */
+  onCreateDerivative?: () => void
+  /** A crop-derivative creation/processing request is in flight. */
+  derivativePending?: boolean
   hasPrev: boolean
   hasNext: boolean
   position: { current: number; total: number } | null
@@ -41,7 +60,10 @@ export function CurateStage({
   onCropCommit,
   onPrev,
   onNext,
+  onSkip,
   onReset,
+  onCreateDerivative,
+  derivativePending = false,
   hasPrev,
   hasNext,
   position,
@@ -100,6 +122,16 @@ export function CurateStage({
         <Button onClick={onReset} disabled={!candidate || !editingCrop} data-testid="reset-crop">
           <RotateCcw size={15} /> Reset crop
         </Button>
+        {onCreateDerivative ? (
+          <Button
+            onClick={onCreateDerivative}
+            disabled={!candidate || !crop || derivativePending || busy}
+            data-testid="create-derivative"
+            title="Cut this rectangle into an immutable derivative with its own processing and review state"
+          >
+            <Scissors size={15} /> {derivativePending ? 'Creating…' : 'Create derivative'}
+          </Button>
+        ) : null}
         <div className="candidate-view-toggle" role="group" aria-label="Image source">
           <IconButton
             label="Show thumbnail"
@@ -158,9 +190,16 @@ export function CurateStage({
         <span>
           {candidate ? candidate.asset_id : '—'}
         </span>
-        <Button onClick={onNext} disabled={!hasNext || busy} data-testid="next-candidate">
-          Next <ChevronRight size={16} />
-        </Button>
+        <div className="candidate-nav__group">
+          {onSkip ? (
+            <Button onClick={onSkip} disabled={!candidate || busy} data-testid="skip-candidate">
+              <SkipForward size={15} /> Skip
+            </Button>
+          ) : null}
+          <Button onClick={onNext} disabled={!hasNext || busy} data-testid="next-candidate">
+            Next <ChevronRight size={16} />
+          </Button>
+        </div>
       </div>
     </section>
   )

@@ -184,9 +184,24 @@ export type CropBox = Schemas['CropBox']
 export type CurationCandidate = Schemas['CurationCandidate']
 export type CurationProgress = Schemas['CurationProgress']
 export type StyleBreakdown = Schemas['StyleBreakdown']
+export type ScopeBreakdown = Schemas['ScopeBreakdown']
 export type LabelRequest = Schemas['LabelRequest']
 export type LabelResponse = Schemas['LabelResponse']
 export type SnapshotResponse = Schemas['SnapshotResponse']
+
+// Curation safety (schema v4): session queue, by-id retrieval, SFW
+// adjudication behind reveal controls, and immutable crop derivatives.
+export type SkipRequest = Schemas['SkipRequest']
+export type SkipResponse = Schemas['SkipResponse']
+export type QuarantineCandidate = Schemas['QuarantineCandidate']
+export type RevealRequest = Schemas['RevealRequest']
+export type SfwAdjudicationRequest = Schemas['SfwAdjudicationRequest']
+export type SfwAdjudicationResponse = Schemas['SfwAdjudicationResponse']
+export type CropRequest = Schemas['CropRequest']
+export type CropResponse = Schemas['CropResponse']
+export type DerivativeMeasurements = Schemas['DerivativeMeasurements']
+export type DerivativeArtifactStamp = Schemas['DerivativeArtifactStamp']
+export type DerivativeProcessResponse = Schemas['DerivativeProcessResponse']
 
 // Permission, SFW, and split models shared by the manifest and the curation
 // wire (schema v2). Unknown permission never implies any allowed use, and a

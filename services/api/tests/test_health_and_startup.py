@@ -85,7 +85,10 @@ def test_health_reports_every_spec_field(client: TestClient) -> None:
     assert body["fixture_mode"] is True
     assert body["gallery_size"] == 23  # 24 synthetic records, one disabled
     assert body["dataset_version"] == "2026.09.08-synthetic"
-    assert body["schema_version"] == 4  # v4: event identity + durable pins
+    # v3: eligibility + derivative currency; v4: event identity + durable
+    # pins; v5: curation safety (optimistic label versions, derivatives
+    # registry, SFW audit).
+    assert body["schema_version"] == 5
     assert {model["name"] for model in body["models"]} == {
         "semantic",
         "structural",

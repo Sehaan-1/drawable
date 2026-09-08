@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, FlaskConical, Inbox, Keyboard, RotateCw, X } from 'lucide-react'
 import { ResearchShell } from '../components/AppChrome'
 import { Button } from '../components/primitives'
 import { useServiceStore } from '../services/serviceRegistry'
 import {
+  useAdjudicateSfw,
+  useCreateCrop,
   useCurationNext,
   useCurationProgress,
   useExportSnapshot,
+  useProcessDerivative,
+  useQuarantine,
+  useRevealQuarantined,
+  useSkipCandidate,
   useWriteLabel,
 } from '../services/curationHooks'
+import { fetchCandidate } from '../services/curationClient'
 import { CurateSidebar, type ScopeFilter, type StyleFilter } from '../components/CuratePage/CurateSidebar'
 import { CurateStage } from '../components/CuratePage/CurateStage'
+import { QuarantinePanel } from '../components/CuratePage/QuarantinePanel'
 import {
   CurateInspector,
   type ReviewFormState,
@@ -20,17 +29,30 @@ import {
   type PixelRect,
 } from '../components/CuratePage/CropOverlay'
 import type { CurationCandidate, LabelRequest } from '@drawable/contracts'
-import { fixtureCurationCandidate, fixtureCurationProgress } from '../services/curationFixtures'
+import { ApiError } from '../services/apiClient'
+import {
+  fixtureCurationCandidate,
+  fixtureCurationProgress,
+  fixtureQuarantine,
+} from '../services/curationFixtures'
 
 /**
  * Curation workspace.
  *
- * Wires the curation API (via React Query) to three subcomponents: the
- * progress sidebar, the candidate image stage, and the metadata inspector.
- * The page owns a few pieces of UI state that are not worth hoisting to a
- * store: the current style/scope filter, the in-flight review form, the
- * crop rectangle, the edit-crop toggle, and a small history stack that
- * powers the "Previous" navigation.
+ * Wires the curation API (via React Query) to the sidebar, the candidate
+ * image stage, the metadata inspector, and the SFW adjudication panel.
+ *
+ * Queue semantics: the page owns a per-mount review ``session_id``. The
+ * server keeps a cursor for it — every serve advances, Skip excludes an
+ * asset for the session (button or ``S``), and no local bookkeeping can
+ * drift from what the queue actually serves. ``Previous`` re-fetches the
+ * actual previous candidate **by id** (live metadata, never a stale copy).
+ *
+ * Concurrency: every write echoes the candidate's ``label_version`` back as
+ * ``expected_label_version``. When another curator got there first, the API
+ * answers 409 with reconciliation details and this page shows a banner —
+ * the losing write is never applied, and one click reloads the live
+ * candidate so the decision can be re-applied against the current version.
  *
  * Keyboard shortcuts are registered globally while the page is mounted so
  * the reviewer can drive the queue with one hand on the keyboard. The
@@ -48,10 +70,66 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false
 }
 
+/** Per-mount review session id (cursor/skip queue on the server). */
+function newSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `sess-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`
+}
+
+interface ConflictBanner {
+  assetId: string
+  code: string
+  message: string
+  currentLabelVersion: number
+  currentReviewState: string
+  latestDecision: string | null
+  latestReviewer: string | null
+}
+
+function conflictFromError(assetId: string, error: unknown): ConflictBanner | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null
+  if (error.code !== 'label_version_conflict' && error.code !== 'review_conflict') return null
+  const details = (error.details ?? {}) as Record<string, unknown>
+  return {
+    assetId,
+    code: error.code,
+    message: error.message,
+    currentLabelVersion: typeof details.current_label_version === 'number' ? details.current_label_version : 0,
+    currentReviewState: typeof details.current_review_state === 'string' ? details.current_review_state : 'unknown',
+    latestDecision: typeof details.latest_decision === 'string' ? details.latest_decision : null,
+    latestReviewer: typeof details.latest_reviewer === 'string' ? details.latest_reviewer : null,
+  }
+}
+
+interface DerivativeToast {
+  childId: string
+  parentAssetId: string
+  state: 'created' | 'processing' | 'complete' | 'failed' | 'cut_failed'
+  detail?: string
+}
+
+/**
+ * Build a human-facing detail for a failed crop cut. A 422
+ * ``parent_artifact_invalid`` carries ``details.problems`` naming each parent
+ * artifact that failed verification; show them so the curator knows the parent
+ * needs a pipeline re-run rather than another crop attempt.
+ */
+function cropFailureDetail(error: unknown): string | undefined {
+  if (!(error instanceof ApiError)) return undefined
+  const problems = error.details?.problems
+  if (Array.isArray(problems) && problems.length > 0) {
+    return `${error.message}: ${problems.map(String).join('; ')}`
+  }
+  return error.message
+}
+
 export default function CuratePage() {
   const mode = useServiceStore((state) => state.mode)
   const health = useServiceStore((state) => state.health)
   const probe = useServiceStore((state) => state.probe)
+  const queryClient = useQueryClient()
 
   // Make sure the registry has probed the API at least once so we know
   // whether the curation endpoints are reachable.
@@ -63,13 +141,23 @@ export default function CuratePage() {
   const live = mode === 'live'
   const offline = mode === 'fixture'
 
+  // ---- session -----------------------------------------------------------
+  // One session per mount: the server-side cursor makes Next/Skip advance
+  // without a label, and skipped assets never return for this session.
+  const sessionIdRef = useRef<string>(newSessionId())
+  const sessionId = sessionIdRef.current
+
   // ---- filters ----------------------------------------------------------
   const [styleFilter, setStyleFilter] = useState<StyleFilter>(null)
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>(null)
 
   // ---- candidate fetch --------------------------------------------------
   const nextQuery = useCurationNext(
-    { style: styleFilter ?? undefined, scope: scopeFilter ?? undefined },
+    {
+      style: styleFilter ?? undefined,
+      scope: scopeFilter ?? undefined,
+      sessionId: live ? sessionId : undefined,
+    },
     { enabled: live && curationEnabled },
   )
 
@@ -78,27 +166,27 @@ export default function CuratePage() {
   // in flight, no edit in progress); otherwise the UI would jump under the
   // reviewer's hands while they are mid-decision.
   const [current, setCurrent] = useState<CurationCandidate | null>(null)
-  const [history, setHistory] = useState<CurationCandidate[]>([])
+  const [history, setHistory] = useState<string[]>([])
+
+  const pushHistory = useCallback((assetId: string) => {
+    setHistory((stack) => {
+      if (stack[stack.length - 1] === assetId) return stack
+      return [...stack.slice(-(HISTORY_LIMIT - 1)), assetId]
+    })
+  }, [])
 
   // When the query result changes and we're not busy, advance the displayed
-  // candidate. We also push the previous *full* candidate onto the history
-  // stack so Previous can restore it immediately without a refetch.
+  // candidate. We track the previous id on the history stack so Previous can
+  // re-fetch it live by id.
   useEffect(() => {
     if (nextQuery.data === undefined) return // still loading or errored
     if (nextQuery.isFetching) return
     setCurrent((previous: CurationCandidate | null) => {
       if (previous && previous.asset_id === nextQuery.data?.asset_id) return previous
-      if (nextQuery.data) {
-        setHistory((stack) => {
-          if (previous && stack[stack.length - 1]?.asset_id !== previous.asset_id) {
-            return [...stack.slice(-(HISTORY_LIMIT - 1)), previous]
-          }
-          return stack
-        })
-      }
+      if (previous && nextQuery.data) pushHistory(previous.asset_id)
       return nextQuery.data
     })
-  }, [nextQuery.data, nextQuery.isFetching])
+  }, [nextQuery.data, nextQuery.isFetching, pushHistory])
 
   const displayed = offline ? fixtureCurationCandidate : current
 
@@ -119,10 +207,47 @@ export default function CuratePage() {
     setEditingCrop(false)
   }, [displayed?.asset_id])
 
+  // ---- conflict + toast state -------------------------------------------
+  const [conflict, setConflict] = useState<ConflictBanner | null>(null)
+  useEffect(() => {
+    // The banner describes one asset; a candidate change supersedes it.
+    if (conflict && displayed && conflict.assetId !== displayed.asset_id) setConflict(null)
+  }, [conflict, displayed])
+  const [derivativeToast, setDerivativeToast] = useState<DerivativeToast | null>(null)
+  useEffect(() => {
+    if (!derivativeToast) return
+    const id = window.setTimeout(() => setDerivativeToast(null), 8000)
+    return () => window.clearTimeout(id)
+  }, [derivativeToast])
+
   // ---- label submission -------------------------------------------------
   const writeLabel = useWriteLabel()
   const exportSnapshot = useExportSnapshot()
-  const busy = !offline && (writeLabel.isPending || exportSnapshot.isPending)
+  const skip = useSkipCandidate()
+  const createCrop = useCreateCrop()
+  const processDerivative = useProcessDerivative()
+  const reveal = useRevealQuarantined()
+  const adjudicate = useAdjudicateSfw()
+  const busy =
+    !offline &&
+    (writeLabel.isPending || exportSnapshot.isPending || skip.isPending || createCrop.isPending)
+
+  const reloadCandidateLive = useCallback(
+    async (assetId: string): Promise<void> => {
+      try {
+        const fresh = await queryClient.fetchQuery({
+          queryKey: ['curation', 'candidate', assetId],
+          queryFn: () => fetchCandidate(assetId),
+          staleTime: 0,
+        })
+        setCurrent(fresh)
+      } catch {
+        // The asset vanished (e.g. a gallery reload dropped it); keep the
+        // stale copy on screen — the next /next serve will move on.
+      }
+    },
+    [queryClient],
+  )
 
   const submit = useCallback(
     (decision: 'keep' | 'reject') => {
@@ -130,32 +255,43 @@ export default function CuratePage() {
       // Quality and a known primary scope are required by the API on keep,
       // and a blocked asset can only be rejected. We block here instead of
       // letting the server bounce with 422 to keep the UX snappy.
-      if (decision === 'keep' && (form.quality === null || form.primaryScope === 'unknown' || form.blockers.length > 0)) {
+      if (
+        decision === 'keep' &&
+        (form.quality === null || form.primaryScope === 'unknown' || form.blockers.length > 0)
+      ) {
         return
       }
       const payload: LabelRequest = {
         asset_id: current.asset_id,
+        // Optimistic concurrency: echo the version we loaded. If another
+        // curator wrote first, the server answers 409 and we reconcile.
         expected_review_state: current.review_state,
+        expected_label_version: current.label_version,
         decision,
         primary_style: form.primaryStyle === current.primary_style ? null : form.primaryStyle,
         primary_scope: form.primaryScope === current.primary_scope ? null : form.primaryScope,
         secondary_scopes: sameScopes(form.secondaryScopes, current.secondary_scopes ?? [])
           ? null
           : form.secondaryScopes,
-        crop: crop ? { x: crop.x, y: crop.y, width: crop.width, height: crop.height } : null,
         blockers: form.blockers,
         quality: form.quality,
         note: form.note.trim() || null,
         sfw_safe: form.sfwSafe,
+        session_id: sessionId,
       }
       writeLabel.mutate(payload, {
         onSuccess: () => {
+          setConflict(null)
           // The mutation's onSuccess already invalidates the candidate +
           // progress caches, so a fresh /next will arrive shortly.
         },
+        onError: (error) => {
+          const banner = conflictFromError(current.asset_id, error)
+          if (banner) setConflict(banner)
+        },
       })
     },
-    [offline, current, form, crop, writeLabel],
+    [offline, current, form, sessionId, writeLabel],
   )
 
   // ---- navigation -------------------------------------------------------
@@ -163,29 +299,99 @@ export default function CuratePage() {
     if (offline) return
     setHistory((stack) => {
       if (stack.length === 0) return stack
-      const previous = stack[stack.length - 1]!
-      setCurrent(previous)
+      const previousId = stack[stack.length - 1]!
+      // Re-fetch the *actual* previous candidate by id — live metadata, not
+      // a stale copy — and show it immediately.
+      void reloadCandidateLive(previousId)
       return stack.slice(0, -1)
     })
-  }, [offline])
+  }, [offline, reloadCandidateLive])
 
   const onNext = useCallback(() => {
     if (offline) return
-    setCurrent((shown) => {
-      const liveCandidate = nextQuery.data
-      if (shown && liveCandidate && shown.asset_id !== liveCandidate.asset_id) {
-        setHistory((stack) => {
-          if (stack[stack.length - 1]?.asset_id !== shown.asset_id) {
-            return [...stack.slice(-(HISTORY_LIMIT - 1)), shown]
-          }
-          return stack
-        })
-        return liveCandidate
-      }
-      return shown
-    })
+    if (current) pushHistory(current.asset_id)
     void nextQuery.refetch()
-  }, [offline, nextQuery])
+  }, [offline, current, nextQuery, pushHistory])
+
+  const onSkip = useCallback(() => {
+    if (offline || !current) return
+    if (current) pushHistory(current.asset_id)
+    skip.mutate(
+      { session_id: sessionId, asset_id: current.asset_id },
+      {
+        onSuccess: () => {
+          setConflict(null)
+          void nextQuery.refetch()
+        },
+      },
+    )
+  }, [offline, current, sessionId, skip, nextQuery, pushHistory])
+
+  // ---- crop derivatives -------------------------------------------------
+  // Committing a crop no longer edits the label: it cuts an immutable child
+  // derivative (fresh files, its own processing + review state) and then
+  // runs the required processing so it lands in the review queue.
+  const onCreateDerivative = useCallback(() => {
+    if (offline || !current || !crop) return
+    createCrop.mutate(
+      {
+        assetId: current.asset_id,
+        body: {
+          crop: { x: crop.x, y: crop.y, width: crop.width, height: crop.height },
+          expected_label_version: current.label_version,
+          reviewer: null,
+          note: null,
+        },
+      },
+      {
+        onSuccess: (created) => {
+          setDerivativeToast({
+            childId: created.asset_id,
+            parentAssetId: current.asset_id,
+            state: 'processing',
+          })
+          processDerivative.mutate(
+            { assetId: created.asset_id },
+            {
+              onSuccess: (processed) => {
+                setDerivativeToast({
+                  childId: created.asset_id,
+                  parentAssetId: current.asset_id,
+                  state: processed.processing_state === 'complete' ? 'complete' : 'failed',
+                  detail:
+                    processed.processing_state === 'complete'
+                      ? `quality ${(processed.measurements?.quality_score ?? 0).toFixed(2)} — awaiting its own review`
+                      : undefined,
+                })
+              },
+              onError: (error) => {
+                setDerivativeToast({
+                  childId: created.asset_id,
+                  parentAssetId: current.asset_id,
+                  state: 'failed',
+                  detail: error instanceof ApiError ? error.message : undefined,
+                })
+              },
+            },
+          )
+        },
+        onError: (error) => {
+          const banner = conflictFromError(current.asset_id, error)
+          if (banner) {
+            setConflict(banner)
+            return
+          }
+          // The cut never happened: nothing about the parent was modified.
+          setDerivativeToast({
+            childId: current.asset_id,
+            parentAssetId: current.asset_id,
+            state: 'cut_failed',
+            detail: cropFailureDetail(error),
+          })
+        },
+      },
+    )
+  }, [offline, current, crop, createCrop, processDerivative])
 
   // ---- keyboard shortcuts ----------------------------------------------
   // We keep the latest ``submit`` and ``form`` in refs so the keydown
@@ -201,6 +407,10 @@ export default function CuratePage() {
   useEffect(() => {
     formRef.current = form
   }, [form])
+  const skipRef = useRef(onSkip)
+  useEffect(() => {
+    skipRef.current = onSkip
+  }, [onSkip])
 
   // Tracks the last shortcut we acted on so the visible HUD can confirm
   // the listener is alive. ``lastKey`` is the key string, ``lastAt`` is a
@@ -258,6 +468,10 @@ export default function CuratePage() {
         case 'R':
           fire('R', () => submitRef.current('reject'))
           break
+        case 's':
+        case 'S':
+          fire('S', () => skipRef.current())
+          break
         case '1':
         case '2':
         case '3': {
@@ -308,8 +522,33 @@ export default function CuratePage() {
     return () => window.clearTimeout(id)
   }, [keepHint])
 
-  // ---- progress --------------------------------------------------------
+  // ---- progress + quarantine --------------------------------------------
   const progressQuery = useCurationProgress({ enabled: live && curationEnabled })
+  const [quarantineMode, setQuarantineMode] = useState(false)
+  const quarantineQuery = useQuarantine({ enabled: live && curationEnabled && quarantineMode })
+
+  const onReveal = useCallback(
+    (assetId: string) => {
+      if (offline) return
+      reveal.mutate({ assetId })
+    },
+    [offline, reveal],
+  )
+
+  const onAdjudicate = useCallback(
+    (assetId: string, safe: boolean, expectedLabelVersion: number) => {
+      if (offline) return
+      adjudicate.mutate(
+        { assetId, safe, expected_label_version: expectedLabelVersion },
+        {
+          onSuccess: () => {
+            if (current?.asset_id === assetId) void reloadCandidateLive(assetId)
+          },
+        },
+      )
+    },
+    [offline, adjudicate, current, reloadCandidateLive],
+  )
 
   // ---- layout pieces ---------------------------------------------------
   const totalSeen = useMemo(() => {
@@ -318,9 +557,8 @@ export default function CuratePage() {
     return { current: history.length + 1, total: history.length + 1 }
   }, [displayed, history.length, offline])
 
-  // The crop controls use the parent's state via callbacks, so we
-  // synthesise ``onCropCommit`` = ``onCropChange`` for now (commits are
-  // sent on every change; the API only stores the final value on label).
+  // The crop overlay's rect is staged locally; ``onCropCommit`` mirrors it
+  // and the toolbar's "Create derivative" button is what persists it.
   const onCropChange = useCallback((next: PixelRect) => setCrop(next), [])
   const onCropCommit = useCallback((next: PixelRect) => setCrop(next), [])
 
@@ -356,7 +594,7 @@ export default function CuratePage() {
     )
   }
 
-  if (!offline && nextQuery.isError) {
+  if (!offline && nextQuery.isError && !quarantineMode) {
     return (
       <ResearchShell eyebrow="Dataset workspace" title="Curation">
         <div className="curation-layout curation-layout--empty">
@@ -374,6 +612,10 @@ export default function CuratePage() {
   }
 
   const queueEmpty = !offline && current === null && !nextQuery.isLoading
+  const pendingAsset =
+    reveal.isPending || adjudicate.isPending
+      ? (reveal.variables?.assetId ?? adjudicate.variables?.assetId ?? null)
+      : null
 
   return (
     <ResearchShell eyebrow="Dataset workspace" title="Curation">
@@ -384,9 +626,84 @@ export default function CuratePage() {
           scope={scopeFilter}
           onStyle={setStyleFilter}
           onScope={setScopeFilter}
+          quarantined={offline ? fixtureQuarantine.length : progressQuery.data?.quarantined ?? 0}
+          quarantineMode={quarantineMode}
+          onToggleQuarantine={() => setQuarantineMode((value) => !value)}
         />
 
-        {queueEmpty ? (
+        {conflict ? (
+          <div className="conflict-banner" role="alert" data-testid="conflict-banner">
+            <AlertCircle size={15} />
+            <div>
+              <strong>
+                {conflict.latestDecision
+                  ? `Another curator already recorded “${conflict.latestDecision}”`
+                  : 'This asset changed while you were reviewing it'}
+                {conflict.latestReviewer ? ` (${conflict.latestReviewer})` : ''}
+              </strong>
+              <span>
+                Live version is {conflict.currentLabelVersion} ({conflict.currentReviewState}).
+                Your decision was not applied — reload the candidate and re-apply it.
+              </span>
+            </div>
+            <Button onClick={() => void reloadCandidateLive(conflict.assetId)} data-testid="conflict-reload">
+              <RotateCw size={13} /> Reload candidate
+            </Button>
+            <button
+              type="button"
+              className="kbd-toast__close"
+              onClick={() => setConflict(null)}
+              aria-label="Dismiss"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : null}
+
+        {derivativeToast ? (
+          <div className="kbd-toast derivative-toast" role="status" data-testid="derivative-toast">
+            {derivativeToast.state === 'complete' ? '✓' : derivativeToast.state === 'failed' || derivativeToast.state === 'cut_failed' ? '✕' : '…'}
+            <span>
+              {derivativeToast.state === 'cut_failed' ? (
+                <>
+                  Crop derivative of <code>{derivativeToast.parentAssetId}</code> was not cut
+                  {derivativeToast.detail ? `: ${derivativeToast.detail}` : ''} — the parent was
+                  not modified.
+                </>
+              ) : (
+                <>
+                  Derivative <code>{derivativeToast.childId}</code> cut from{' '}
+                  <code>{derivativeToast.parentAssetId}</code>
+                  {derivativeToast.state === 'processing' ? ' — processing…' : ''}
+                  {derivativeToast.state === 'complete' ? ` — ${derivativeToast.detail ?? 'processed'}` : ''}
+                  {derivativeToast.state === 'failed'
+                    ? ` — processing failed${derivativeToast.detail ? `: ${derivativeToast.detail}` : ''} (retry from the queue)`
+                    : ''}
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              className="kbd-toast__close"
+              onClick={() => setDerivativeToast(null)}
+              aria-label="Dismiss"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : null}
+
+        {quarantineMode && !offline ? (
+          <QuarantinePanel
+            entries={quarantineQuery.data ?? null}
+            loading={quarantineQuery.isLoading}
+            error={quarantineQuery.error ? quarantineQuery.error.message : null}
+            onRetry={() => void quarantineQuery.refetch()}
+            onReveal={onReveal}
+            onAdjudicate={onAdjudicate}
+            pendingAsset={pendingAsset}
+          />
+        ) : queueEmpty ? (
           <section className="candidate-stage candidate-stage--empty">
             <div className="candidate-empty-card">
               <Inbox size={32} />
@@ -421,12 +738,15 @@ export default function CuratePage() {
             onCropCommit={onCropCommit}
             onPrev={onPrev}
             onNext={onNext}
+            onSkip={offline ? undefined : onSkip}
             onReset={() => {
               if (displayed) {
                 const next = defaultCrop(displayed.width, displayed.height)
                 setCrop(next)
               }
             }}
+            onCreateDerivative={offline ? undefined : onCreateDerivative}
+            derivativePending={createCrop.isPending || processDerivative.isPending}
             hasPrev={!offline && history.length > 0}
             hasNext={!offline}
             position={totalSeen}
@@ -472,6 +792,10 @@ export default function CuratePage() {
             <div>
               <dt><kbd>R</kbd></dt>
               <dd>Reject current candidate</dd>
+            </div>
+            <div>
+              <dt><kbd>S</kbd></dt>
+              <dd>Skip without a label</dd>
             </div>
             <div>
               <dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></dt>

@@ -3,9 +3,12 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { JSX, ReactNode } from 'react'
 import {
+  useCandidate,
   useCurationNext,
   useCurationProgress,
   useExportSnapshot,
+  useQuarantine,
+  useSkipCandidate,
   useWriteLabel,
 } from './curationHooks'
 
@@ -72,6 +75,7 @@ describe('useWriteLabel', () => {
       result.current.mutate({
         asset_id: 'a',
         expected_review_state: 'unreviewed',
+        expected_label_version: 0,
         decision: 'keep',
         primary_scope: 'eye',
         secondary_scopes: [],
@@ -86,6 +90,57 @@ describe('useWriteLabel', () => {
     const calls = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls
     expect(calls.length).toBe(1)
     expect(calls[0]?.[0]).toBe('/api/v1/curation/labels')
+  })
+})
+
+describe('useCandidate', () => {
+  it('fetches a live candidate by id', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      mockJsonResponse({ asset_id: 'a', review_state: 'accepted', label_version: 2 }),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() => useCandidate('a'), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.label_version).toBe(2)
+  })
+
+  it('stays idle without an asset id', async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    const { result } = renderHook(() => useCandidate(null), { wrapper: makeWrapper() })
+    expect(result.current.fetchStatus).toBe('idle')
+    expect((fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls.length).toBe(0)
+  })
+})
+
+describe('useSkipCandidate', () => {
+  it('skips for the session and hits the queue endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockJsonResponse({ session_id: 's', cursor_asset_id: 'a', excluded_asset_id: 'a', remaining: 2 }),
+    ) as unknown as typeof fetch
+    globalThis.fetch = fetchMock
+    const { result } = renderHook(() => useSkipCandidate(), { wrapper: makeWrapper() })
+    await act(async () => {
+      result.current.mutate({ session_id: 's', asset_id: 'a' })
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const calls = (fetchMock as unknown as { mock: { calls: unknown[][] } }).mock.calls
+    expect(calls[0]?.[0]).toBe('/api/v1/curation/queue/skip')
+  })
+})
+
+describe('useQuarantine', () => {
+  it('fetches the metadata-only backlog', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      mockJsonResponse([
+        { asset_id: 'held-1', revealed: false, thumbnail_url: null, line_art_url: null },
+      ]),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() => useQuarantine(), { wrapper: makeWrapper() })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.[0]?.asset_id).toBe('held-1')
+    // Metadata only: no image URLs before a reveal.
+    expect(result.current.data?.[0]?.thumbnail_url).toBeNull()
   })
 })
 
