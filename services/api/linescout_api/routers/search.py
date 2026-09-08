@@ -114,7 +114,11 @@ async def search(
             "image",
         )
     try:
-        stroke_sequence = decode_strokes(strokes_bytes, settings.max_strokes_bytes)
+        stroke_sequence = decode_strokes(
+            strokes_bytes,
+            settings.max_strokes_bytes,
+            max_expanded_bytes=settings.max_strokes_decompressed_bytes,
+        )
     except SnapshotError as error:
         _raise_snapshot_error(error, "strokes")
 

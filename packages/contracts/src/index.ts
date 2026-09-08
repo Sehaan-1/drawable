@@ -129,7 +129,11 @@ export type SearchFormFields = Schemas['Body_search_api_v1_search_post']
 
 export const SEARCH_LIMITS = {
   maxImageBytes: 4 * 1024 * 1024,
-  maxStrokesBytes: 2 * 1024 * 1024,
+  maxStrokesBytes: 256 * 1024,
+  maxStrokesDecompressedBytes: 1024 * 1024,
+  // Total request envelope enforced server-side before multipart parsing:
+  // image + strokes + 64 KiB of multipart overhead.
+  maxRequestBytes: 4 * 1024 * 1024 + 256 * 1024 + 64 * 1024,
   maxTextHintChars: 120,
   minPointsForSearch: 20,
   minInkDiagonalRatio: 0.02,
