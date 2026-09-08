@@ -1,0 +1,51 @@
+name: Debug pytest (temporary)
+
+# Temporary diagnostic: runs services/api pytest on this branch and posts the
+# output to the PR because the sandbox cannot download Actions logs.
+on:
+  push:
+    branches: ["arena/**"]
+
+jobs:
+  debug:
+    name: services/api pytest output
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        working-directory: services/api
+        run: uv sync --frozen --extra dev --python 3.11
+      - name: Environment
+        working-directory: services/api
+        run: |
+          .venv/bin/python -c "import sys, sqlite3; print('python', sys.version); print('sqlite', sqlite3.sqlite_version)"
+          date -u
+      - name: Pytest
+        working-directory: services/api
+        run: |
+          set +e
+          .venv/bin/pytest -q --tb=long -rA > /tmp/pytest.out 2>&1
+          echo "pytest exit: $?"
+      - name: Comment on PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=$(gh pr list --head "$GITHUB_REF_NAME" --json number --jq '.[0].number')
+          if [ -z "$PR" ]; then echo "no PR for $GITHUB_REF_NAME"; exit 0; fi
+          {
+            echo "### services/api pytest output (\`$GITHUB_SHA\`)"
+            echo
+            echo '```'
+            tail -c 22000 /tmp/pytest.out
+            echo '```'
+          } > /tmp/comment.md
+          gh pr comment "$PR" --body-file /tmp/comment.md
