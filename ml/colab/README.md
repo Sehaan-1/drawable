@@ -63,7 +63,7 @@ these is optional, and none of them are the author's machine being representativ
 ### The repository pin
 
 The notebook defaults to **`junosapollo/drawable`** at commit
-`06ae97663c8c322f5020ae3574cb9ec55f00dbe3` (`06ae97663c8c`), fetched over
+`407a483f17fd11db50bf675859e5cfb08e298574` (`407a483f17fd`), fetched over
 `https://github.com/junosapollo/drawable.git` — the unauthenticated transport, because
 nothing that has to be reproducible should depend on a token you happen to have in a
 runtime. `REPO_URL` is a form field for the private-repo case and for a fork; the pin
@@ -77,16 +77,21 @@ when the canonical URL is unreachable, and it cannot change what runs: whatever 
 is checked out by SHA and the checkout is refused if HEAD is not the pin. Content
 addressing is what makes a mirror safe; "a second URL I trust" would not be.
 
-That commit is `ml: make the Colab pipeline reproducible beyond lockfiles`, and both
-URLs were asked whether they could serve it: `linescout-repro checkout --rev <pin>`
-fetched it from `junosapollo/drawable.git` *and* from the mirror, printing
-`HEAD : 06ae97663c8c  (matches the pin)` either way. The reason the canonical URL
-answers is that `Sehaan-1/drawable` is a fork of `junosapollo/drawable` and GitHub
-shares object storage across a fork network — which is fine today and a hazard
-tomorrow, because a pin that is reachable only through a fork breaks the moment that
-fork is re-created or detached. Merging into the *canonical* repository is what makes
-this pin permanent: a merge into `Sehaan-1/drawable` makes the mirror permanent and
-leaves the primary URL relying on the fork network still.
+The pin names the commit that contains the finalized pipeline, including the stage
+logic and the SFW policy above; bumping it moves it to whatever commit does. Each bump
+is verified the same way, against GitHub rather than a fixture:
+
+```bash
+.venv/bin/linescout-repro checkout --dir /tmp/ls-pin --rev <pin>   # canonical + mirror
+```
+
+which prints `HEAD : 407a483f17fd  (matches the pin)` for both URLs. The reason the
+canonical URL answers at all is that `Sehaan-1/drawable` is a *fork* of
+`junosapollo/drawable` and GitHub shares object storage across a fork network — enough
+to run today, a hazard tomorrow, because a pin reachable only through a fork breaks
+the moment that fork is re-created or detached. Merging into the canonical repository
+is what makes the pin permanent: a merge into `Sehaan-1/drawable` makes the mirror
+permanent and leaves the primary URL relying on the fork network still.
 
 `0000000000000000000000000000000000000000` is what the pin held before that commit
 existed: a format-valid SHA no repository contains, named out loud by

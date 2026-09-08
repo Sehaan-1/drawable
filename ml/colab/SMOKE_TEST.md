@@ -23,7 +23,7 @@ reading the table at the bottom.
 | `requirements-colab.txt` agrees with `ml/uv.lock`, its names are all in the `[gpu]` extra, and no runtime pin is installed by pip | `linescout-repro selfcheck` |
 | Every checkpoint the default pipeline selects has a lock entry; nothing is fetched by tag; a digest or size mismatch stops the run | `pytest tests/test_colab_checkpoints.py` |
 | No heavy import is reachable at module scope, so CPU tests need no torch | `linescout-repro selfcheck` |
-| The checkout contract against a real remote: shallow fetch of the pinned SHA, HEAD compared, both URLs, and a reuse of the existing checkout | `linescout-repro checkout --dir /tmp/x --rev 06ae976…` — 12 hex out of a real clone of `junosapollo/drawable`, not a fixture |
+| The checkout contract against a real remote: shallow fetch of the pinned SHA, HEAD compared, both URLs, and a reuse of the existing checkout | `linescout-repro checkout --dir /tmp/x --rev <COLAB_PIN>` — 12 hex out of a real clone of `junosapollo/drawable`, not a fixture |
 | The docs still describe the setup CI runs | `linescout-repro selfcheck` |
 
 Reproduce that block anywhere:
