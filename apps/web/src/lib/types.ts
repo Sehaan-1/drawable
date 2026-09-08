@@ -78,15 +78,31 @@ export interface ReferenceAsset {
   id: string
   title: string
   imageUrl: string
-  /** Trace-compatible full asset; falls back to imageUrl when absent. */
+  /** Full-size asset for display; falls back to imageUrl when absent. */
   fullImageUrl?: string
   style: ReferenceStyle
   scope: string
   source: string
+  /**
+   * Whether the line art is native or extracted. Presentation only — it says
+   * nothing about what the asset may be used for.
+   */
   native: boolean
   match: 'Strong' | 'Close' | 'Related'
   relevance?: number
+  /**
+   * Stored source permission for placing this asset on the trace layer.
+   * Never inferred from `native`.
+   */
   traceAllowed: boolean
+  /**
+   * The image the trace layer may load, or `null` when tracing is not
+   * permitted. Populated only from `traceAllowed`, so a UI path that forgets
+   * to check the flag still cannot trace a forbidden asset.
+   */
+  traceUrl?: string | null
+  /** ISO timestamp for pinned references; absent for search results. */
+  pinnedAt?: string
 }
 
 export interface ReferenceGroup {

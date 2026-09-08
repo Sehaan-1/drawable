@@ -1,49 +1,35 @@
 import { create } from 'zustand'
+import type { GalleryKind } from '@drawable/contracts'
 import type { ReferenceAsset, SearchResponse } from '../lib/types'
+import { localPinClient, type PinClient, type RevokedPinView } from '../services/frontendServices'
 
 /**
- * Pinned references are durable *local application state*, fully independent
- * of learning: the API's preference profile never sees them. The fixture
- * gallery and the live gallery use separate namespaces so a pin made against
- * synthetic fixtures can never leak into a real-gallery session, and the
- * `:version` suffix lets the storage format evolve without a risky rewrite.
+ * Pinned references are durable *state*, fully independent of learning: an
+ * affinity reset never clears them, and turning learning off never stops
+ * them from working.
+ *
+ * Where they are stored depends on the gallery, and the two are isolated:
+ *
+ * * **live** pins belong to the API's SQLite database, so they survive a page
+ *   reload *and* a restart of the API, and every read revalidates them
+ *   against the current gallery (a pin whose asset lost permission or
+ *   eligibility comes back as `revokedPins`, not as a pin);
+ * * **fixture** pins are offline-only and live in an isolated local store
+ *   (see `services/pinStorage.ts`).
+ *
+ * The store never talks to a gallery directly; `attachGallery` injects the
+ * client for the active one, which is also what keeps the two namespaces from
+ * ever being read into each other.
  */
 
-export type GalleryKind = 'fixture' | 'live'
+export type { GalleryKind }
 
-export const PINS_VERSION = 1
-const LEGACY_PINS_KEY = 'drawable-fixture-pins'
-
-export function pinsKey(kind: GalleryKind): string {
-  return `drawable-pins:${kind}:${PINS_VERSION}`
-}
-
-function readPins(kind: GalleryKind): ReferenceAsset[] {
-  const key = pinsKey(kind)
-  if (localStorage.getItem(key) === null && kind === 'fixture') {
-    // One-time migration: the pre-v2 app stored fixture pins under a single
-    // un-namespaced key, so they can only ever belong to the fixture
-    // namespace — never to whichever gallery is read first.
-    const legacy = localStorage.getItem(LEGACY_PINS_KEY)
-    if (legacy !== null) {
-      localStorage.setItem(key, legacy)
-      localStorage.removeItem(LEGACY_PINS_KEY)
-    }
-  }
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? '[]') as ReferenceAsset[]
-  } catch {
-    return []
-  }
-}
-
-function writePins(kind: GalleryKind, pinned: ReferenceAsset[]): void {
-  localStorage.setItem(pinsKey(kind), JSON.stringify(pinned))
-}
+export { PINS_VERSION, pinsKey } from '../services/pinStorage'
 
 interface SearchState {
   /** Which gallery namespace pins are read from / written to. */
   gallery: GalleryKind
+  pinClient: PinClient
   generation: number
   drawing: boolean
   loading: boolean
@@ -53,8 +39,14 @@ interface SearchState {
   selectedStyle: string | null
   selectedAsset: ReferenceAsset | null
   pinned: ReferenceAsset[]
-  /** Switch the pin namespace and reload pins for that gallery. */
-  setGallery: (kind: GalleryKind) => void
+  /** Pins dropped by revalidation since the last hydrate. */
+  revokedPins: RevokedPinView[]
+  pinsHydrated: boolean
+  pinError: string | null
+  /** Point the store at a gallery's pin store and hydrate from it. */
+  attachGallery: (kind: GalleryKind, client: PinClient) => Promise<void>
+  /** Re-read pins from their durable store (startup, or after a change). */
+  hydratePins: () => Promise<void>
   invalidate: (drawing?: boolean) => number
   setDrawing: (drawing: boolean) => void
   setLoading: (loading: boolean) => void
@@ -63,11 +55,17 @@ interface SearchState {
   setTextHint: (hint: string) => void
   setSelectedStyle: (style: string | null) => void
   setSelectedAsset: (asset: ReferenceAsset | null) => void
-  togglePin: (asset: ReferenceAsset) => void
+  togglePin: (asset: ReferenceAsset) => Promise<boolean>
+  dismissRevokedPins: () => void
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : 'Pinned references are unavailable.'
 }
 
 export const useSearchStore = create<SearchState>((set, get) => ({
   gallery: 'fixture',
+  pinClient: localPinClient(),
   generation: 0,
   drawing: false,
   loading: false,
@@ -76,10 +74,27 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   textHint: '',
   selectedStyle: null,
   selectedAsset: null,
-  pinned: readPins('fixture'),
-  setGallery: (kind) => {
-    if (get().gallery === kind) return
-    set({ gallery: kind, pinned: readPins(kind) })
+  pinned: [],
+  revokedPins: [],
+  pinsHydrated: false,
+  pinError: null,
+  attachGallery: async (kind, client) => {
+    if (get().gallery === kind && get().pinClient === client && get().pinsHydrated) return
+    // Drop the previous gallery's pins immediately: showing them against
+    // another gallery, even for one frame, would mix the two namespaces.
+    set({ gallery: kind, pinClient: client, pinned: [], revokedPins: [], pinsHydrated: false })
+    await get().hydratePins()
+  },
+  hydratePins: async () => {
+    const client = get().pinClient
+    try {
+      const snapshot = await client.list()
+      if (get().pinClient !== client) return
+      set({ pinned: snapshot.pins, revokedPins: snapshot.revoked, pinsHydrated: true, pinError: null })
+    } catch (error) {
+      if (get().pinClient !== client) return
+      set({ pinError: message(error), pinsHydrated: true })
+    }
   },
   invalidate: (drawing = get().drawing) => {
     const generation = get().generation + 1
@@ -93,10 +108,23 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   setTextHint: (textHint) => set((state) => ({ textHint: textHint.slice(0, 120), generation: state.generation + 1 })),
   setSelectedStyle: (selectedStyle) => set((state) => ({ selectedStyle, generation: state.generation + 1 })),
   setSelectedAsset: (selectedAsset) => set({ selectedAsset }),
-  togglePin: (asset) => set((state) => {
-    const exists = state.pinned.some((item) => item.id === asset.id)
-    const pinned = exists ? state.pinned.filter((item) => item.id !== asset.id) : [asset, ...state.pinned]
-    writePins(state.gallery, pinned)
-    return { pinned }
-  }),
+  /**
+   * Pin or unpin, and adopt the durable store's answer. Returns the resulting
+   * pinned state so callers can log the matching interaction — the learning
+   * signal follows the state change, it never replaces it.
+   */
+  togglePin: async (asset) => {
+    const client = get().pinClient
+    const pinned = get().pinned.some((item) => item.id === asset.id)
+    try {
+      const snapshot = pinned ? await client.unpin(asset.id) : await client.pin(asset)
+      if (get().pinClient !== client) return !pinned
+      set({ pinned: snapshot.pins, revokedPins: snapshot.revoked, pinError: null })
+      return !pinned
+    } catch (error) {
+      if (get().pinClient === client) set({ pinError: message(error) })
+      return pinned
+    }
+  },
+  dismissRevokedPins: () => set({ revokedPins: [] }),
 }))

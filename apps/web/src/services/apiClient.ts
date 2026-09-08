@@ -8,10 +8,12 @@
 
 import {
   API_PREFIX,
+  type AssetPermissions,
   type ErrorResponse,
   type EventRequest,
   type EventResponse,
   type HealthResponse,
+  type PinsResponse,
   type PreferencesResponse,
   type PreferencesUpdate,
   type SearchResponse,
@@ -127,4 +129,13 @@ export const api = {
 
   getPreferences: () => request<PreferencesResponse>('/preferences'),
   updatePreferences: (update: PreferencesUpdate) => request<PreferencesResponse>('/preferences', json(update, 'PUT')),
+
+  // Pins are durable server state; every call returns the full revalidated set.
+  getPins: () => request<PinsResponse>('/pins'),
+  pinAsset: (assetId: string) => request<PinsResponse>(`/pins/${encodeURIComponent(assetId)}`, { method: 'PUT' }),
+  unpinAsset: (assetId: string) => request<PinsResponse>(`/pins/${encodeURIComponent(assetId)}`, { method: 'DELETE' }),
+
+  /** Source permissions for one asset (authoritative answer to "may this be traced?"). */
+  assetPermissions: (assetId: string, signal?: AbortSignal) =>
+    request<AssetPermissions>(`/assets/${encodeURIComponent(assetId)}/permissions`, { signal }),
 }

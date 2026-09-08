@@ -504,7 +504,6 @@ def test_exact_envelope_boundary_json_then_plus_one(client: TestClient) -> None:
         "session_id": "5e93f09a-3d34-4a11-8af0-2c1f0b28a980",
         "asset_id": "ls_synthetic_f1becf0b9d67dcc3",
         "event": "open",
-        "style": "cartoon",
         "query_revision": 1,
     }
     body = json.dumps(event).encode()

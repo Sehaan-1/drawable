@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from linescout_ml.taxonomy import LineArtOrigin, PrimaryStyle, ScopeLabel
+from linescout_ml.taxonomy import LineArtOrigin, PermissionBasis, PrimaryStyle, ScopeLabel
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Re-exported so the OpenAPI schema names them once and the TS contracts pick
@@ -21,6 +21,8 @@ __all__ = [
     "PrimaryStyle",
     "ScopeLabel",
     "LineArtOrigin",
+    "PermissionBasis",
+    "GalleryKind",
     "SearchMode",
     "StrokeStatus",
     "InteractionEvent",
@@ -259,18 +261,44 @@ class StrokeSequence(ApiModel):
 
 
 class EventRequest(ApiModel):
+    #: Client-generated identity for this interaction. Retrying the *same*
+    #: request (same UUID, same authoritative payload) replays the original
+    #: result instead of writing a second row; reusing the UUID with a
+    #: different payload is a ``409 event_uuid_conflict``.
+    event_uuid: UUID = Field(
+        description="Client-generated UUID identifying this interaction attempt (idempotency key)."
+    )
     session_id: UUID
     asset_id: str = Field(min_length=1, max_length=64)
     event: InteractionEvent
-    style: PrimaryStyle = Field(
-        description="Client-reported style. Ignored; the gallery asset's primary style is stored."
+    style: PrimaryStyle | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated and ignored. Style is derived server-side from the gallery row, so this "
+            "field is not part of the request's authoritative payload and never affects "
+            "idempotency. It is accepted only so older clients keep working."
+        ),
     )
     query_revision: int = Field(ge=0)
 
 
 class EventResponse(ApiModel):
+    #: Row id of the stored event, or ``0`` when nothing was stored
+    #: (learning disabled).
     id: int
+    #: Identity of the stored event. Equals the requested ``event_uuid``
+    #: except when the interaction coalesced onto an earlier equivalent event,
+    #: in which case it is that event's UUID.
+    event_uuid: UUID
     created_at: str
+    #: Whether a training event exists for this interaction. ``False`` when
+    #: learning is disabled — the call still succeeds, nothing is accumulated.
+    recorded: bool = True
+    #: ``True`` when this response replays an earlier write (retry with the
+    #: same UUID, or a repeat that coalesced onto an existing contribution)
+    #: rather than describing a row created by this request.
+    replayed: bool = False
 
 
 # ---------------------------------------------------------------- preferences
@@ -299,4 +327,95 @@ class PreferencesUpdate(ApiModel):
     )
     clear_selected_style: bool = Field(default=False, description="Clear the explicit style.")
     learning_enabled: bool | None = None
-    reset_affinities: bool = False
+    reset_affinities: bool = Field(
+        default=False,
+        description=(
+            "Forget learned affinities. Pins are durable application state and are never "
+            "cleared by a reset."
+        ),
+    )
+
+
+# ---------------------------------------------------------------- pins
+
+
+class GalleryKind(StrEnum):
+    """Namespace an interaction or pin belongs to.
+
+    Stamped server-side from the API's own mode: fixture-gallery state can
+    never mix with live-gallery state.
+    """
+
+    FIXTURE = "fixture"
+    LIVE = "live"
+
+
+class PinnedAsset(ApiModel):
+    """A durably pinned reference, projected against the *current* gallery.
+
+    The projection is recomputed on every read, so a permission or eligibility
+    change is reflected immediately: ``trace_allowed`` is the asset's stored
+    trace permission (never inferred from ``origin``), and an asset that lost
+    display eligibility does not appear here at all.
+    """
+
+    asset_id: str
+    pinned_at: str
+    thumbnail_url: str
+    asset_url: str
+    style: PrimaryStyle
+    primary_scope: ScopeLabel
+    scopes: list[ScopeLabel]
+    secondary_scopes: list[ScopeLabel] = Field(default_factory=list)
+    origin: LineArtOrigin
+    trace_allowed: bool = Field(
+        description="Stored per-asset trace permission; never derived from origin."
+    )
+    quality: float = Field(ge=0.0, le=1.0)
+    person_count: int | None = Field(default=None, ge=0)
+    person_count_approximate: bool = False
+
+
+class RevokedPin(ApiModel):
+    """A pin dropped because its asset is no longer eligible to be shown."""
+
+    asset_id: str
+    reasons: list[str] = Field(
+        description="Stable machine-readable serving blockers, e.g. display_not_permitted."
+    )
+
+
+class PinsResponse(ApiModel):
+    schema_version: Literal[1] = 1
+    gallery_kind: GalleryKind
+    pins: list[PinnedAsset]
+    revoked: list[RevokedPin] = Field(
+        default_factory=list,
+        description=(
+            "Pins removed by this read because revalidation found the asset ineligible "
+            "(permission revoked, review changed, derivatives stale, or asset gone)."
+        ),
+    )
+
+
+# ---------------------------------------------------------------- assets
+
+
+class AssetPermissions(ApiModel):
+    """Permission metadata a client needs before *using* an asset.
+
+    ``trace_url`` is populated only when tracing is permitted, so a client
+    that restores a saved trace layer cannot resurrect an asset whose trace
+    permission was revoked.
+    """
+
+    asset_id: str
+    origin: LineArtOrigin
+    permission_basis: PermissionBasis
+    attribution: str | None = None
+    attribution_required: bool = False
+    allowed_display: bool
+    allowed_trace: bool
+    thumbnail_url: str
+    asset_url: str
+    trace_url: str | None = None

@@ -8,8 +8,9 @@
  */
 
 import { create } from 'zustand'
+import type { GalleryKind } from '@drawable/contracts'
 import type { HealthResult } from '../lib/types'
-import { useSearchStore, type GalleryKind } from '../state/searchStore'
+import { useSearchStore } from '../state/searchStore'
 import { fixtureServices, type FrontendServices } from './frontendServices'
 import { liveServices } from './liveServices'
 
@@ -38,10 +39,12 @@ const forced = import.meta.env.VITE_LINESCOUT_SERVICES as string | undefined
 export const useServiceStore = create<ServiceState>((set) => {
   const activate = (mode: ServiceMode, services: FrontendServices, health: HealthResult | null) => {
     set({ mode, services, health })
-    // Pins are namespaced per gallery kind: switching between the fixture
-    // and live galleries swaps the pin set so the two never mix.
+    // Pins are namespaced per gallery kind and hydrated from that gallery's
+    // durable store (the API's database for live, an isolated local store for
+    // fixture), so switching galleries swaps the whole pin set and the two
+    // never mix.
     if (mode === 'live' || mode === 'fixture') {
-      useSearchStore.getState().setGallery(mode as GalleryKind)
+      void useSearchStore.getState().attachGallery(mode as GalleryKind, services.pins)
     }
   }
   return {

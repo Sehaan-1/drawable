@@ -30,7 +30,15 @@ from linescout_api.errors import (
     validation_error_handler,
 )
 from linescout_api.limits import RequestBodyLimitMiddleware
-from linescout_api.routers import assets, curation, events, health, preferences, search
+from linescout_api.routers import (
+    assets,
+    curation,
+    events,
+    health,
+    pins,
+    preferences,
+    search,
+)
 from linescout_api.state import build_state
 
 log = logging.getLogger(__name__)
@@ -154,7 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     app.add_middleware(
@@ -183,6 +191,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(search.router, prefix=prefix)
     app.include_router(events.router, prefix=prefix)
     app.include_router(preferences.router, prefix=prefix)
+    app.include_router(pins.router, prefix=prefix)
     app.include_router(assets.router, prefix=prefix)
     if settings.curation_mode:
         app.include_router(curation.router, prefix=prefix)

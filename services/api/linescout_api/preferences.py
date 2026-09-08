@@ -1,11 +1,30 @@
 """Local, account-free style preference learning.
 
-Event weights: open 1, pin 3, trace 4. Repeated open/trace clicks on the same
-asset (same session and query revision) coalesce to one contribution. Pin/unpin
-is a per-asset toggle: an unpin cancels a matching pin and never applies a
-negative penalty. Affinity per style is the Laplace-smoothed share of
-exponentially decayed weight (30-day half-life). Preferences only control
-style-row order; they never touch relevance or Best Match.
+Event weights: open 1, pin 3, trace 4, **unpin 0**.
+
+Coalescing and timestamp stability
+----------------------------------
+Repeated ``open``/``trace`` clicks on the same asset (same session, query
+revision, and gallery) coalesce to exactly one contribution. The contribution
+is dated by the *earliest* matching event, so a retry, a double-click, or a
+replayed request can neither add weight nor refresh the decay clock — an
+interaction is worth what it was worth when it first happened. (The events
+table also enforces this with a partial unique index; the aggregator keeps the
+rule so historic rows behave the same way.)
+
+Zero-weight unpin
+-----------------
+Pins are durable application state (see :mod:`linescout_api.pins`), not a
+negative learning event. ``unpin`` carries weight ``0``: it never subtracts
+from a style and never penalises anything. What it *does* do is end the
+matching pin's contribution — the +3 exists only while the asset is actually
+pinned — and re-pinning later starts a new contribution dated at the earliest
+pin of that active run, so pin/unpin drumming cannot inflate or refresh
+anything either.
+
+Affinity per style is the Laplace-smoothed share of exponentially decayed
+weight (30-day half-life). Preferences only control style-row order; they
+never touch relevance or Best Match.
 """
 
 from __future__ import annotations
@@ -22,6 +41,9 @@ EVENT_WEIGHTS: dict[InteractionEvent, float] = {
     InteractionEvent.OPEN: 1.0,
     InteractionEvent.PIN: 3.0,
     InteractionEvent.TRACE: 4.0,
+    # Zero, deliberately: an unpin ends the pin's contribution, it is never a
+    # penalty of its own.
+    InteractionEvent.UNPIN: 0.0,
 }
 LAPLACE_ALPHA = 1.0
 
@@ -51,8 +73,10 @@ def compute_affinities(
         params = (reset_at,)
 
     decay = math.log(2) / max(half_life_days, 1e-6)
-    # Open/trace: one contribution per (session, asset, revision). Pin: net toggle
-    # per (session, asset). Unpins never contribute a negative weight of their own.
+    # Open/trace: one contribution per (session, asset, revision), dated by the
+    # FIRST matching event so replays and repeat clicks cannot refresh it.
+    # Pin: net toggle per (session, asset). Unpins never contribute a weight of
+    # their own (see EVENT_WEIGHTS).
     opens: dict[tuple[str, str, int], tuple[PrimaryStyle, datetime]] = {}
     traces: dict[tuple[str, str, int], tuple[PrimaryStyle, datetime]] = {}
     pin_events: dict[tuple[str, str], list[tuple[datetime, InteractionEvent, PrimaryStyle]]] = {}
@@ -67,16 +91,12 @@ def compute_affinities(
         session_id = str(row["session_id"])
         asset_id = str(row["asset_id"])
         revision = int(row["query_revision"])
-        if event is InteractionEvent.OPEN:
+        if event in (InteractionEvent.OPEN, InteractionEvent.TRACE):
+            bucket = opens if event is InteractionEvent.OPEN else traces
             key = (session_id, asset_id, revision)
-            previous = opens.get(key)
-            if previous is None or ts >= previous[1]:
-                opens[key] = (style, ts)
-        elif event is InteractionEvent.TRACE:
-            key = (session_id, asset_id, revision)
-            previous = traces.get(key)
-            if previous is None or ts >= previous[1]:
-                traces[key] = (style, ts)
+            previous = bucket.get(key)
+            if previous is None or ts < previous[1]:
+                bucket[key] = (style, ts)
         elif event in (InteractionEvent.PIN, InteractionEvent.UNPIN):
             pin_events.setdefault((session_id, asset_id), []).append((ts, event, style))
 
@@ -91,18 +111,21 @@ def compute_affinities(
     for style, ts in traces.values():
         accumulate(style, ts, EVENT_WEIGHTS[InteractionEvent.TRACE])
     for sequence in pin_events.values():
+        # Sort by (timestamp, id order is already stable) and walk the toggle.
+        # ``pin_at`` is the earliest pin of the *currently active* run, so a
+        # repeated pin does not refresh the contribution's decay clock.
         sequence.sort(key=lambda item: item[0])
-        pinned = False
         pin_style: PrimaryStyle | None = None
         pin_at: datetime | None = None
         for ts, event, style in sequence:
             if event is InteractionEvent.PIN:
-                pinned = True
-                pin_style = style
-                pin_at = ts
+                if pin_at is None:
+                    pin_style, pin_at = style, ts
             else:
-                pinned = False
-        if pinned and pin_style is not None and pin_at is not None:
+                # Unpin: weight 0. It contributes nothing itself and ends the
+                # active pin's contribution.
+                pin_style, pin_at = None, None
+        if pin_style is not None and pin_at is not None:
             accumulate(pin_style, pin_at, EVENT_WEIGHTS[InteractionEvent.PIN])
 
     clipped = {style: max(0.0, weight) for style, weight in weights.items()}
@@ -143,6 +166,9 @@ def write_preferences(
         updates.append("learning_enabled = ?")
         params.append(int(learning_enabled))
     if reset_affinities:
+        # Only *learned* weight is forgotten. Pins live in their own table and
+        # are deliberately untouched: they are state the artist chose, not an
+        # inference the app made.
         updates.append("affinity_reset_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')")
     if not updates:
         return

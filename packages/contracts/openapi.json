@@ -24,6 +24,76 @@
         "title": "AllowedUses",
         "type": "object"
       },
+      "AssetPermissions": {
+        "additionalProperties": false,
+        "description": "Permission metadata a client needs before *using* an asset.\n\n``trace_url`` is populated only when tracing is permitted, so a client\nthat restores a saved trace layer cannot resurrect an asset whose trace\npermission was revoked.",
+        "properties": {
+          "allowed_display": {
+            "title": "Allowed Display",
+            "type": "boolean"
+          },
+          "allowed_trace": {
+            "title": "Allowed Trace",
+            "type": "boolean"
+          },
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_url": {
+            "title": "Asset Url",
+            "type": "string"
+          },
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "attribution_required": {
+            "default": false,
+            "title": "Attribution Required",
+            "type": "boolean"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/LineArtOrigin"
+          },
+          "permission_basis": {
+            "$ref": "#/components/schemas/PermissionBasis"
+          },
+          "thumbnail_url": {
+            "title": "Thumbnail Url",
+            "type": "string"
+          },
+          "trace_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Url"
+          }
+        },
+        "required": [
+          "asset_id",
+          "origin",
+          "permission_basis",
+          "allowed_display",
+          "allowed_trace",
+          "thumbnail_url",
+          "asset_url"
+        ],
+        "title": "AssetPermissions",
+        "type": "object"
+      },
       "Body_search_api_v1_search_post": {
         "properties": {
           "canvas_height": {
@@ -521,6 +591,12 @@
           "event": {
             "$ref": "#/components/schemas/InteractionEvent"
           },
+          "event_uuid": {
+            "description": "Client-generated UUID identifying this interaction attempt (idempotency key).",
+            "format": "uuid",
+            "title": "Event Uuid",
+            "type": "string"
+          },
           "query_revision": {
             "minimum": 0.0,
             "title": "Query Revision",
@@ -532,15 +608,23 @@
             "type": "string"
           },
           "style": {
-            "$ref": "#/components/schemas/PrimaryStyle",
-            "description": "Client-reported style. Ignored; the gallery asset's primary style is stored."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrimaryStyle"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "Deprecated and ignored. Style is derived server-side from the gallery row, so this field is not part of the request's authoritative payload and never affects idempotency. It is accepted only so older clients keep working."
           }
         },
         "required": [
+          "event_uuid",
           "session_id",
           "asset_id",
           "event",
-          "style",
           "query_revision"
         ],
         "title": "EventRequest",
@@ -553,17 +637,42 @@
             "title": "Created At",
             "type": "string"
           },
+          "event_uuid": {
+            "format": "uuid",
+            "title": "Event Uuid",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "recorded": {
+            "default": true,
+            "title": "Recorded",
+            "type": "boolean"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
+          "event_uuid",
           "created_at"
         ],
         "title": "EventResponse",
         "type": "object"
+      },
+      "GalleryKind": {
+        "description": "Namespace an interaction or pin belongs to.\n\nStamped server-side from the API's own mode: fixture-gallery state can\nnever mix with live-gallery state.",
+        "enum": [
+          "fixture",
+          "live"
+        ],
+        "title": "GalleryKind",
+        "type": "string"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1074,6 +1183,128 @@
         "title": "Permissions",
         "type": "object"
       },
+      "PinnedAsset": {
+        "additionalProperties": false,
+        "description": "A durably pinned reference, projected against the *current* gallery.\n\nThe projection is recomputed on every read, so a permission or eligibility\nchange is reflected immediately: ``trace_allowed`` is the asset's stored\ntrace permission (never inferred from ``origin``), and an asset that lost\ndisplay eligibility does not appear here at all.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "asset_url": {
+            "title": "Asset Url",
+            "type": "string"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/LineArtOrigin"
+          },
+          "person_count": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Count"
+          },
+          "person_count_approximate": {
+            "default": false,
+            "title": "Person Count Approximate",
+            "type": "boolean"
+          },
+          "pinned_at": {
+            "title": "Pinned At",
+            "type": "string"
+          },
+          "primary_scope": {
+            "$ref": "#/components/schemas/ScopeLabel"
+          },
+          "quality": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Quality",
+            "type": "number"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeLabel"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "secondary_scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeLabel"
+            },
+            "title": "Secondary Scopes",
+            "type": "array"
+          },
+          "style": {
+            "$ref": "#/components/schemas/PrimaryStyle"
+          },
+          "thumbnail_url": {
+            "title": "Thumbnail Url",
+            "type": "string"
+          },
+          "trace_allowed": {
+            "description": "Stored per-asset trace permission; never derived from origin.",
+            "title": "Trace Allowed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asset_id",
+          "pinned_at",
+          "thumbnail_url",
+          "asset_url",
+          "style",
+          "primary_scope",
+          "scopes",
+          "origin",
+          "trace_allowed",
+          "quality"
+        ],
+        "title": "PinnedAsset",
+        "type": "object"
+      },
+      "PinsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "gallery_kind": {
+            "$ref": "#/components/schemas/GalleryKind"
+          },
+          "pins": {
+            "items": {
+              "$ref": "#/components/schemas/PinnedAsset"
+            },
+            "title": "Pins",
+            "type": "array"
+          },
+          "revoked": {
+            "description": "Pins removed by this read because revalidation found the asset ineligible (permission revoked, review changed, derivatives stale, or asset gone).",
+            "items": {
+              "$ref": "#/components/schemas/RevokedPin"
+            },
+            "title": "Revoked",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "gallery_kind",
+          "pins"
+        ],
+        "title": "PinsResponse",
+        "type": "object"
+      },
       "PreferencesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1139,6 +1370,7 @@
           },
           "reset_affinities": {
             "default": false,
+            "description": "Forget learned affinities. Pins are durable application state and are never cleared by a reset.",
             "title": "Reset Affinities",
             "type": "boolean"
           },
@@ -1192,6 +1424,30 @@
         ],
         "title": "ReviewState",
         "type": "string"
+      },
+      "RevokedPin": {
+        "additionalProperties": false,
+        "description": "A pin dropped because its asset is no longer eligible to be shown.",
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "reasons": {
+            "description": "Stable machine-readable serving blockers, e.g. display_not_permitted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "asset_id",
+          "reasons"
+        ],
+        "title": "RevokedPin",
+        "type": "object"
       },
       "ScopeBreakdown": {
         "additionalProperties": false,
@@ -1948,6 +2204,59 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/assets/{asset_id}/permissions": {
+      "get": {
+        "description": "Permission metadata for an eligible asset.\n\nThis is the authoritative answer to \"may this asset be traced?\": it comes\nfrom the recorded source permission (``allowed_trace``), never from\nwhether the line art is native or extracted. ``trace_url`` is ``null``\nwhen tracing is not permitted, so a client restoring a saved trace layer\ncannot resurrect an asset whose permission was revoked.",
+        "operationId": "get_asset_permissions_api_v1_assets__asset_id__permissions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetPermissions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown or ineligible asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Asset Permissions",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
     "/api/v1/assets/{asset_id}/{kind}": {
       "get": {
         "operationId": "get_asset_file_api_v1_assets__asset_id___kind__get",
@@ -2192,7 +2501,7 @@
     },
     "/api/v1/events": {
       "post": {
-        "description": "Record an interaction. Timestamp and style are generated server-side.",
+        "description": "Record an interaction. Timestamp, style, and namespace are server-side.",
         "operationId": "record_event_api_v1_events_post",
         "requestBody": {
           "content": {
@@ -2214,6 +2523,36 @@
               }
             },
             "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Tracing this asset is not permitted"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown or ineligible asset"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "event_uuid reused with a different payload"
           },
           "422": {
             "content": {
@@ -2250,6 +2589,122 @@
         "summary": "Health",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/pins": {
+      "get": {
+        "description": "Pins for this API's gallery namespace, revalidated on every read.",
+        "operationId": "get_pins_api_v1_pins_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Pins",
+        "tags": [
+          "pins"
+        ]
+      }
+    },
+    "/api/v1/pins/{asset_id}": {
+      "delete": {
+        "description": "Unpin an asset. Idempotent, and never a negative learning signal.\n\nUnpinning an asset that is not pinned (or no longer exists) succeeds: the\ncaller's intent \u2014 \"this must not be pinned\" \u2014 is already true.",
+        "operationId": "unpin_asset_api_v1_pins__asset_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unpin Asset",
+        "tags": [
+          "pins"
+        ]
+      },
+      "put": {
+        "description": "Pin an asset. Idempotent: re-pinning keeps the original pin time.",
+        "operationId": "pin_asset_api_v1_pins__asset_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown or ineligible asset"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pin Asset",
+        "tags": [
+          "pins"
         ]
       }
     },
