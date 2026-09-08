@@ -176,6 +176,9 @@ export function ReferenceDock() {
   const pinError = useSearchStore((state) => state.pinError)
   const invalidate = useSearchStore((state) => state.invalidate)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const vectorBranch = response?.degradations?.find(
+    (item) => item.kind === 'vector_absent' || item.kind === 'vector_sparse',
+  )
 
   const groups = useMemo(() => {
     if (!response) return []
@@ -237,6 +240,12 @@ export function ReferenceDock() {
             ? 'Searching a raster snapshot — no exact vector counts'
             : 'Vector counts are approximate'}
         </p>
+      ) : null}
+      {vectorBranch && !error ? (
+        // Read from the response's structural degradations, never re-derived
+        // from stroke counts: a substantive raster import with no vectors and
+        // a thin vector payload are different disclosures with different fixes.
+        <p className="reference-warning" role="note" data-testid="vector-branch">{vectorBranch.detail}</p>
       ) : null}
       {selectedAsset ? <ReferenceDetail asset={selectedAsset} /> : null}
       <div className="reference-scroll" ref={scrollRef}>

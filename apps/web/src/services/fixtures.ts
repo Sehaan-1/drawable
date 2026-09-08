@@ -3,9 +3,11 @@ import type {
   ReferenceAsset,
   ReferenceGroup,
   ReferenceStyle,
+  SearchDegradation,
   SearchRequest,
   SearchResponse,
 } from '../lib/types'
+import { inputDegradations, rasterSufficiency, vectorBranchStatus } from '../lib/rasterInk'
 
 const styles: ReferenceStyle[] = ['Manga / anime', 'Western ink', 'Realistic', 'Cartoon', 'Gesture']
 const scopes = ['Eye study', 'Face construction', 'Hair silhouette', 'Hand gesture', 'Standing figure', 'Two-character pose']
@@ -84,6 +86,17 @@ export async function fixtureSearch(request: SearchRequest, signal: AbortSignal)
     }, { once: true })
   })
   if (lowerHint.includes('error')) throw new Error('The fixture search was asked to fail.')
+  const ink = request.ink ?? null
+  // The delivered payload outranks the reported counts, exactly as it does on
+  // the API: `strokes` present is ground truth, absent is an estimate.
+  const deliveredPoints = request.strokes
+    ? request.strokes.strokes.reduce((total, stroke) => total + stroke.points.length, 0)
+    : undefined
+  const vector = vectorBranchStatus(request.strokeCount, request.pointCount, deliveredPoints)
+  // Structural only: what about *this query's input* is below full quality. The
+  // offline gallery being a fixture is disclosed by the dock badge, not here.
+  const degradations: SearchDegradation[] = inputDegradations(ink, request.strokeCount, request.pointCount, deliveredPoints)
+  const warning = degradations.map((item) => item.detail).join('; ') || null
   const base = {
     revision: request.revision,
     generation: request.generation,
@@ -91,13 +104,28 @@ export async function fixtureSearch(request: SearchRequest, signal: AbortSignal)
     // counts only when a vector payload was actually delivered.
     countsApproximate: !request.strokes,
     strokeStatus: request.strokes ? 'present' : 'absent',
-  } satisfies Pick<SearchResponse, 'revision' | 'generation' | 'countsApproximate' | 'strokeStatus'>
-  if (request.strokeCount === 0) {
+    degradations,
+    warning,
+  } satisfies Pick<SearchResponse, 'revision' | 'generation' | 'countsApproximate' | 'strokeStatus' | 'degradations' | 'warning'>
+  // Sufficiency is measured on the snapshot's ink: an import with real line art
+  // but zero vector points is a drawing, and a canvas whose only mark was
+  // erased (or a fully transparent import) is not. Where pixels could not be
+  // read at all, fall back to the vector counts instead of guessing blank.
+  const sufficiency = rasterSufficiency(ink)
+  if (sufficiency.blank || (sufficiency.unknown && vector === 'absent')) {
     return { ...base, mode: 'empty', interpretation: 'Blank canvas', groups: [] }
   }
-  if (lowerHint.includes('empty')) {
-    return { ...base, mode: 'insufficient', interpretation: 'No relevant candidates', groups: [] }
+  if (sufficiency.insufficient || lowerHint.includes('empty')) {
+    return {
+      ...base,
+      mode: 'insufficient',
+      interpretation: sufficiency.insufficient ? 'Too little ink to read a subject from' : 'No relevant candidates',
+      groups: [],
+    }
   }
+  // Confidence stays a function of how much of the *drawing* has been made —
+  // the vector branch's state is disclosed above, not folded into the mode, so
+  // a substantive raster import is never demoted for the geometry it lacks.
   if (request.strokeCount < 3) {
     return { ...base, mode: 'provisional', interpretation: 'Reading early marks', groups: provisionalGroups() }
   }

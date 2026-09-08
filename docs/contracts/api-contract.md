@@ -40,14 +40,36 @@ Response (`schema_version: 2`):
 | `stroke_status` | `present` \| `absent` | whether a vector `strokes` payload accompanied this query |
 | `counts_approximate` | bool | exact-verification flag, see below |
 | `preprocessing_version` | str | snapshot-preprocessing pipeline identity |
-| `mode` | `insufficient` \| `provisional` \| `confident` | blank/early input → `200` with `mode=insufficient`, never an error |
+| `mode` | `insufficient` \| `provisional` \| `confident` | too little input → `200` with `mode=insufficient`, never an error; the API has no `empty` mode, clients map `degradations: [blank_raster]` onto it |
 | `scope_predictions` | `[{label, confidence}]` | early-scope reading; `unknown` label = no confident scope yet |
 | `groups` | `[{kind, id?, title, style?, scope?, results}]` | `best_match`, `style`, or `provisional_scope` |
 | `results[i]` | see below | per-result fields include `trace_allowed` (stored permission, never derived from origin) |
 | `timing` | `{preprocessing_ms, embedding_ms, retrieval_ms, reranking_ms, total_ms}` | |
-| `degradations` | `[{kind, detail}]` | **canonical** quality view; `[]` = full quality. kinds: `fixture_mode`, `cpu_fallback`, `branch_disabled`, `gallery_empty` |
+| `degradations` | `[{kind, detail}]` | **canonical** quality view; `[]` = full quality. kinds: `fixture_mode`, `cpu_fallback`, `branch_disabled`, `gallery_empty`, `blank_raster`, `vector_absent`, `vector_sparse` |
 | `warning` | str \| null | `"; ".join(detail)` of `degradations`; kept for older clients, may be removed later |
 | `dataset_version` / `index_version` | str \| null | provenance of the results |
+
+**Sufficiency is a raster verdict; the vector branch is a separate verdict.**
+`mode` comes from the ink on the uploaded snapshot, measured on the flattened
+512² image (grayscale < 200 counts as ink, `preprocessing_version` 1.1.0):
+
+| Verdict | Rule |
+|---|---|
+| `blank` | no ink pixels at all (`ink_pixels`/`coverage` are 0) — nothing was drawn, everything was erased, or the import is fully transparent/blank. Transparency is flattened onto white first, so an empty import measures as blank rather than as content. |
+| `insufficient` | `blank`, or the ink bounding-box diagonal is below `min_ink_diagonal_ratio` of the snapshot diagonal (a mark too small to read a subject from) |
+
+Stroke/point counts never produce either verdict. They describe the *vector
+branch* only — `absent` (no strokes and no points), `sparse` (below
+`min_points_for_search` sampled points), or `usable` — and a degraded branch is
+disclosed (`vector_absent` / `vector_sparse`) without demoting a drawing that
+has real ink. That distinction is the whole point: a PNG or flattened-SVG
+import carries no vector geometry at all, and counting it as "too few points"
+would make imported artwork unsearchable.
+
+`blank` is reported structurally as `blank_raster` so a client can tell "this
+canvas is empty" from "keep drawing" without re-deriving it from counts. On the
+insufficient path the input degradations are the raster ones; on the ranked path
+they are the vector ones (the query had enough ink to be searched at all).
 
 **Count cross-checks are never silently trusted.** When a `strokes` payload
 is present its `canvas_width`/`canvas_height` and stroke array are the ground

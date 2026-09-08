@@ -3,6 +3,20 @@
 This is the part of the search pipeline that exists before any model does:
 validate the PNG, normalize it to a white-background grayscale view, measure
 the ink bounding box, and decide whether there is enough to search on.
+
+Two *separate* verdicts come out of this module:
+
+``raster_sufficiency``
+    Whether the drawing itself carries enough ink to search on. This is the
+    only gate on the overall response: it is measured on the flattened
+    snapshot, so a vector-less import with real line art is searchable and a
+    fully transparent "import" is recognised as blank rather than as content.
+
+``vector_branch``
+    Whether the *stroke* retrieval branch has enough vector data to
+    contribute. Absent or sparse vectors degrade that branch (structurally,
+    through the response's ``degradations`` list); they never veto a drawing
+    the raster already justifies.
 """
 
 from __future__ import annotations
@@ -12,6 +26,7 @@ import json
 import math
 import zlib
 from dataclasses import dataclass
+from typing import Literal
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
@@ -24,11 +39,13 @@ MAX_COMPRESSED_BYTES = 256 * 1024  # 256 KiB — gzipped strokes, as uploaded
 MAX_DECOMPRESSED_BYTES = 1024 * 1024  # 1 MiB — stroke JSON after decompression
 
 # Identity of the snapshot-preprocessing pipeline (PNG decode, grayscale
-# normalization, ink measurement, insufficiency rule). Bumped only when a
+# normalization, ink measurement, sufficiency rule). Bumped only when a
 # change would make two calls with identical inputs produce meaningfully
 # different stats; echoed on every search response and in /health so clients
 # can tell whether two queries were prepared by the same code.
-PREPROCESSING_VERSION = "1.0.0"
+# 1.1.0: sufficiency is measured on raster ink alone — vector counts no longer
+# gate whether a drawing is searchable, only whether the stroke branch runs.
+PREPROCESSING_VERSION = "1.1.0"
 
 
 class SnapshotError(ValueError):
@@ -120,18 +137,120 @@ def ink_stats(gray: Image.Image) -> InkStats:
     return InkStats(gray.width, gray.height, ink_pixels=histogram[255], bbox=bbox)
 
 
-def is_insufficient(
-    stats: InkStats, point_count: int, min_points: int, min_diagonal_ratio: float
-) -> bool:
-    """Return True when the query has too little ink (or too few vector points).
+@dataclass(frozen=True)
+class RasterSufficiency:
+    """Whether the measured ink in the snapshot justifies a search at all.
 
-    Imported raster drawings may have ``point_count == 0``; those are judged by
-    ink coverage and bounding-box diagonal instead of vector sampling.
+    ``blank`` is the difference between *nothing was drawn* and *too little was
+    drawn*: a blank snapshot (an empty canvas, or an imported PNG/SVG whose
+    visible content is fully transparent — transparency flattens onto white)
+    has no ink to read a subject from at all, while a small mark has ink but no
+    spread. Both are insufficient, but only ``blank`` is an empty canvas.
     """
-    too_little_ink = stats.coverage <= 0.0 or stats.bbox_diagonal_ratio < min_diagonal_ratio
-    if point_count == 0:
-        return too_little_ink
-    return point_count < min_points or stats.bbox_diagonal_ratio < min_diagonal_ratio
+
+    ink_pixels: int
+    coverage: float
+    bbox_diagonal_ratio: float
+    blank: bool
+    spread_too_small: bool
+
+    @property
+    def sufficient(self) -> bool:
+        return not (self.blank or self.spread_too_small)
+
+    @property
+    def insufficient(self) -> bool:
+        return not self.sufficient
+
+
+def raster_sufficiency(stats: InkStats, min_diagonal_ratio: float) -> RasterSufficiency:
+    """Judge the drawing on its ink measurements — and on nothing else.
+
+    Vector data is deliberately not consulted here: an imported raster carries
+    no strokes, and the client's reported point counts are estimates. Treating
+    either as evidence of an empty drawing would veto a substantive import;
+    :func:`vector_branch` is what decides whether the stroke branch runs.
+    """
+    blank = stats.ink_pixels <= 0 or stats.coverage <= 0.0
+    return RasterSufficiency(
+        ink_pixels=stats.ink_pixels,
+        coverage=stats.coverage,
+        bbox_diagonal_ratio=stats.bbox_diagonal_ratio,
+        blank=blank,
+        spread_too_small=not blank and stats.bbox_diagonal_ratio < min_diagonal_ratio,
+    )
+
+
+VectorStatus = Literal["usable", "sparse", "absent"]
+
+
+@dataclass(frozen=True)
+class VectorBranch:
+    """Availability of the stroke (vector) retrieval branch for one query.
+
+    ``point_count`` is the *trusted* total: the delivered payload's point count
+    when a ``strokes`` part was decoded (ground truth), otherwise the client's
+    estimate. The status never decides whether the query is searched — it
+    decides how much of the query the vector branch can contribute.
+    """
+
+    status: VectorStatus
+    stroke_count: int
+    point_count: int
+    #: True when ``point_count`` came from the delivered payload, not an estimate.
+    measured: bool
+    min_points: int
+
+    @property
+    def usable(self) -> bool:
+        return self.status == "usable"
+
+    @property
+    def degradation(self) -> tuple[Literal["vector_absent", "vector_sparse"], str] | None:
+        """The structured degradation this query's vector input causes, if any."""
+        if self.status == "absent":
+            return (
+                "vector_absent",
+                "no vector stroke data in this query; the stroke branch contributed nothing",
+            )
+        if self.status == "sparse":
+            return (
+                "vector_sparse",
+                f"vector branch degraded: {self.point_count} sampled point(s) below the "
+                f"{self.min_points} this branch needs"
+                f"{'' if self.measured else ' (client-reported count)'}",
+            )
+        return None
+
+
+def vector_branch(
+    stroke_sequence: StrokeSequence | None,
+    *,
+    stroke_count: int,
+    point_count: int,
+    min_points: int,
+) -> VectorBranch:
+    """Decide whether the vector branch has enough delivered data to rank on."""
+    delivered = (
+        None
+        if stroke_sequence is None
+        else sum(len(stroke.points) for stroke in stroke_sequence.strokes)
+    )
+    measured = delivered is not None
+    total = point_count if delivered is None else delivered
+    if stroke_count <= 0 and total <= 0:
+        status: VectorStatus = "absent"
+    elif stroke_count <= 0 or total < min_points:
+        status = "sparse"
+    else:
+        status = "usable"
+    return VectorBranch(
+        status=status,
+        stroke_count=stroke_count,
+        point_count=total,
+        measured=measured,
+        min_points=min_points,
+    )
 
 
 def tight_crop(gray: Image.Image, stats: InkStats, padding: float = 0.10) -> Image.Image:

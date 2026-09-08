@@ -62,11 +62,48 @@ def test_blank_canvas_is_insufficient_not_an_error(client: TestClient, session_i
     assert body["groups"] == []
 
 
-def test_too_few_points_is_insufficient(client: TestClient, session_id: str) -> None:
+def test_small_vector_counts_do_not_veto_a_sufficient_raster(
+    client: TestClient, session_id: str
+) -> None:
+    """A degraded stroke branch is a degradation, never a rejected drawing.
+
+    The figure below is fully drawn in the snapshot but reports only 19
+    sampled points — under the 20 the stroke branch wants. The drawing stays
+    searchable; what shrinks is the vector branch, and that has to be visible
+    structurally rather than by the response silently coming back empty.
+    """
     status, body = post_search(
         client, session_id, png_bytes(draw_figure), point_count=19, stroke_count=1
     )
-    assert status == 200 and body["mode"] == "insufficient"
+    assert status == 200
+    assert body["mode"] != "insufficient"
+    assert body["groups"]
+    kinds = {item["kind"] for item in body["degradations"]}
+    assert "vector_sparse" in kinds
+    assert "blank_raster" not in kinds
+
+
+def test_transparent_import_is_blank_not_substantive(client: TestClient, session_id: str) -> None:
+    """A fully transparent PNG *is* an empty canvas once flattened onto white.
+
+    It gets the same 200/insufficient answer as a canvas nothing was drawn on,
+    and it says so structurally: `blank_raster` is what tells a client "your
+    import had no ink" apart from "your drawing is too small to read".
+    """
+    transparent = png_bytes(None, size=512, mode="RGBA")
+    status, body = post_search(client, session_id, transparent, stroke_count=0, point_count=0)
+    assert status == 200
+    assert body["mode"] == "insufficient"
+    assert body["groups"] == []
+    assert {item["kind"] for item in body["degradations"]} >= {"blank_raster"}
+    # A substantive import of the same file size is *not* blank: same shape on
+    # the wire, opposite verdict, decided purely by the measured ink.
+    status, inked = post_search(
+        client, session_id, png_bytes(draw_figure, mode="RGBA"), stroke_count=0, point_count=0
+    )
+    assert status == 200
+    assert inked["mode"] != "insufficient"
+    assert not any(item["kind"] == "blank_raster" for item in inked["degradations"])
 
 
 def test_tiny_ink_bbox_is_insufficient(client: TestClient, session_id: str) -> None:
@@ -365,12 +402,25 @@ def test_not_ready_api_returns_structured_503(tmp_path: Path, session_id: str) -
 def test_imported_raster_with_zero_points_is_searchable(
     client: TestClient, session_id: str
 ) -> None:
+    """The substantive import: real line art, no vector geometry at all.
+
+    Zero strokes and zero points is what an imported PNG/SVG flattens to, so
+    the counts must not be read as "nothing was drawn". The stroke branch is
+    off for this query and says so structurally; the search itself runs on the
+    snapshot.
+    """
     status, body = post_search(
         client, session_id, png_bytes(draw_figure), stroke_count=0, point_count=0
     )
     assert status == 200
     assert body["mode"] in ("provisional", "confident")
     assert body["groups"]
+    assert body["stroke_status"] == "absent"
+    assert body["counts_approximate"] is True
+    vector = [item for item in body["degradations"] if item["kind"] == "vector_absent"]
+    assert len(vector) == 1
+    assert "stroke branch" in vector[0]["detail"]
+    assert not any(item["kind"] == "blank_raster" for item in body["degradations"])
 
 
 def test_zip_bomb_strokes_are_413(client: TestClient, session_id: str) -> None:

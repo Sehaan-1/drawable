@@ -744,6 +744,13 @@ export interface components {
          *     ``degradations`` on the response is the canonical, machine-readable view;
          *     the top-level ``warning`` string is a convenience join kept for older
          *     clients and may be removed in a future contract version.
+         *
+         *     The kinds split by what is degraded: ``fixture_mode``/``cpu_fallback``/
+         *     ``branch_disabled``/``gallery_empty`` describe the *server*, while
+         *     ``blank_raster``/``vector_absent``/``vector_sparse`` describe this
+         *     *query's input*. A client that only wants to know whether the stroke
+         *     branch contributed filters on the input kinds; ``branch_disabled`` means
+         *     the branch is off for every query, not for this one.
          */
         Degradation: {
             /** Detail */
@@ -752,7 +759,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "fixture_mode" | "cpu_fallback" | "branch_disabled" | "gallery_empty";
+            kind: "fixture_mode" | "cpu_fallback" | "branch_disabled" | "gallery_empty" | "blank_raster" | "vector_absent" | "vector_sparse";
         };
         /**
          * DerivativeArtifactStamp
@@ -2448,7 +2455,7 @@ export const curationBlockerValues: ReadonlyArray<FlattenedDeepRequired<componen
 export const curationCandidateDerivative_processing_stateAnyOf0Values: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["derivative_processing_state"]> = ["pending", "complete", "failed"];
 export const curationCandidateOriginValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["origin"]> = ["native_line_art", "extracted_line_art"];
 export const curationCandidateReview_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CurationCandidate"]["review_state"]> = ["unreviewed", "accepted", "rejected", "quarantined"];
-export const degradationKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Degradation"]["kind"]> = ["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty"];
+export const degradationKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Degradation"]["kind"]> = ["fixture_mode", "cpu_fallback", "branch_disabled", "gallery_empty", "blank_raster", "vector_absent", "vector_sparse"];
 export const derivativeProcessResponseProcessing_stateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["DerivativeProcessResponse"]["processing_state"]> = ["pending", "complete", "failed"];
 export const galleryKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["GalleryKind"]> = ["fixture", "live"];
 export const healthResponseDeviceValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HealthResponse"]["device"]> = ["cuda", "cpu"];
