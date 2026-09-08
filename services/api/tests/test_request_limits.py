@@ -261,6 +261,31 @@ def _randbytes(seed: int, n: int) -> bytes:
     return random.Random(seed).randbytes(n)
 
 
+def gzip_of_exact_size(payload: bytes, target_size: int) -> bytes:
+    """A valid gzip member of exactly ``target_size`` bytes wrapping ``payload``.
+
+    The length is matched by padding the gzip FEXTRA header field, never by
+    hunting for an input whose deflate stream happens to land on the target —
+    the latter depends on the linked zlib version. Decoders skip the extra
+    field, so every zlib release inflates this identically. One FEXTRA field
+    holds up to 65535 bytes of padding.
+    """
+    base = gzip.compress(payload, mtime=0)
+    extra_len = target_size - len(base) - 2  # 2 bytes for the XLEN field itself
+    assert 0 <= extra_len <= 0xFFFF, (len(base), extra_len)
+    padded = (
+        base[:3]
+        + bytes([base[3] | 0x04])  # FLG bit 2: FEXTRA present
+        + base[4:10]
+        + struct.pack("<H", extra_len)
+        + b"x" * extra_len
+        + base[10:]
+    )
+    assert len(padded) == target_size
+    assert gzip.decompress(padded) == payload  # sanity: decoders skip FEXTRA
+    return padded
+
+
 def test_stroke_limits_are_consistent_between_config_and_preprocessing() -> None:
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.max_strokes_bytes == 256 * 1024 == MAX_COMPRESSED_BYTES
@@ -268,26 +293,12 @@ def test_stroke_limits_are_consistent_between_config_and_preprocessing() -> None
 
 
 def test_compressed_boundary_exact_and_plus_one() -> None:
-    # Find an incompressible payload whose gzip form is exactly 256 KiB...
-    exact = None
-    exact_n = 0
-    for n in range(MAX_COMPRESSED_BYTES, MAX_COMPRESSED_BYTES - 1600, -1):
-        candidate = gzip.compress(_randbytes(1, n), mtime=0)
-        if len(candidate) == MAX_COMPRESSED_BYTES:
-            exact, exact_n = candidate, n
-            break
-    assert exact is not None, "no incompressible payload lands exactly on 256 KiB"
-    assert safe_decompress_gzip(exact)  # boundary itself is accepted
-    # ...and the next incompressible payload that crosses it is refused.
-    over = None
-    for n in range(exact_n + 1, exact_n + 400):
-        candidate = gzip.compress(_randbytes(1, n), mtime=0)
-        if len(candidate) == MAX_COMPRESSED_BYTES + 1:
-            over = candidate
-            break
-    assert over is not None, "no incompressible payload lands on 256 KiB + 1"
+    payload = _randbytes(1, 210_000)  # incompressible; FEXTRA does the sizing
+    exact = gzip_of_exact_size(payload, MAX_COMPRESSED_BYTES)
+    assert len(exact) == 256 * 1024
+    assert safe_decompress_gzip(exact) == payload  # boundary itself is accepted
     with pytest.raises(GzipLimitError, match="compressed_payload_too_large"):
-        safe_decompress_gzip(over)
+        safe_decompress_gzip(gzip_of_exact_size(payload, MAX_COMPRESSED_BYTES + 1))
 
 
 def test_expanded_boundary_exact_then_plus_one() -> None:
@@ -610,16 +621,10 @@ def test_concatenated_gzip_strokes_are_400(client: TestClient, session_id: str) 
 def test_strokes_exactly_256kib_compressed_pass_the_size_gate(
     client: TestClient, session_id: str
 ) -> None:
-    # Incompressible payload tuned to exactly 256 KiB on the wire: over the
-    # compressed gate nothing fires, so decoding proceeds and (random bytes
-    # not being JSON) fails later as malformed — never as too_large.
-    exact = None
-    for n in range(MAX_COMPRESSED_BYTES - 18, MAX_COMPRESSED_BYTES - 1600, -1):
-        candidate = gzip.compress(random.Random(11).randbytes(n), mtime=0)
-        if len(candidate) == MAX_COMPRESSED_BYTES:
-            exact = candidate
-            break
-    assert exact is not None
+    # Exactly 256 KiB on the wire (sized via the gzip FEXTRA field): the
+    # compressed gate does not fire, decoding proceeds, and the random payload
+    # — not being JSON — fails later as malformed, never as too_large.
+    exact = gzip_of_exact_size(random.Random(11).randbytes(210_000), MAX_COMPRESSED_BYTES)
     assert len(exact) == 256 * 1024
     status, body = post_search(client, session_id, png_bytes(draw_figure), strokes=exact)
     assert status == 400 and body["error"]["code"] == "strokes_malformed"
