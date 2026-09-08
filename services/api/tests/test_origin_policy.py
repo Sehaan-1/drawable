@@ -123,8 +123,11 @@ def curation_client(tmp_path: Path) -> TestClient:
                 Image.new("RGBA", (16, 16), (0, 0, 0, 0)).save(target, "PNG")
     with TestClient(create_app(make_settings(tmp_path, curation_mode=True))) as client:
         state = client.app.state.linescout
+        # gold members must stay 'accepted' per the schema CHECK constraint, so
+        # demote everyone to unreviewed *and* strip the gold flag together.
         state.connection.execute(
-            "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, enabled = 0"
+            "UPDATE assets SET review_state = 'unreviewed', review_quality = NULL, "
+            "enabled = 0, gold_member = 0"
         )
         state.assets = enabled_assets(state.connection)
         yield client  # type: ignore[misc]
