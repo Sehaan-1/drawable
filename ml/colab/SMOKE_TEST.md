@@ -121,3 +121,32 @@ gap rather than silently missing.
 | `MissingDependencyError` in the label stage after `AUTO_INSTALL = False` | Nothing installed, as asked | Run cell 2d |
 | `ImportError: libGL.so.1: cannot open shared object file` from `cv2` | `opennsfw2` pulls `opencv-python` (the GUI build) as a dependency, and our `opencv-python-headless` pin coexists with it rather than replacing it | Colab ships `libGL`; a slim container should `apt-get install -y libgl1` or drop the label stage. Nothing about the pinning caused it |
 | A stray `note:` about a mirror | `REPO_URL` was unreachable and the mirror served the fetch | Harmless *if* the printed HEAD equals `REPO_PIN`; it always is, or the run stopped |
+
+## Verification log
+
+Dated record of what was re-verified and when, so a future reader can tell "checked
+again" from "written once". A GPU run has **never** happened; the entry below says so
+rather than implying otherwise.
+
+**2026-09-09 — pin moved to `81a8683a53ea9e1a9838925968bd6b3020a3d102`** (the first
+tree whose pipeline, checkpoint lock, environment spec, and notebook all speak the
+schema the current API loads). Re-verified without a GPU, exactly as the "What is
+verified without a GPU" table prescribes:
+
+```bash
+cd ml && uv sync --frozen --extra dev --python 3.11
+.venv/bin/pytest -q                                   # 379 passed (CPU, no torch)
+.venv/bin/linescout-repro selfcheck                   # prints nothing
+.venv/bin/linescout-repro pin --check && linescout-repro pin --json
+.venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/mypy linescout_ml
+# the checkout contract, against GitHub rather than a fixture:
+.venv/bin/linescout-repro checkout --dir /tmp/ls-pin --rev 81a8683a53ea9e1a9838925968bd6b3020a3d102
+PYTHONPATH=/tmp/ls-pin/ml .venv/bin/python -c \
+  "from pathlib import Path; from linescout_ml.colab import run_selfcheck; \
+print(run_selfcheck(Path('/tmp/ls-pin')))"             # [] — the pinned tree agrees with itself
+```
+
+`checkout` fetched the pinned SHA from both the canonical URL and the mirror and
+reported `HEAD : 81a8683a53ea  (matches the pin)`. Still not run: a real Colab/GPU
+session — this sandbox has no CUDA device and no route to the weight hosts, so the
+first T4 run is the next entry this log needs, from a machine that can do it.
