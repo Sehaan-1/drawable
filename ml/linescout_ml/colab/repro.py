@@ -56,7 +56,7 @@ COLAB_MIRROR_URLS: tuple[str, ...] = ("https://github.com/Sehaan-1/drawable.git"
 #: shares the parent's object storage is one `git remote remove` away from being
 #: unreachable, which is the difference between this pin and a permanent one.
 #: Verified with: ``linescout-repro checkout --dir /tmp/x --rev <COLAB_PIN>``.
-COLAB_PIN = "c966202bc537cc01735aa4134361fe5ac6665ca3"
+COLAB_PIN = "81a8683a53ea9e1a9838925968bd6b3020a3d102"
 
 #: A revision must be a full commit hash. Abbreviated hashes and branch names are
 #: exactly the mutable refs reproducibility is about avoiding.

@@ -63,7 +63,7 @@ these is optional, and none of them are the author's machine being representativ
 ### The repository pin
 
 The notebook defaults to **`junosapollo/drawable`** at commit
-`c966202bc537cc01735aa4134361fe5ac6665ca3`, fetched over
+`81a8683a53ea9e1a9838925968bd6b3020a3d102`, fetched over
 `https://github.com/junosapollo/drawable.git` — the unauthenticated transport, because
 nothing that has to be reproducible should depend on a token you happen to have in a
 runtime. `REPO_URL` is a form field for the private-repo case and for a fork; the pin
@@ -78,13 +78,14 @@ is checked out by SHA and the checkout is refused if HEAD is not the pin. Conten
 addressing is what makes a mirror safe; "a second URL I trust" would not be.
 
 The pin names the commit that contains the finalized pipeline — the stage logic, the
-SFW policy above, and the schema v2 contract the gallery is written against. **A contract
+SFW policy above, and the schema v3 contract the gallery is written against. **A contract
 change counts as a pipeline change.** A pin predating one is not merely older, it is
 *wrong*: the notebooks at such a pin emit records the current API refuses to read, so the
 pin moved when v2 landed rather than staying put as a documentation courtesy — and moved
 once more when running the notebook's own reporting cells turned up three v1 attribute
-reads no test had been able to see. The churn is the mechanism working: every bump is a
-commit whose tree agrees with itself, so the number cannot quietly drift out of date.
+reads no test had been able to see, and again when schema v3 froze which records the API
+loads at all. The churn is the mechanism working: every bump is a commit whose tree agrees
+with itself, so the number cannot quietly drift out of date.
 
 One lag is structural and worth knowing before you file it as a bug. A commit cannot
 contain its own SHA, so the commit that *ships* a pin value is one past the commit the pin
@@ -103,7 +104,7 @@ cd /tmp && PYTHONPATH=/tmp/ls-pin/ml <repo>/ml/.venv/bin/python -c \
 print(run_selfcheck(Path('/tmp/ls-pin')))"
 ```
 
-The first prints `HEAD : c966202bc537  (matches the pin)` for both URLs; the second
+The first prints `HEAD : 81a8683a53ea  (matches the pin)` for both URLs; the second
 prints `[]`, which is the stronger claim — the pinned commit's own notebook,
 environment spec, checkpoint lock, and docs agree with *each other*, not merely with
 whatever the working tree looks like now. Running it from the repository root instead
