@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "rubric_id": "drawable-viewpoint-v1",
+  "purpose": "Human-reviewed viewpoint labels and pairwise usefulness judgments for development-only detail-reference evaluation.",
+  "axes": {
+    "horizontal_view": ["front", "three_quarter", "profile", "rear", "indeterminate", "not_applicable"],
+    "facing": ["image_left", "image_right", "center", "indeterminate", "not_applicable"],
+    "elevation": ["level", "view_from_above", "view_from_below", "indeterminate", "not_applicable"],
+    "roll_degrees": "Optional visible in-plane rotation in degrees, normalized to [-180, 180). Do not infer head roll from crop rotation."
+  },
+  "evidence_basis": ["visible_crop", "crop_with_parent_context", "visible_prefix", "not_applicable"],
+  "match_judgments": {
+    "same": "The reference has a materially matching visible view for the queried feature.",
+    "near": "The view differs modestly but remains structurally useful for the queried feature.",
+    "incompatible": "The view is structurally misleading or unsuitable for the query despite subject/style similarity.",
+    "indeterminate": "Available visual evidence cannot support a reliable judgment.",
+    "not_applicable": "A viewpoint comparison is not meaningful for this pair."
+  },
+  "rules": [
+    "Indeterminate is a valid reviewed judgment and must not be coerced to frontal.",
+    "A viewpoint label describes visible evidence, not artist intent or a hidden final image.",
+    "Use parent context when an isolated crop obscures orientation cues.",
+    "Viewpoint labels and usefulness judgments are separate annotations.",
+    "This rubric does not establish retrieval accuracy or authorize training."
+  ]
+}

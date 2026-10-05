@@ -1,5 +1,10 @@
 import { create } from 'zustand'
 import type { ReferenceAsset, SearchResponse } from '../lib/types'
+import { isRealSearchMode } from '../services/frontendServices'
+
+function pinStorageKey() {
+  return isRealSearchMode() ? 'drawable-local-pins' : 'drawable-fixture-pins'
+}
 
 interface SearchState {
   generation: number
@@ -23,7 +28,7 @@ interface SearchState {
 }
 
 function readPins(): ReferenceAsset[] {
-  try { return JSON.parse(localStorage.getItem('drawable-fixture-pins') ?? '[]') as ReferenceAsset[] }
+  try { return JSON.parse(localStorage.getItem(pinStorageKey()) ?? '[]') as ReferenceAsset[] }
   catch { return [] }
 }
 
@@ -52,7 +57,7 @@ export const useSearchStore = create<SearchState>((set, get) => ({
   togglePin: (asset) => set((state) => {
     const exists = state.pinned.some((item) => item.id === asset.id)
     const pinned = exists ? state.pinned.filter((item) => item.id !== asset.id) : [asset, ...state.pinned]
-    localStorage.setItem('drawable-fixture-pins', JSON.stringify(pinned))
+    localStorage.setItem(pinStorageKey(), JSON.stringify(pinned))
     return { pinned }
   }),
 }))

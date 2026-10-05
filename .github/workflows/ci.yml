@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --all-packages --frozen
+      - run: uv run --package drawable-api pytest services/api/tests
+      - run: uv run --package drawable-api ruff check services/api/src services/api/tests scripts
+      - run: uv run --package drawable-api mypy services/api/src/drawable_api
+      - run: uv sync --project ml --locked --extra dev
+      - run: uv run --project ml --locked pytest ml/tests packages/research-contracts/tests
+      - run: uv run --project ml --locked ruff check ml/src ml/tests packages/research-contracts/src packages/research-contracts/tests
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --all-packages --frozen
+      - run: npm ci
+      - run: npm run api:contracts:check

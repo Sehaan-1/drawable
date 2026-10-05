@@ -1,4 +1,15 @@
 NEW/
+docs/*
+!docs/deep-draw.md
+datasets/
+artifacts/
+reports/private/
+.venv/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+*.sqlite
+*.sqlite3
 node_modules/
 dist/
 coverage/

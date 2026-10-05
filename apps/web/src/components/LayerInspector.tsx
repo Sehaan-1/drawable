@@ -3,19 +3,20 @@ import { ChevronDown, ChevronUp, Eye, EyeOff, Trash2, X } from 'lucide-react'
 import * as Slider from '@radix-ui/react-slider'
 import { renderDrawingOperation } from '../lib/drawing'
 import type { DrawingLayer } from '../lib/types'
-import { useDocumentStore } from '../state/documentStore'
+import { useDocumentStore, useDocumentStoreApi } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import { AppDialog, Button, IconButton } from './primitives'
 import { resolveRasterImages } from '../services/rasterAssets'
 
 function LayerThumbnail({ layer }: { layer: DrawingLayer }) {
+  const documentStore = useDocumentStoreApi()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
     if (!canvas || !context) return
     let active = true
-    resolveRasterImages(useDocumentStore.getState().document).then((assets) => {
+    resolveRasterImages(documentStore.getState().document).then((assets) => {
       if (!active) return
       context.clearRect(0, 0, canvas.width, canvas.height)
       context.save()
@@ -24,7 +25,7 @@ function LayerThumbnail({ layer }: { layer: DrawingLayer }) {
       context.restore()
     }).catch(() => undefined)
     return () => { active = false }
-  }, [layer])
+  }, [documentStore, layer])
   return <canvas ref={canvasRef} className="layer-thumbnail" width={56} height={56} aria-hidden="true" />
 }
 

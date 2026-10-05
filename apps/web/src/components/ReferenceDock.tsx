@@ -19,6 +19,7 @@ import { useSearchStore } from '../state/searchStore'
 import { useDocumentStore } from '../state/documentStore'
 import { useUiStore } from '../state/uiStore'
 import type { ReferenceAsset, ReferenceGroup } from '../lib/types'
+import { isRealSearchMode } from '../services/frontendServices'
 
 const styleOptions = ['Manga / anime', 'Western ink', 'Realistic', 'Cartoon', 'Gesture']
 
@@ -98,6 +99,7 @@ function ReferenceDetail({ asset }: { asset: ReferenceAsset }) {
 }
 
 export function ReferenceDock() {
+  const realMode = isRealSearchMode()
   const dockMode = useUiStore((state) => state.dockMode)
   const setDockMode = useUiStore((state) => state.setDockMode)
   const dockCollapsed = useUiStore((state) => state.dockCollapsed)
@@ -146,7 +148,7 @@ export function ReferenceDock() {
       <div className="reference-query">
         <label>
           <Search size={15} />
-          <input value={textHint} onChange={(event) => setTextHint(event.target.value)} placeholder="Optional hint…" aria-label="Reference text hint" />
+          <input value={realMode ? '' : textHint} disabled={realMode} onChange={(event) => setTextHint(event.target.value)} placeholder={realMode ? 'Search uses your drawing' : 'Optional hint…'} aria-label="Reference text hint" />
           {textHint ? <button aria-label="Clear hint" onClick={() => setTextHint('')}><X size={14} /></button> : null}
         </label>
         <div className="style-chips" aria-label="Preferred style">
@@ -156,7 +158,7 @@ export function ReferenceDock() {
       </div>
       <div className="reference-status" role="status">
         <span><StatusDot tone={error ? 'error' : loading ? 'warning' : response?.mode === 'confident' ? 'success' : 'neutral'} />{error ? 'Search interrupted' : loading ? 'Looking at your drawing…' : response?.interpretation ?? 'Waiting for marks'}</span>
-        <span className="fixture-badge">Fixture</span>
+        <span className="fixture-badge">{realMode ? 'Local · experimental' : 'Fixture'}</span>
       </div>
       {selectedAsset ? <ReferenceDetail asset={selectedAsset} /> : null}
       <div className="reference-scroll" ref={scrollRef}>

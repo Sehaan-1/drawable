@@ -1,13 +1,15 @@
 import type { PropsWithChildren } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Link, useLocation } from 'react-router-dom'
-import { ChevronDown, FlaskConical, Gauge, HeartPulse, PenLine } from 'lucide-react'
+import { ChevronDown, ClipboardCheck, FlaskConical, Gauge, HeartPulse, PenLine, Radio } from 'lucide-react'
 
 const routes = [
   { to: '/draw', label: 'Draw', icon: PenLine },
   { to: '/curate', label: 'Curate', icon: FlaskConical },
   { to: '/benchmark', label: 'Benchmark', icon: Gauge },
   { to: '/setup', label: 'System', icon: HeartPulse },
+  { to: '/record', label: 'Record', icon: Radio },
+  { to: '/m0', label: 'M0', icon: ClipboardCheck },
 ]
 
 export function WorkspaceSwitcher() {
@@ -39,7 +41,7 @@ export function WorkspaceSwitcher() {
   )
 }
 
-export function ResearchShell({ title, eyebrow, children }: PropsWithChildren<{ title: string; eyebrow: string }>) {
+export function ResearchShell({ title, eyebrow, badge = 'Fixture preview', children }: PropsWithChildren<{ title: string; eyebrow: string; badge?: string }>) {
   return (
     <div className="research-shell">
       <header className="research-topbar">
@@ -48,7 +50,7 @@ export function ResearchShell({ title, eyebrow, children }: PropsWithChildren<{ 
           <span>{eyebrow}</span>
           <strong>{title}</strong>
         </div>
-        <span className="fixture-badge">Fixture preview</span>
+        <span className="fixture-badge">{badge}</span>
       </header>
       <main className="research-main">{children}</main>
     </div>

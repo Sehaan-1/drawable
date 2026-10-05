@@ -23,7 +23,7 @@ interface PinchGesture {
   panY: number
 }
 
-export function CanvasStage() {
+export function CanvasStage({ searchIntegration = 'fixture', readOnly = false }: { searchIntegration?: 'fixture' | 'disabled'; readOnly?: boolean }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const paperRef = useRef<HTMLDivElement>(null)
   const activeCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -96,6 +96,7 @@ export function CanvasStage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (readOnly) return
       const target = event.target as HTMLElement | null
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
       if (event.code === 'Space') {
@@ -140,7 +141,7 @@ export function CanvasStage() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
     }
-  }, [brushSize, document.layers, fitCanvas, panX, panY, redo, setActiveLayer, setBrushSize, setTool, setView, traceVisible, undo, updateTrace, zoom])
+  }, [brushSize, document.layers, fitCanvas, panX, panY, readOnly, redo, setActiveLayer, setBrushSize, setTool, setView, traceVisible, undo, updateTrace, zoom])
 
   const logicalPoint = (event: PointerEvent | React.PointerEvent): DrawPoint | null => {
     const paper = paperRef.current
@@ -172,18 +173,26 @@ export function CanvasStage() {
       if (point) activePoints.current.push(point)
     }
     if (activeTool !== 'hand') {
-      activeOperation.current = makeStrokeOperation(
+      activeOperation.current = {
+        ...makeStrokeOperation(
         activeTool,
         activePoints.current,
         brushSize,
         stabilization,
         event.pointerType === 'mouse' ? simulatePressure : false,
-      )
+        ),
+        input: {
+          pointerType: event.pointerType === 'pen' ? 'pen' : 'mouse',
+          pressure: event.pointerType === 'mouse' && simulatePressure ? 'simulated' : 'reported',
+          timing: 'available',
+        },
+      }
       paintActive()
     }
   }
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (readOnly) return
     event.currentTarget.setPointerCapture(event.pointerId)
     if (event.pointerType === 'touch') {
       touchPointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
@@ -212,8 +221,10 @@ export function CanvasStage() {
     if (!layer?.visible || layer.opacity <= 0) return
     drawingPointer.current = event.pointerId
     activePoints.current = []
-    invalidateSearch(true)
-    setSearchDrawing(true)
+    if (searchIntegration === 'fixture') {
+      invalidateSearch(true)
+      setSearchDrawing(true)
+    }
     updateActiveOperation(event)
   }
 
@@ -253,7 +264,7 @@ export function CanvasStage() {
     activePoints.current = []
     activeOperation.current = null
     drawingPointer.current = null
-    setSearchDrawing(false)
+    if (searchIntegration === 'fixture') setSearchDrawing(false)
   }
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {

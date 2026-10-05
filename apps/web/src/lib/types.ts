@@ -21,6 +21,11 @@ export interface StrokeOperation {
   streamline: number
   simulatePressure: boolean
   createdAt: number
+  input?: {
+    pointerType: 'mouse' | 'pen'
+    pressure: 'reported' | 'simulated'
+    timing: 'available'
+  }
 }
 
 export interface RasterOperation {
@@ -76,7 +81,7 @@ export interface ReferenceAsset {
   scope: string
   source: string
   native: boolean
-  match: 'Strong' | 'Close' | 'Related'
+  match: 'Strong' | 'Close' | 'Related' | 'Tentative'
   traceAllowed: boolean
 }
 
@@ -90,6 +95,8 @@ export interface ReferenceGroup {
 export type SearchMode = 'empty' | 'insufficient' | 'provisional' | 'confident'
 
 export interface SearchRequest {
+  documentId?: string
+  image?: Blob
   revision: number
   generation: number
   strokeCount: number
@@ -102,6 +109,7 @@ export interface SearchResponse {
   mode: SearchMode
   interpretation: string
   groups: ReferenceGroup[]
+  buildId?: string
 }
 
 export interface HealthResult {

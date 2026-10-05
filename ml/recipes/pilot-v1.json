@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "recipe_id": "pilot-v1-semantic-then-structure",
+  "seed": 42,
+  "optimizer": "AdamW",
+  "weight_decay": 0.01,
+  "effective_batch_size": 64,
+  "microbatch_size": 4,
+  "gradient_cache": true,
+  "semantic": {
+    "model_id": "mobileclip2-s2-dfndr2b",
+    "max_epochs": 10,
+    "early_stop_patience": 2,
+    "final_image_stage_learning_rate": 0.00001,
+    "projection_learning_rate": 0.0001,
+    "scope_head_learning_rate": 0.0001,
+    "contrastive_temperature": 0.07,
+    "scope_loss_weight": 0.25,
+    "consistency_loss_weight": 0.25,
+    "scope_count": 11,
+    "view": "tight"
+  },
+  "structural": {
+    "model_id": "dinov2-small",
+    "projection_dimensions": [384, 512, 256],
+    "triplet_margin": 0.2,
+    "learning_rate": 0.0001,
+    "max_epochs": 10,
+    "early_stop_patience": 2
+  },
+  "precision": "fp16_if_forward_backward_validated_else_fp32",
+  "session_budget_minutes": 120,
+  "stop_starting_steps_minutes_before_budget": 5,
+  "checkpoint_interval_seconds": 300,
+  "checkpoint_retention": {
+    "latest": 2,
+    "best": 1,
+    "final": 1
+  },
+  "protected_splits": ["threshold_selection", "calibration_audit", "locked_test"],
+  "automatic_training": false,
+  "automatic_upload": false
+}

@@ -1,0 +1,12 @@
+{
+  "name": "@drawable/contracts",
+  "private": true,
+  "types": "generated.ts",
+  "scripts": {
+    "generate": "openapi-typescript openapi.json -o generated.ts",
+    "check": "openapi-typescript openapi.json -o /tmp/drawable-openapi-check.d.ts && diff -u generated.ts /tmp/drawable-openapi-check.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.9.1"
+  }
+}

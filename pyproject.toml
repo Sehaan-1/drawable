@@ -1,0 +1,3 @@
+[tool.uv.workspace]
+members = ["services/api", "packages/research-contracts"]
+exclude = ["ml"]

@@ -1,0 +1,141 @@
+{
+  "schema_version": 2,
+  "policy": "Frozen inference only in the current phase. Registry pins identify exact upstream bytes, local artifacts are independently hashed, and model terms are purpose-specific. No model loads from a network alias.",
+  "models": [
+    {
+      "id": "mobileclip2-s2-dfndr2b",
+      "role": "semantic-retrieval",
+      "repository": "apple/ml-mobileclip",
+      "variant": "MobileCLIP2-S2",
+      "pretrained_tag": "dfndr2b",
+        "artifact_source": {
+        "provider": "huggingface",
+        "repository": "timm/MobileCLIP2-S2-OpenCLIP",
+        "revision": "ac6b37c8fc40b62b623d09ed228a6f0c9bc29fe6",
+        "weights_file": "open_clip_model.safetensors",
+        "weights_sha256": "92f6bdcf3665a31eb05b83e41e3de665055a9dfe2f8ed8274fcf7ee08c692d68",
+        "weights_bytes": 397696772,
+        "artifact_directory_files": ["open_clip_model.safetensors"],
+        "embedding_dimension": 512,
+        "image_resolution": 256,
+        "loader": "open_clip.MobileCLIP2-S2"
+      },
+      "preprocessing_profile": {
+        "id": "mobileclip2-s2-dfndr2b-256-v1",
+        "frame_size": 256,
+        "output_size": 256,
+        "resize": "shortest",
+        "crop": "center",
+        "interpolation": "bilinear",
+        "mean": [0.0, 0.0, 0.0],
+        "std": [1.0, 1.0, 1.0],
+        "exif_orientation": "transpose",
+        "alpha_background": "white",
+        "framing": "orientation-preserving-square-letterbox",
+        "views": ["full", "tight"],
+        "tight_view": "crop-ink-bounds-with-2-percent-margin"
+      },
+      "terms_source_url": "https://huggingface.co/timm/MobileCLIP2-S2-OpenCLIP/tree/ac6b37c8fc40b62b623d09ed228a6f0c9bc29fe6",
+      "state": "not_acquired",
+      "revision": null,
+      "weights_sha256": null,
+      "artifact_manifest_sha256": null,
+      "terms_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "reviewed_at": null,
+        "terms_snapshot_sha256": null
+      },
+      "training_terms_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "reviewed_at": null,
+        "terms_snapshot_sha256": null
+      },
+      "inference_only": true,
+      "training_authorized": false,
+      "cloud_training_authorized": false
+    },
+    {
+      "id": "dinov2-small",
+      "role": "structural-retrieval",
+      "repository": "facebookresearch/dinov2",
+      "variant": "facebook/dinov2-small",
+      "artifact_source": {
+        "provider": "huggingface",
+        "repository": "facebook/dinov2-small",
+        "revision": "ed25f3a31f01632728cabb09d1542f84ab7b0056",
+        "weights_file": "model.safetensors",
+        "weights_sha256": "ae1e99fcefd534ed978cdeb8326f08030c96e28b7a81ffcbc98a857c84d14be1",
+        "weights_bytes": 88249960,
+        "artifact_directory_files": ["config.json", "model.safetensors", "preprocessor_config.json"],
+        "embedding_dimension": 384,
+        "image_resolution": 224,
+        "loader": "transformers.AutoModel"
+      },
+      "preprocessing_profile": {
+        "id": "dinov2-small-224-pinned-processor-v1",
+        "frame_size": 256,
+        "output_size": 224,
+        "resize": "shortest-edge-256",
+        "crop": "center-224",
+        "interpolation": "bilinear",
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225],
+        "exif_orientation": "transpose",
+        "alpha_background": "white",
+        "framing": "orientation-preserving-square-letterbox",
+        "views": ["full", "tight"],
+        "tight_view": "crop-ink-bounds-with-2-percent-margin",
+        "upstream_processor_revision": "ed25f3a31f01632728cabb09d1542f84ab7b0056"
+      },
+      "terms_source_url": "https://huggingface.co/facebook/dinov2-small/tree/ed25f3a31f01632728cabb09d1542f84ab7b0056",
+      "output": "384-dimensional CLS; pilot identity projection",
+      "state": "not_acquired",
+      "revision": null,
+      "weights_sha256": null,
+      "artifact_manifest_sha256": null,
+      "terms_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "reviewed_at": null,
+        "terms_snapshot_sha256": null
+      },
+      "training_terms_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "reviewed_at": null,
+        "terms_snapshot_sha256": null
+      },
+      "inference_only": true,
+      "training_authorized": false,
+      "cloud_training_authorized": false
+    },
+    {
+      "id": "openclip-bigG-laion2b-s39b-b160k",
+      "role": "separate-frozen-comparator",
+      "repository": "mlfoundations/open_clip",
+      "variant": "ViT-bigG-14/laion2b_s39b_b160k",
+      "artifact_source": null,
+      "state": "not_acquired",
+      "revision": null,
+      "weights_sha256": null,
+      "artifact_manifest_sha256": null,
+      "terms_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "reviewed_at": null,
+        "terms_snapshot_sha256": null
+      },
+      "training_terms_review": {
+        "status": "pending",
+        "reviewer_id": null,
+        "reviewed_at": null,
+        "terms_snapshot_sha256": null
+      },
+      "inference_only": true,
+      "training_authorized": false,
+      "cloud_training_authorized": false
+    }
+  ]
+}

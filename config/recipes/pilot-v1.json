@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "recipe_id": "pilot-v1",
+  "seed": "drawable-pilot-v1",
+  "purpose": "fixed source-yield review sample; never auto-accepts assets",
+  "source_yield": {
+    "anita-dataset": {"items": 70, "per_work": 5, "candidate_type": "sketch"},
+    "emoreccom-panels": {"items": 60, "distinct_verified_book_groups": 60, "partition": "source_train"},
+    "the-met-open-access": {"items": 50, "public_domain_only": true},
+    "aic-open-access": {"items": 50, "public_domain_only": true}
+  },
+  "pilot_gallery": {
+    "target_items": 250,
+    "styles": {
+      "manga_anime": 60,
+      "western_ink": 45,
+      "realistic_academic": 55,
+      "cartoon": 45,
+      "gesture_sketch": 45
+    },
+    "sources": {
+      "anita-dataset": 105,
+      "emoreccom-panels": 70,
+      "the-met-open-access": 35,
+      "aic-open-access": 40
+    }
+  },
+  "policy": {
+    "selection_is_not_acceptance": true,
+    "requires_verified_archive_receipts_for_archive_sources": true,
+    "requires_current_terms_and_local_display_permission": true,
+    "requires_authoritative_grouping_for_emoreccom": true,
+    "locked_test_partition_excluded": true,
+    "museum_public_domain_flag_required": true,
+    "no_gallery_activation": true,
+    "no_training": true
+  }
+}

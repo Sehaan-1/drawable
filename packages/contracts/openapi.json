@@ -1,0 +1,3601 @@
+{
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ApiErrorBody"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "error",
+          "request_id"
+        ],
+        "title": "ApiError",
+        "type": "object"
+      },
+      "ApiErrorBody": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ApiErrorBody",
+        "type": "object"
+      },
+      "CurationCandidate": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "preview_available": {
+            "default": false,
+            "title": "Preview Available",
+            "type": "boolean"
+          },
+          "preview_blocker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Blocker"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "source_id": {
+            "title": "Source Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "asset_id",
+          "source_id",
+          "revision",
+          "state",
+          "metadata"
+        ],
+        "title": "CurationCandidate",
+        "type": "object"
+      },
+      "CurationCandidateList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationCandidate"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CurationCandidateList",
+        "type": "object"
+      },
+      "CurationCropRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "idempotency_key": {
+            "format": "uuid",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "reviewer_id",
+          "idempotency_key",
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "CurationCropRequest",
+        "type": "object"
+      },
+      "CurationCropResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "height": {
+            "minimum": 96.0,
+            "title": "Height",
+            "type": "integer"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "parent_asset_id": {
+            "title": "Parent Asset Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "width": {
+            "minimum": 96.0,
+            "title": "Width",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "asset_id",
+          "parent_asset_id",
+          "revision",
+          "width",
+          "height",
+          "sha256"
+        ],
+        "title": "CurationCropResponse",
+        "type": "object"
+      },
+      "CurationHistoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "keep",
+              "reject",
+              "quarantine"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "review": {
+            "additionalProperties": true,
+            "title": "Review",
+            "type": "object"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id",
+          "expected_revision",
+          "reviewer_id",
+          "decision",
+          "review",
+          "created_at"
+        ],
+        "title": "CurationHistoryItem",
+        "type": "object"
+      },
+      "CurationLabels": {
+        "additionalProperties": false,
+        "properties": {
+          "character_useful": {
+            "title": "Character Useful",
+            "type": "boolean"
+          },
+          "clipped": {
+            "title": "Clipped",
+            "type": "boolean"
+          },
+          "damaged": {
+            "title": "Damaged",
+            "type": "boolean"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of"
+          },
+          "keep_reject_reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Keep Reject Reason",
+            "type": "string"
+          },
+          "person_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Count"
+          },
+          "primary_scope": {
+            "enum": [
+              "eye",
+              "eyebrow",
+              "mouth",
+              "face_head",
+              "hair",
+              "hand",
+              "foot",
+              "upper_body_clothing",
+              "full_body",
+              "multi_character"
+            ],
+            "title": "Primary Scope",
+            "type": "string"
+          },
+          "quality": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Quality",
+            "type": "integer"
+          },
+          "review_seconds": {
+            "maximum": 86400.0,
+            "minimum": 0.0,
+            "title": "Review Seconds",
+            "type": "number"
+          },
+          "secondary_scopes": {
+            "items": {
+              "enum": [
+                "eye",
+                "eyebrow",
+                "mouth",
+                "face_head",
+                "hair",
+                "hand",
+                "foot",
+                "upper_body_clothing",
+                "full_body",
+                "multi_character"
+              ],
+              "type": "string"
+            },
+            "maxItems": 9,
+            "title": "Secondary Scopes",
+            "type": "array"
+          },
+          "sfw": {
+            "enum": [
+              "safe",
+              "unsafe",
+              "uncertain"
+            ],
+            "title": "Sfw",
+            "type": "string"
+          },
+          "style": {
+            "enum": [
+              "manga_anime",
+              "western_ink",
+              "realistic_academic",
+              "cartoon",
+              "gesture_sketch"
+            ],
+            "title": "Style",
+            "type": "string"
+          },
+          "text_coverage": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Text Coverage",
+            "type": "number"
+          }
+        },
+        "required": [
+          "style",
+          "primary_scope",
+          "person_count",
+          "sfw",
+          "quality",
+          "character_useful",
+          "text_coverage",
+          "clipped",
+          "damaged",
+          "review_seconds",
+          "keep_reject_reason"
+        ],
+        "title": "CurationLabels",
+        "type": "object"
+      },
+      "CurationProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "minimum": 0.0,
+            "title": "Candidate",
+            "type": "integer"
+          },
+          "pending": {
+            "minimum": 0.0,
+            "title": "Pending",
+            "type": "integer"
+          },
+          "rejected": {
+            "minimum": 0.0,
+            "title": "Rejected",
+            "type": "integer"
+          },
+          "reviewed": {
+            "minimum": 0.0,
+            "title": "Reviewed",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "pending",
+          "candidate",
+          "rejected",
+          "reviewed"
+        ],
+        "title": "CurationProgress",
+        "type": "object"
+      },
+      "CurationReviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution_text": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution Text"
+          },
+          "decision": {
+            "enum": [
+              "keep",
+              "reject",
+              "quarantine"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "format": "uuid",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurationLabels"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "learning_split": {
+            "default": "unassigned",
+            "enum": [
+              "unassigned",
+              "pilot_development",
+              "train",
+              "validation"
+            ],
+            "title": "Learning Split",
+            "type": "string"
+          },
+          "license_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License Id"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Note",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "rights_status": {
+            "default": "review_required",
+            "enum": [
+              "review_required",
+              "approved",
+              "rejected"
+            ],
+            "title": "Rights Status",
+            "type": "string"
+          },
+          "source_yield_judgment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceYieldJudgment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "terms_snapshot_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Snapshot Sha256"
+          },
+          "use_permissions": {
+            "$ref": "#/components/schemas/CurationUsePermissions"
+          },
+          "viewpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ViewpointReviewV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expected_revision",
+          "reviewer_id",
+          "idempotency_key",
+          "decision"
+        ],
+        "title": "CurationReviewRequest",
+        "type": "object"
+      },
+      "CurationReviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_id": {
+            "title": "Asset Id",
+            "type": "string"
+          },
+          "gallery_eligible_candidate": {
+            "default": false,
+            "title": "Gallery Eligible Candidate",
+            "type": "boolean"
+          },
+          "gallery_member": {
+            "title": "Gallery Member",
+            "type": "boolean"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id",
+          "asset_id",
+          "revision",
+          "state",
+          "gallery_member"
+        ],
+        "title": "CurationReviewResponse",
+        "type": "object"
+      },
+      "CurationSnapshotRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "asset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Asset Ids",
+            "type": "array"
+          },
+          "expected_rubric_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Rubric Sha256",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "format": "uuid",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "requester_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Requester Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_rubric_sha256",
+          "requester_id",
+          "idempotency_key",
+          "asset_ids"
+        ],
+        "title": "CurationSnapshotRequest",
+        "type": "object"
+      },
+      "CurationSnapshotResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "gallery_activated": {
+            "const": false,
+            "default": false,
+            "title": "Gallery Activated",
+            "type": "boolean"
+          },
+          "idempotent_replay": {
+            "default": false,
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "item_count": {
+            "minimum": 1.0,
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "rubric_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Rubric Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          },
+          "snapshot_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Snapshot Sha256",
+            "type": "string"
+          },
+          "status": {
+            "const": "created_review_only",
+            "default": "created_review_only",
+            "title": "Status",
+            "type": "string"
+          },
+          "training_started": {
+            "const": false,
+            "default": false,
+            "title": "Training Started",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "snapshot_sha256",
+          "rubric_sha256",
+          "item_count"
+        ],
+        "title": "CurationSnapshotResponse",
+        "type": "object"
+      },
+      "CurationUsePermissions": {
+        "additionalProperties": false,
+        "properties": {
+          "cloud_processing": {
+            "default": false,
+            "title": "Cloud Processing",
+            "type": "boolean"
+          },
+          "cloud_storage": {
+            "default": false,
+            "title": "Cloud Storage",
+            "type": "boolean"
+          },
+          "derive": {
+            "default": false,
+            "title": "Derive",
+            "type": "boolean"
+          },
+          "evaluation": {
+            "default": false,
+            "title": "Evaluation",
+            "type": "boolean"
+          },
+          "export": {
+            "default": false,
+            "title": "Export",
+            "type": "boolean"
+          },
+          "local_display": {
+            "default": false,
+            "title": "Local Display",
+            "type": "boolean"
+          },
+          "public_demo": {
+            "default": false,
+            "title": "Public Demo",
+            "type": "boolean"
+          },
+          "redistribute": {
+            "default": false,
+            "title": "Redistribute",
+            "type": "boolean"
+          },
+          "trace": {
+            "default": false,
+            "title": "Trace",
+            "type": "boolean"
+          },
+          "training": {
+            "default": false,
+            "title": "Training",
+            "type": "boolean"
+          }
+        },
+        "title": "CurationUsePermissions",
+        "type": "object"
+      },
+      "CurationViewMatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "format": "uuid",
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ViewMatchReviewV1"
+          }
+        },
+        "required": [
+          "idempotency_key",
+          "review"
+        ],
+        "title": "CurationViewMatchRequest",
+        "type": "object"
+      },
+      "CurationViewMatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotent_replay": {
+            "default": false,
+            "title": "Idempotent Replay",
+            "type": "boolean"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "review_id"
+        ],
+        "title": "CurationViewMatchResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled_branches": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Enabled Branches",
+            "type": "array"
+          },
+          "gallery_size": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Gallery Size",
+            "type": "integer"
+          },
+          "gpu": {
+            "default": "not_probed",
+            "enum": [
+              "not_probed",
+              "disabled_by_owner",
+              "unavailable",
+              "available"
+            ],
+            "title": "Gpu",
+            "type": "string"
+          },
+          "live": {
+            "const": true,
+            "default": true,
+            "title": "Live",
+            "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "fixture",
+              "cpu",
+              "cuda"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "models_loaded": {
+            "default": false,
+            "title": "Models Loaded",
+            "type": "boolean"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "setup_errors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Setup Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_id",
+          "ready",
+          "mode"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "M0WorkspaceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "blockers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "object"
+          },
+          "effort_log_available": {
+            "title": "Effort Log Available",
+            "type": "boolean"
+          },
+          "gates": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Gates",
+            "type": "object"
+          },
+          "gpu_status": {
+            "const": "not_probed",
+            "default": "not_probed",
+            "title": "Gpu Status",
+            "type": "string"
+          },
+          "model_terms_status": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Model Terms Status",
+            "type": "object"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source_archive_status": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Source Archive Status",
+            "type": "object"
+          },
+          "source_terms_status": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Source Terms Status",
+            "type": "object"
+          },
+          "source_yield_sample_count": {
+            "maximum": 250.0,
+            "minimum": 0.0,
+            "title": "Source Yield Sample Count",
+            "type": "integer"
+          },
+          "source_yield_sample_status": {
+            "title": "Source Yield Sample Status",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "blocked",
+              "complete"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "training_authorized": {
+            "const": false,
+            "default": false,
+            "title": "Training Authorized",
+            "type": "boolean"
+          },
+          "training_started": {
+            "const": false,
+            "default": false,
+            "title": "Training Started",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "gates",
+          "blockers",
+          "source_archive_status",
+          "source_terms_status",
+          "model_terms_status",
+          "effort_log_available",
+          "source_yield_sample_status",
+          "source_yield_sample_count"
+        ],
+        "title": "M0WorkspaceResponse",
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "enum": [
+              "fixture",
+              "real"
+            ],
+            "title": "Profile",
+            "type": "string"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id",
+          "ready",
+          "profile"
+        ],
+        "title": "ReadinessResponse",
+        "type": "object"
+      },
+      "ReviewCandidatePreparationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "reviewer_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Reviewer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "reviewer_id"
+        ],
+        "title": "ReviewCandidatePreparationRequest",
+        "type": "object"
+      },
+      "ReviewDecisionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution_text": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution Text"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "source",
+              "work",
+              "model"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 1000,
+            "minLength": 12,
+            "title": "Note",
+            "type": "string"
+          },
+          "permissions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurationUsePermissions"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewer_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "terms_snapshot_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Terms Snapshot Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "kind",
+          "id",
+          "reviewer_id",
+          "decision",
+          "terms_snapshot_sha256",
+          "note"
+        ],
+        "title": "ReviewDecisionRequest",
+        "type": "object"
+      },
+      "ReviewModelItem": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "terms_snapshot_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Snapshot Sha256"
+          },
+          "terms_url": {
+            "title": "Terms Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "training_authorized": {
+            "const": false,
+            "default": false,
+            "title": "Training Authorized",
+            "type": "boolean"
+          },
+          "weights_state": {
+            "title": "Weights State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "terms_url",
+          "decision",
+          "weights_state"
+        ],
+        "title": "ReviewModelItem",
+        "type": "object"
+      },
+      "ReviewPreparationJob": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                }
+              ]
+            },
+            "title": "Progress",
+            "type": "object"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "complete",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "message"
+        ],
+        "title": "ReviewPreparationJob",
+        "type": "object"
+      },
+      "ReviewPreviewBatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_local_preview": {
+            "const": true,
+            "title": "Confirm Local Preview",
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 24,
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "reviewer_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Reviewer Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "reviewer_id",
+          "confirm_local_preview"
+        ],
+        "title": "ReviewPreviewBatchRequest",
+        "type": "object"
+      },
+      "ReviewSourceItem": {
+        "additionalProperties": false,
+        "properties": {
+          "archive": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive"
+          },
+          "authority_url": {
+            "title": "Authority Url",
+            "type": "string"
+          },
+          "candidate_count": {
+            "minimum": 0.0,
+            "title": "Candidate Count",
+            "type": "integer"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/CurationUsePermissions"
+          },
+          "terms_snapshot_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Snapshot Sha256"
+          },
+          "terms_url": {
+            "title": "Terms Url",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "authority_url",
+          "terms_url",
+          "decision",
+          "permissions",
+          "candidate_count"
+        ],
+        "title": "ReviewSourceItem",
+        "type": "object"
+      },
+      "ReviewTermsCaptureRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "source",
+              "model"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "title": "ReviewTermsCaptureRequest",
+        "type": "object"
+      },
+      "ReviewTermsCaptureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "byte_length": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Length"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "final_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Url"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "model_loaded": {
+            "const": false,
+            "default": false,
+            "title": "Model Loaded",
+            "type": "boolean"
+          },
+          "network_used": {
+            "default": true,
+            "title": "Network Used",
+            "type": "boolean"
+          },
+          "owner_decision_required": {
+            "const": true,
+            "default": true,
+            "title": "Owner Decision Required",
+            "type": "boolean"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "retrieved_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retrieved At"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "snapshot_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Path"
+          },
+          "source_content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Content Sha256"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "terms_snapshot_sha256": {
+            "title": "Terms Snapshot Sha256",
+            "type": "string"
+          },
+          "training_started": {
+            "const": false,
+            "default": false,
+            "title": "Training Started",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "kind",
+          "terms_snapshot_sha256"
+        ],
+        "title": "ReviewTermsCaptureResponse",
+        "type": "object"
+      },
+      "ReviewWorkItem": {
+        "additionalProperties": false,
+        "properties": {
+          "artist": {
+            "title": "Artist",
+            "type": "string"
+          },
+          "attribution_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution Text"
+          },
+          "decision": {
+            "title": "Decision",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "license": {
+            "title": "License",
+            "type": "string"
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/CurationUsePermissions"
+          },
+          "selected": {
+            "default": false,
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "artist",
+          "license",
+          "decision",
+          "permissions"
+        ],
+        "title": "ReviewWorkItem",
+        "type": "object"
+      },
+      "ReviewWorkSelectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_revision": {
+            "minimum": 0.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "work_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 14,
+            "minItems": 1,
+            "title": "Work Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "work_ids"
+        ],
+        "title": "ReviewWorkSelectionRequest",
+        "type": "object"
+      },
+      "ReviewWorkspaceStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "available_works": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewWorkItem"
+            },
+            "title": "Available Works",
+            "type": "array"
+          },
+          "curation": {
+            "$ref": "#/components/schemas/CurationProgress"
+          },
+          "preparation": {
+            "additionalProperties": true,
+            "title": "Preparation",
+            "type": "object"
+          },
+          "private_storage": {
+            "const": true,
+            "default": true,
+            "title": "Private Storage",
+            "type": "boolean"
+          },
+          "required_handoff": {
+            "title": "Required Handoff",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected_models": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewModelItem"
+            },
+            "title": "Selected Models",
+            "type": "array"
+          },
+          "selected_sources": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewSourceItem"
+            },
+            "title": "Selected Sources",
+            "type": "array"
+          },
+          "selected_works": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewWorkItem"
+            },
+            "title": "Selected Works",
+            "type": "array"
+          },
+          "training_authorized": {
+            "const": false,
+            "default": false,
+            "title": "Training Authorized",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision",
+          "selected_sources",
+          "selected_works",
+          "available_works",
+          "selected_models",
+          "reviewer_id",
+          "preparation",
+          "curation",
+          "required_handoff"
+        ],
+        "title": "ReviewWorkspaceStatus",
+        "type": "object"
+      },
+      "SearchReferenceAsset": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "image_url": {
+            "pattern": "^/api/v1/assets/[^/]+/preview\\?build_id=prototype-[0-9a-f]{24}$",
+            "title": "Image Url",
+            "type": "string"
+          },
+          "match": {
+            "const": "Tentative",
+            "title": "Match",
+            "type": "string"
+          },
+          "native": {
+            "title": "Native",
+            "type": "boolean"
+          },
+          "scope": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "style": {
+            "enum": [
+              "Manga / anime",
+              "Western ink",
+              "Realistic",
+              "Cartoon",
+              "Gesture"
+            ],
+            "title": "Style",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "trace_allowed": {
+            "title": "Trace Allowed",
+            "type": "boolean"
+          },
+          "visual_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Visual Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "image_url",
+          "style",
+          "scope",
+          "source",
+          "native",
+          "match",
+          "trace_allowed",
+          "visual_score"
+        ],
+        "title": "SearchReferenceAsset",
+        "type": "object"
+      },
+      "SearchReferenceGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchReferenceAsset"
+            },
+            "maxItems": 4,
+            "minItems": 1,
+            "title": "Results",
+            "type": "array"
+          },
+          "tentative": {
+            "const": true,
+            "default": true,
+            "title": "Tentative",
+            "type": "boolean"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "results"
+        ],
+        "title": "SearchReferenceGroup",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "canvas_revision": {
+            "minimum": 0.0,
+            "title": "Canvas Revision",
+            "type": "integer"
+          },
+          "data_uploaded": {
+            "const": false,
+            "default": false,
+            "title": "Data Uploaded",
+            "type": "boolean"
+          },
+          "document_id": {
+            "format": "uuid",
+            "title": "Document Id",
+            "type": "string"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "object"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SearchReferenceGroup"
+            },
+            "maxItems": 3,
+            "title": "Groups",
+            "type": "array"
+          },
+          "interpretation": {
+            "title": "Interpretation",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "insufficient",
+              "provisional"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version"
+          },
+          "preprocessing_version": {
+            "title": "Preprocessing Version",
+            "type": "string"
+          },
+          "query_generation": {
+            "minimum": 0.0,
+            "title": "Query Generation",
+            "type": "integer"
+          },
+          "reason": {
+            "enum": [
+              "insufficient_visible_ink",
+              "no_relevant_candidates",
+              "experimental_visual_matches"
+            ],
+            "title": "Reason",
+            "type": "string"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "scope_scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Scope Scores",
+            "type": "object"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "timings_ms": {
+            "$ref": "#/components/schemas/SearchTimings"
+          },
+          "training_started": {
+            "const": false,
+            "default": false,
+            "title": "Training Started",
+            "type": "boolean"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_id",
+          "session_id",
+          "document_id",
+          "canvas_revision",
+          "query_generation",
+          "preprocessing_version",
+          "mode",
+          "reason",
+          "interpretation",
+          "timings_ms"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchTimings": {
+        "additionalProperties": false,
+        "properties": {
+          "preprocessing_ms": {
+            "minimum": 0.0,
+            "title": "Preprocessing Ms",
+            "type": "number"
+          },
+          "queue_ms": {
+            "minimum": 0.0,
+            "title": "Queue Ms",
+            "type": "number"
+          },
+          "total_ms": {
+            "minimum": 0.0,
+            "title": "Total Ms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "queue_ms",
+          "preprocessing_ms",
+          "total_ms"
+        ],
+        "title": "SearchTimings",
+        "type": "object"
+      },
+      "SourceYieldJudgment": {
+        "additionalProperties": false,
+        "properties": {
+          "review_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 86400.0,
+            "title": "Review Seconds",
+            "type": "number"
+          },
+          "sample_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sample Sha256",
+            "type": "string"
+          },
+          "useful_eye_crop": {
+            "enum": [
+              "yes",
+              "no",
+              "uncertain"
+            ],
+            "title": "Useful Eye Crop",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sample_sha256",
+          "useful_eye_crop",
+          "review_seconds"
+        ],
+        "title": "SourceYieldJudgment",
+        "type": "object"
+      },
+      "SourceYieldQueueResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationCandidate"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "sample_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Sha256"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected_count": {
+            "maximum": 250.0,
+            "minimum": 0.0,
+            "title": "Selected Count",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "selected_count",
+          "sources",
+          "items"
+        ],
+        "title": "SourceYieldQueueResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ViewMatchReviewV1": {
+        "additionalProperties": false,
+        "properties": {
+          "match": {
+            "enum": [
+              "same",
+              "near",
+              "incompatible",
+              "indeterminate",
+              "not_applicable"
+            ],
+            "title": "Match",
+            "type": "string"
+          },
+          "query_asset_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Query Asset Id",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 1000,
+            "minLength": 10,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "reference_asset_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reference Asset Id",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "title": "Reviewed At",
+            "type": "string"
+          },
+          "reviewer_id": {
+            "pattern": "^[A-Za-z0-9_-]{3,80}$",
+            "title": "Reviewer Id",
+            "type": "string"
+          },
+          "rubric_id": {
+            "const": "drawable-viewpoint-v1",
+            "default": "drawable-viewpoint-v1",
+            "title": "Rubric Id",
+            "type": "string"
+          },
+          "rubric_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Rubric Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rubric_sha256",
+          "query_asset_id",
+          "reference_asset_id",
+          "match",
+          "reviewer_id",
+          "reviewed_at",
+          "rationale"
+        ],
+        "title": "ViewMatchReviewV1",
+        "type": "object"
+      },
+      "ViewpointReviewV1": {
+        "additionalProperties": false,
+        "properties": {
+          "elevation": {
+            "enum": [
+              "level",
+              "view_from_above",
+              "view_from_below",
+              "indeterminate",
+              "not_applicable"
+            ],
+            "title": "Elevation",
+            "type": "string"
+          },
+          "evidence_basis": {
+            "enum": [
+              "visible_crop",
+              "crop_with_parent_context",
+              "visible_prefix",
+              "not_applicable"
+            ],
+            "title": "Evidence Basis",
+            "type": "string"
+          },
+          "facing": {
+            "enum": [
+              "image_left",
+              "image_right",
+              "center",
+              "indeterminate",
+              "not_applicable"
+            ],
+            "title": "Facing",
+            "type": "string"
+          },
+          "horizontal_view": {
+            "enum": [
+              "front",
+              "three_quarter",
+              "profile",
+              "rear",
+              "indeterminate",
+              "not_applicable"
+            ],
+            "title": "Horizontal View",
+            "type": "string"
+          },
+          "rationale": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "review_state": {
+            "enum": [
+              "unreviewed",
+              "reviewed",
+              "not_applicable"
+            ],
+            "title": "Review State",
+            "type": "string"
+          },
+          "reviewed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewed At"
+          },
+          "reviewer_id": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_-]{3,80}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Id"
+          },
+          "roll_degrees": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roll Degrees"
+          },
+          "rubric_id": {
+            "const": "drawable-viewpoint-v1",
+            "default": "drawable-viewpoint-v1",
+            "title": "Rubric Id",
+            "type": "string"
+          },
+          "rubric_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Rubric Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rubric_sha256",
+          "review_state",
+          "evidence_basis",
+          "horizontal_view",
+          "facing",
+          "elevation"
+        ],
+        "title": "ViewpointReviewV1",
+        "type": "object"
+      },
+      "ViewpointRubricResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "rubric": {
+            "additionalProperties": true,
+            "title": "Rubric",
+            "type": "object"
+          },
+          "rubric_id": {
+            "const": "drawable-viewpoint-v1",
+            "title": "Rubric Id",
+            "type": "string"
+          },
+          "rubric_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Rubric Sha256",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rubric_id",
+          "rubric_sha256",
+          "rubric"
+        ],
+        "title": "ViewpointRubricResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Loopback-only API with opt-in, frozen CPU educational prototype search.",
+    "title": "drawable local API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/assets/{asset_id}/preview": {
+      "get": {
+        "operationId": "prototype_preview_api_v1_assets__asset_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prototype Preview",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
+    "/api/v1/curation/assets/{asset_id}/crops": {
+      "post": {
+        "operationId": "curation_crop_api_v1_curation_assets__asset_id__crops_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurationCropRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCropResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curation Crop",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/assets/{asset_id}/preview": {
+      "get": {
+        "operationId": "curation_preview_api_v1_curation_assets__asset_id__preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curation Preview",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/assets/{asset_id}/review": {
+      "post": {
+        "operationId": "review_curation_asset_api_v1_curation_assets__asset_id__review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurationReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Curation Asset",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/assets/{asset_id}/reviews": {
+      "get": {
+        "operationId": "curation_history_api_v1_curation_assets__asset_id__reviews_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CurationHistoryItem"
+                  },
+                  "title": "Response Curation History Api V1 Curation Assets  Asset Id  Reviews Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curation History",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/candidates": {
+      "get": {
+        "operationId": "curation_candidates_api_v1_curation_candidates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "pending",
+              "pattern": "^(pending|candidate|rejected|all)$",
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "candidate_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Candidate Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCandidateList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curation Candidates",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/progress": {
+      "get": {
+        "operationId": "curation_progress_route_api_v1_curation_progress_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationProgress"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Curation Progress Route",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/prototype/batch": {
+      "post": {
+        "operationId": "prototype_next_batch_api_v1_curation_prototype_batch_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 32,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCandidateList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Prototype Next Batch",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/rubric/viewpoint": {
+      "get": {
+        "operationId": "curation_viewpoint_rubric_api_v1_curation_rubric_viewpoint_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ViewpointRubricResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Curation Viewpoint Rubric",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/snapshots": {
+      "post": {
+        "operationId": "curation_snapshot_api_v1_curation_snapshots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurationSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationSnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Curation Snapshot",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/source-yield": {
+      "get": {
+        "operationId": "curation_source_yield_api_v1_curation_source_yield_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceYieldQueueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Curation Source Yield",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/curation/view-matches": {
+      "post": {
+        "operationId": "review_curation_view_match_api_v1_curation_view_matches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurationViewMatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationViewMatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Curation View Match",
+        "tags": [
+          "curation"
+        ]
+      }
+    },
+    "/api/v1/feasibility/m0": {
+      "get": {
+        "operationId": "m0_feasibility_workspace_api_v1_feasibility_m0_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/M0WorkspaceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "M0 Feasibility Workspace",
+        "tags": [
+          "feasibility"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/ready": {
+      "get": {
+        "operationId": "readiness_api_v1_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "operationId": "search_not_ready_api_v1_search_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Search Not Ready",
+        "tags": [
+          "search"
+        ]
+      },
+      "post": {
+        "operationId": "search_api_v1_search_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "canvas_height": {
+                    "const": 2048,
+                    "type": "integer"
+                  },
+                  "canvas_revision": {
+                    "maximum": 9007199254740991.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "canvas_width": {
+                    "const": 2048,
+                    "type": "integer"
+                  },
+                  "counts_approximate": {
+                    "type": "boolean"
+                  },
+                  "document_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "image": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "point_count": {
+                    "maximum": 1000000.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "preprocessing_version": {
+                    "maxLength": 100,
+                    "type": "string"
+                  },
+                  "query_generation": {
+                    "maximum": 9007199254740991.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "session_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
+                  "stroke_count": {
+                    "maximum": 10000.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  "stroke_status": {
+                    "enum": [
+                      "available",
+                      "too_short",
+                      "erased_layers",
+                      "raster_content",
+                      "unsupported_transform",
+                      "out_of_bounds",
+                      "too_many_boundaries",
+                      "disabled"
+                    ],
+                    "type": "string"
+                  },
+                  "strokes": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "text_hint": {
+                    "maxLength": 120,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "session_id",
+                  "document_id",
+                  "canvas_revision",
+                  "query_generation",
+                  "canvas_width",
+                  "canvas_height",
+                  "stroke_count",
+                  "point_count",
+                  "counts_approximate",
+                  "stroke_status",
+                  "preprocessing_version",
+                  "image"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Gateway Timeout"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/v1/setup": {
+      "get": {
+        "operationId": "setup_status_api_v1_setup_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewWorkspaceStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Setup Status",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/decisions": {
+      "post": {
+        "operationId": "setup_record_decision_api_v1_setup_decisions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Setup Record Decision Api V1 Setup Decisions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Record Decision",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/prepare-candidates": {
+      "post": {
+        "operationId": "setup_prepare_candidates_api_v1_setup_prepare_candidates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewCandidatePreparationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPreparationJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Prepare Candidates",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/prepare-candidates/{job_id}": {
+      "get": {
+        "operationId": "setup_preparation_status_api_v1_setup_prepare_candidates__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPreparationJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Preparation Status",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/preview-batches": {
+      "post": {
+        "operationId": "setup_grant_preview_batch_api_v1_setup_preview_batches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewPreviewBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Setup Grant Preview Batch Api V1 Setup Preview Batches Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Grant Preview Batch",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/terms": {
+      "post": {
+        "operationId": "setup_capture_terms_api_v1_setup_terms_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTermsCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTermsCaptureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Capture Terms",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/terms/{kind}/{identifier}": {
+      "get": {
+        "operationId": "setup_terms_document_api_v1_setup_terms__kind___identifier__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "identifier",
+            "required": true,
+            "schema": {
+              "title": "Identifier",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Terms Document",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/works": {
+      "put": {
+        "operationId": "setup_select_works_api_v1_setup_works_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewWorkSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Setup Select Works Api V1 Setup Works Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Setup Select Works",
+        "tags": [
+          "setup"
+        ]
+      }
+    }
+  }
+}

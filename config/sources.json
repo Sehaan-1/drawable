@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-10-03",
+  "policy": "Sources are quarantined until a reviewer records item-level identity, terms, attribution, and permitted uses. Academic intent alone does not authorize use or cloud transfer.",
+  "sources": [
+    {
+      "id": "anita-dataset",
+      "title": "AnitaDataset",
+      "authority_url": "https://github.com/zhenglinpan/AnitaDataset",
+      "download_url": "https://drive.google.com/uc?export=download&id=1ctfD0sMpT2pVutJUOlyEYKhAxufMYmZ_",
+      "download_hosts": ["drive.google.com", "googleusercontent.com", "google.com"],
+      "archive_filename": "AnitaDataset.zip",
+      "archive_path": "raw/AnitaDataset.zip",
+      "extracted_path": "AnitaDataset",
+      "rights_status": "review_required",
+      "terms_review": {"status": "review_required", "reviewer_id": null, "reviewed_at": null, "reviewed_sha256": null},
+      "license_policy": "Per-work CC BY 4.0 or CC BY-NC-SA 4.0; map each asset to the official work and preserve attribution and share-alike obligations.",
+      "use_permissions": {"local_display": false, "training": false, "evaluation": false, "derive": false, "trace": false, "export": false, "public_demo": false, "redistribute": false, "cloud_storage": false, "cloud_processing": false},
+      "terms_snapshot_sha256": null
+    },
+    {
+      "id": "emoreccom-panels",
+      "title": "EmoRecCom panel subset",
+      "authority_url": "https://l3i-share.univ-lr.fr/2024visemocomic/",
+      "download_url": "https://l3i-share.univ-lr.fr/2024visemocomic/emoreccom_panels.zip",
+      "download_hosts": ["l3i-share.univ-lr.fr"],
+      "archive_filename": "emoreccom_panels.zip",
+      "archive_path": "raw/emoreccom_panels.zip",
+      "extracted_path": "emoreccom_panels",
+      "rights_status": "review_required",
+      "terms_review": {"status": "review_required", "reviewer_id": null, "reviewed_at": null, "reviewed_sha256": null},
+      "license_policy": "The publisher describes the supplied EmoRecCom panels as public domain. Preserve attribution and independently verify each panel's dataset/book provenance before activation.",
+      "use_permissions": {"local_display": false, "training": false, "evaluation": false, "derive": false, "trace": false, "export": false, "public_demo": false, "redistribute": false, "cloud_storage": false, "cloud_processing": false},
+      "terms_snapshot_sha256": null
+    },
+    {
+      "id": "emoreccom-annotations",
+      "title": "EmoRecCom annotations",
+      "authority_url": "https://l3i-share.univ-lr.fr/2024visemocomic/",
+      "download_url": "https://l3i-share.univ-lr.fr/2024visemocomic/visemocomic_csvs.zip",
+      "download_hosts": ["l3i-share.univ-lr.fr"],
+      "archive_filename": "visemocomic_csvs.zip",
+      "archive_path": "raw/visemocomic_csvs.zip",
+      "extracted_path": "visemocomic_csvs",
+      "rights_status": "review_required",
+      "terms_review": {"status": "review_required", "reviewer_id": null, "reviewed_at": null, "reviewed_sha256": null},
+      "license_policy": "Use only the publisher's EmoRecCom annotation subset and preserve its association with the official panel and book identity. Manga109 and IMCDB rows remain excluded.",
+      "use_permissions": {"local_display": false, "training": false, "evaluation": false, "derive": false, "trace": false, "export": false, "public_demo": false, "redistribute": false, "cloud_storage": false, "cloud_processing": false},
+      "terms_snapshot_sha256": null
+    },
+    {
+      "id": "the-met-open-access",
+      "title": "The Metropolitan Museum of Art Open Access",
+      "authority_url": "https://metmuseum.github.io/",
+      "download_url": null,
+      "download_hosts": ["collectionapi.metmuseum.org", "images.metmuseum.org"],
+      "archive_filename": null,
+      "archive_path": null,
+      "extracted_path": "museum/met",
+      "rights_status": "review_required",
+      "terms_review": {"status": "review_required", "reviewer_id": null, "reviewed_at": null, "reviewed_sha256": null},
+      "license_policy": "Use only the current paginated API, records marked isPublicDomain=true, and assets with primaryImage; review image/object terms and attribution per asset.",
+      "use_permissions": {"local_display": false, "training": false, "evaluation": false, "derive": false, "trace": false, "export": false, "public_demo": false, "redistribute": false, "cloud_storage": false, "cloud_processing": false},
+      "terms_snapshot_sha256": null
+    },
+    {
+      "id": "aic-open-access",
+      "title": "Art Institute of Chicago Open Access",
+      "authority_url": "https://api.artic.edu/docs/",
+      "download_url": null,
+      "download_hosts": ["api.artic.edu", "www.artic.edu"],
+      "archive_filename": null,
+      "archive_path": null,
+      "extracted_path": "museum/aic",
+      "rights_status": "review_required",
+      "terms_review": {"status": "review_required", "reviewer_id": null, "reviewed_at": null, "reviewed_sha256": null},
+      "license_policy": "Require is_public_domain=true and image_id. Prefer the documented 843-pixel IIIF image and follow the one-at-a-time download guidance.",
+      "use_permissions": {"local_display": false, "training": false, "evaluation": false, "derive": false, "trace": false, "export": false, "public_demo": false, "redistribute": false, "cloud_storage": false, "cloud_processing": false},
+      "terms_snapshot_sha256": null
+    }
+  ]
+}

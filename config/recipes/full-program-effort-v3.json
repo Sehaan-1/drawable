@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "requirements_revision": "2026-10-04-practical-r1",
+  "protocol_id": "deep-draw-rev1-full-program-effort-v3",
+  "enabled_assets_target": 10000,
+  "screened_candidates_minimum": 20000,
+  "reference_gold_targets": {
+    "manga_anime": {
+      "eye": 24,
+      "eyebrow": 8,
+      "mouth": 8,
+      "face_head": 40,
+      "hair": 20,
+      "hand": 36,
+      "foot": 24,
+      "upper_body_clothing": 60,
+      "full_body": 120,
+      "multi_character": 60
+    },
+    "western_ink": {
+      "eye": 24,
+      "eyebrow": 8,
+      "mouth": 8,
+      "face_head": 40,
+      "hair": 20,
+      "hand": 36,
+      "foot": 24,
+      "upper_body_clothing": 60,
+      "full_body": 120,
+      "multi_character": 60
+    },
+    "realistic_academic": {
+      "eye": 24,
+      "eyebrow": 8,
+      "mouth": 8,
+      "face_head": 40,
+      "hair": 20,
+      "hand": 36,
+      "foot": 24,
+      "upper_body_clothing": 60,
+      "full_body": 120,
+      "multi_character": 60
+    },
+    "cartoon": {
+      "eye": 24,
+      "eyebrow": 8,
+      "mouth": 8,
+      "face_head": 40,
+      "hair": 20,
+      "hand": 36,
+      "foot": 24,
+      "upper_body_clothing": 60,
+      "full_body": 120,
+      "multi_character": 60
+    },
+    "gesture_sketch": {
+      "eye": 24,
+      "eyebrow": 8,
+      "mouth": 8,
+      "face_head": 40,
+      "hair": 20,
+      "hand": 36,
+      "foot": 24,
+      "upper_body_clothing": 60,
+      "full_body": 120,
+      "multi_character": 60
+    }
+  },
+  "query_drawing_targets": [
+    {
+      "partition": "training",
+      "query_class": "in_domain",
+      "count": 75
+    },
+    {
+      "partition": "training",
+      "query_class": "unknown",
+      "count": 10
+    },
+    {
+      "partition": "model_selection",
+      "query_class": "in_domain",
+      "count": 15
+    },
+    {
+      "partition": "model_selection",
+      "query_class": "unknown",
+      "count": 4
+    },
+    {
+      "partition": "threshold",
+      "query_class": "in_domain",
+      "count": 10
+    },
+    {
+      "partition": "threshold",
+      "query_class": "unknown",
+      "count": 3
+    },
+    {
+      "partition": "calibration_audit",
+      "query_class": "in_domain",
+      "count": 20
+    },
+    {
+      "partition": "calibration_audit",
+      "query_class": "unknown",
+      "count": 3
+    },
+    {
+      "partition": "locked_test",
+      "query_class": "in_domain",
+      "count": 50
+    },
+    {
+      "partition": "locked_test",
+      "query_class": "unknown",
+      "count": 10
+    }
+  ],
+  "pilot_development_drawings": 20,
+  "m0_feasibility_recordings": 10,
+  "judgment_pair_minimums": {
+    "training": 2000,
+    "model_selection": 300,
+    "threshold": 300,
+    "audit": 400
+  }
+}

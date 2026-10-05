@@ -4,7 +4,7 @@ import type { DrawingDocument } from '../lib/types'
 import { useDocumentStore } from '../state/documentStore'
 import { useSearchStore } from '../state/searchStore'
 import { useUiStore } from '../state/uiStore'
-import { fixtureServices } from './frontendServices'
+import { getFrontendServices } from './frontendServices'
 import { cleanupExpiredImports, loadDocument, materializeStagedImport, saveDocument, type LoadedDocument } from './persistence'
 import { prepareSnapshot } from './snapshotClient'
 import { acquireDocumentLease, type DocumentLease } from './documentLock'
@@ -33,7 +33,9 @@ export function useWorkspaceLifecycle() {
 
   const setDocumentUrl = (documentId: string) => {
     const url = new URL(window.location.href)
+    const mode = url.searchParams.get('mode')
     url.search = ''
+    if (mode) url.searchParams.set('mode', mode)
     url.searchParams.set('document', documentId)
     window.history.replaceState(null, '', `${url.pathname}${url.search}`)
   }
@@ -114,7 +116,7 @@ export function useWorkspaceLifecycle() {
   useEffect(() => {
     if (!hasHydrated || !document.trace.assetId || document.trace.imageUrl) return
     const controller = new AbortController()
-    fixtureServices.assets.resolveTrace(document.trace.assetId, controller.signal).then((imageUrl) => {
+    getFrontendServices().assets.resolveTrace(document.trace.assetId, controller.signal).then((imageUrl) => {
       if (imageUrl) setResolvedTraceImage(imageUrl)
       else setNotice('The saved trace reference is unavailable; the drawing opened without it.')
     }).catch(() => setNotice('The saved trace reference is unavailable; the drawing opened without it.'))
@@ -137,7 +139,9 @@ export function useWorkspaceLifecycle() {
       setLoading(true)
       prepareSnapshot(document, requestGeneration, controller.signal).then((snapshot) => {
         if (snapshot.revision !== requestRevision || snapshot.generation !== requestGeneration) throw new DOMException('Snapshot superseded', 'AbortError')
-        return fixtureServices.search.search({
+        return getFrontendServices().search.search({
+          documentId: document.id,
+          image: snapshot.image,
           revision: requestRevision,
           generation: requestGeneration,
           strokeCount: countDocumentStrokes(document.layers),
@@ -146,9 +150,9 @@ export function useWorkspaceLifecycle() {
       }).then((response) => {
         const current = useSearchStore.getState()
         const currentDocument = useDocumentStore.getState().document
-        if (!current.drawing && current.generation === response.generation && currentDocument.revision === response.revision) setResponse(response)
+        if (!current.drawing && currentDocument.id === document.id && current.generation === response.generation && currentDocument.revision === response.revision) setResponse(response)
       }).catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') return
+        if (controller.signal.aborted || error instanceof DOMException && error.name === 'AbortError') return
         setError(error instanceof Error ? error.message : 'Reference search failed.')
       })
     }, 350)
@@ -156,7 +160,7 @@ export function useWorkspaceLifecycle() {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [document.revision, drawing, generation, hasHydrated, setError, setLoading, setResponse, textHint])
+  }, [document.id, document.revision, drawing, generation, hasHydrated, setError, setLoading, setResponse, textHint])
 
   useEffect(() => {
     if (theme !== 'system') return

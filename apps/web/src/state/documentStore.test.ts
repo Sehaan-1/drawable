@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { makeStrokeOperation } from '../lib/drawing'
-import { useDocumentStore } from './documentStore'
+import { createDocumentStore, useDocumentStore } from './documentStore'
 
 describe('document store', () => {
   beforeEach(() => useDocumentStore.getState().newDocument())
@@ -43,5 +43,17 @@ describe('document store', () => {
     expect(contentRevision).toBeGreaterThan(initialRevision)
     useDocumentStore.getState().undo()
     expect(useDocumentStore.getState().document.revision).toBeGreaterThan(contentRevision)
+  })
+
+  it('emits recorder commands only for successful mutations', () => {
+    const commands: string[] = []
+    const store = createDocumentStore({ onCommand: (command) => commands.push(command.type) })
+    store.getState().updateLayer('layer-1', { opacity: 1 })
+    store.getState().moveLayer('layer-1', -1)
+    store.getState().clearLayer('layer-1')
+    store.getState().undo()
+    expect(commands).toEqual([])
+    store.getState().commitOperation(makeStrokeOperation('monoline', [{ x: 1, y: 1, pressure: 0.5, time: 0 }], 4, 0, false))
+    expect(commands).toEqual(['operation_committed'])
   })
 })

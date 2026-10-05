@@ -8,7 +8,21 @@
     "build": "npm run build --workspace=@drawable/web",
     "check": "npm run check --workspace=@drawable/web",
     "test": "npm run test --workspace=@drawable/web",
-    "test:e2e": "npm run test:e2e --workspace=@drawable/web"
+    "test:e2e": "npm run test:e2e --workspace=@drawable/web",
+    "m0:browser:install": "playwright install chromium",
+    "m0:record": "node tools/record-m0.mjs",
+    "m0:replay": "node tools/replay-m0-recordings.mjs",
+    "review": "node tools/review-local.mjs",
+    "search:prepare": "node tools/prepare-search.mjs",
+    "search:local": "node tools/review-local.mjs --search",
+    "search:check": "node tools/check-prototype-search.mjs",
+    "data:audit": "uv run --package drawable-api drawable sources audit",
+    "api:openapi": "uv run --package drawable-api python scripts/export_openapi.py",
+    "api:contracts": "npm run api:openapi && npm --workspace=@drawable/contracts run generate",
+    "api:contracts:check": "uv run --package drawable-api python scripts/export_openapi.py --check && npm --workspace=@drawable/contracts run check"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   },
   "engines": {
     "node": ">=22"
