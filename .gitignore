@@ -1,6 +1,5 @@
 NEW/
 docs/*
-!docs/deep-draw.md
 datasets/
 artifacts/
 reports/private/
