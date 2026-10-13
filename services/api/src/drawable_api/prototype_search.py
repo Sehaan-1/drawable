@@ -15,7 +15,10 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
-from drawable_research_contracts import CurationSnapshotV1, validate_curation_snapshot_files
+from drawable_research_contracts import (
+    CurationSnapshotV1,
+    PrototypeGalleryCatalogV2,
+)
 
 from .search import ParsedSearchRequest, SearchInputError
 from .settings import REPOSITORY_ROOT, Settings
@@ -59,6 +62,8 @@ class PrototypeSearchRuntime:
         self.process: asyncio.subprocess.Process | None = None
         self.status: dict[str, Any] = {}
         self.assets: dict[str, Any] = {}
+        self.catalog_id: str | None = None
+        self._build_assets: OrderedDict[str, tuple[dict[str, Any], str | None]] = OrderedDict()
         self.error: str | None = "prototype_search_not_prepared"
         self.pending: OrderedDict[str, Job] = OrderedDict()
         self.wake = asyncio.Event()
@@ -95,11 +100,21 @@ class PrototypeSearchRuntime:
             snapshot_path = private_file(root, manifest["snapshot_path"])
             if digest(snapshot_path) != manifest["snapshot_sha256"]:
                 raise ValueError("Prototype snapshot checksum mismatch")
-            snapshot = CurationSnapshotV1.model_validate_json(snapshot_path.read_bytes())
+            snapshot_document = json.loads(snapshot_path.read_bytes())
+            snapshot = (
+                CurationSnapshotV1.model_validate_json(snapshot_path.read_bytes())
+                if snapshot_document.get("schema_version") == 1
+                else PrototypeGalleryCatalogV2.model_validate_json(snapshot_path.read_bytes())
+                if snapshot_document.get("schema_version") == 2
+                else None
+            )
+            if snapshot is None:
+                raise ValueError("Prototype catalog version is unsupported")
             if snapshot.purpose != "local-educational-prototype":
                 raise ValueError("Prototype search requires an identified prototype snapshot")
-            validate_curation_snapshot_files(snapshot, root)
             self.assets = {item.asset_id: item for item in snapshot.items}
+            self.catalog_id = getattr(snapshot, "catalog_id", None)
+            self._build_assets[build_id] = (self.assets, self.catalog_id)
             executable = os.environ.get(
                 "DRAWABLE_ML_PYTHON", str(REPOSITORY_ROOT / "ml/.venv/bin/python")
             )
@@ -131,12 +146,21 @@ class PrototypeSearchRuntime:
             status = json.loads(response)
             if (
                 status.get("build_id") != build_id
-                or status.get("gallery_size") != len(self.assets)
+                or status.get("catalog_size", status.get("gallery_size")) != len(self.assets)
                 or status.get("ready") is not True
             ):
                 raise ValueError("Inference worker did not load the selected reviewed batch")
             self.status = status
             self.error = None
+            self._startup_availability = None
+            try:
+                availability_relative = pointer.get("availability_path")
+                if availability_relative and digest(private_file(root, availability_relative)) == pointer.get("availability_sha256"):
+                    availability = json.loads(private_file(root, availability_relative).read_bytes())
+                    if availability.get("catalog_id") == self.catalog_id:
+                        self._startup_availability = availability
+            except (OSError, ValueError, TypeError):
+                self._startup_availability = None
             self.dispatcher = asyncio.create_task(self._dispatch())
         except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
             logger.warning("Prototype search setup failed: %s %s", error, "".join(self.stderr_tail))
@@ -247,6 +271,24 @@ class PrototypeSearchRuntime:
                 result = response["result"]
                 if result.get("build_id") != self.status["build_id"]:
                     raise RuntimeError("Inference worker mixed gallery builds")
+                withdrawn_asset_ids = result.pop("withdrawn_asset_ids", [])
+                if withdrawn_asset_ids:
+                    try:
+                        from .references import withdraw_availability
+
+                        withdrawal = withdraw_availability(
+                            self.settings.data_root, withdrawn_asset_ids
+                        )
+                        if withdrawal is None:
+                            logger.warning(
+                                "Could not update availability for changed references: %s",
+                                withdrawn_asset_ids,
+                            )
+                    except (OSError, ValueError, RuntimeError):
+                        logger.exception(
+                            "Could not update availability for changed references: %s",
+                            withdrawn_asset_ids,
+                        )
                 result["queue_ms"] = queue_ms
                 if not job.future.done():
                     job.future.set_result(result)
@@ -267,11 +309,217 @@ class PrototypeSearchRuntime:
                         )
                     )
 
-    def preview(self, asset_id: str, build_id: str) -> tuple[Path, str]:
-        if not self.ready or build_id != self.status.get("build_id") or asset_id not in self.assets:
+    def _availability(self) -> dict[str, Any] | None:
+        fail_closed = {"items": {}} if self.catalog_id is not None else None
+        try:
+            pointer = json.loads(private_file(self.settings.data_root, "prototype/search/active.json").read_bytes())
+            # Keep serving the build selected at startup while another build is activated.
+            if pointer.get("build_id") != self.status.get("build_id"):
+                relative = pointer.get("availability_path")
+                expected = pointer.get("availability_sha256")
+                if relative and isinstance(expected, str):
+                    path = private_file(self.settings.data_root, relative)
+                    if digest(path) != expected:
+                        return fail_closed
+                    active = json.loads(path.read_bytes())
+                    rows = active.get("items")
+                    if not isinstance(rows, dict):
+                        return fail_closed
+                    filtered = {
+                        asset_id: row
+                        for asset_id, row in rows.items()
+                        if asset_id in self.assets
+                        and isinstance(row, dict)
+                        and row.get("sha256") == self.assets[asset_id].sha256
+                        and row.get("reviewed_revision") == self.assets[asset_id].asset_revision
+                    }
+                    return {"schema_version": 1, "catalog_id": self.catalog_id, "items": filtered}
+                return getattr(self, "_startup_availability", fail_closed) or fail_closed
+            relative = pointer.get("availability_path")
+            expected = pointer.get("availability_sha256")
+            if not relative or not isinstance(expected, str):
+                return fail_closed
+            path = private_file(self.settings.data_root, relative)
+            if digest(path) != expected:
+                return fail_closed
+            availability = json.loads(path.read_bytes())
+            rows = availability.get("items")
+            if (
+                availability.get("catalog_id") != self.catalog_id
+                or not isinstance(rows, dict)
+                or not set(rows).issubset(self.assets)
+                or any(
+                    not isinstance(row, dict)
+                    or row.get("sha256") != self.assets[asset_id].sha256
+                    or row.get("reviewed_revision") != self.assets[asset_id].asset_revision
+                    for asset_id, row in rows.items()
+                )
+            ):
+                return fail_closed
+            return availability
+        except (OSError, ValueError, TypeError, KeyError):
+            return getattr(self, "_startup_availability", fail_closed) or fail_closed
+
+    def _assets_for_build(self, build_id: str) -> tuple[dict[str, Any], str | None]:
+        if (
+            not isinstance(build_id, str)
+            or len(build_id) != 34
+            or not build_id.startswith("prototype-")
+            or any(char not in "0123456789abcdef" for char in build_id[10:])
+        ):
+            raise ValueError("Prototype build identity is invalid")
+        cached = self._build_assets.get(build_id)
+        if cached is not None:
+            self._build_assets.move_to_end(build_id)
+            return cached
+        manifest_path = private_file(
+            self.settings.data_root, f"prototype/search/builds/{build_id}/manifest.json"
+        )
+        manifest = json.loads(manifest_path.read_bytes())
+        body = {key: value for key, value in manifest.items() if key != "build_id"}
+        manifest_hash = hashlib.sha256(
+            json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if manifest.get("build_id") != build_id or f"prototype-{manifest_hash[:24]}" != build_id:
+            raise ValueError("Pinned prototype build manifest identity is invalid")
+        snapshot_path = private_file(self.settings.data_root, manifest["snapshot_path"])
+        if digest(snapshot_path) != manifest["snapshot_sha256"]:
+            raise ValueError("Pinned prototype catalog checksum is invalid")
+        document = json.loads(snapshot_path.read_bytes())
+        snapshot = (
+            CurationSnapshotV1.model_validate_json(snapshot_path.read_bytes())
+            if document.get("schema_version") == 1
+            else PrototypeGalleryCatalogV2.model_validate_json(snapshot_path.read_bytes())
+            if document.get("schema_version") == 2
+            else None
+        )
+        if snapshot is None or snapshot.purpose != "local-educational-prototype":
+            raise ValueError("Pinned prototype catalog is unsupported")
+        result = ({item.asset_id: item for item in snapshot.items}, getattr(snapshot, "catalog_id", None))
+        self._build_assets[build_id] = result
+        while len(self._build_assets) > 4:
+            self._build_assets.popitem(last=False)
+        return result
+
+    def _active_catalog_availability(
+        self,
+    ) -> tuple[dict[str, Any] | None, str | None, dict[str, Any]]:
+        pointer = json.loads(
+            private_file(self.settings.data_root, "prototype/search/active.json").read_bytes()
+        )
+        active_id = pointer.get("build_id")
+        if (
+            not isinstance(active_id, str)
+            or len(active_id) != 34
+            or not active_id.startswith("prototype-")
+            or any(char not in "0123456789abcdef" for char in active_id[10:])
+        ):
+            raise ValueError("Active prototype build identity is invalid")
+        active_manifest = private_file(
+            self.settings.data_root, f"prototype/search/builds/{active_id}/manifest.json"
+        )
+        if digest(active_manifest) != pointer.get("manifest_sha256"):
+            raise ValueError("Active prototype manifest checksum is invalid")
+        assets, catalog_id = self._assets_for_build(active_id)
+        if catalog_id is None:
+            return None, None, assets
+        relative = pointer.get("availability_path")
+        expected = pointer.get("availability_sha256")
+        if not relative or not isinstance(expected, str):
+            raise ValueError("Active reference availability is missing")
+        path = private_file(self.settings.data_root, relative)
+        if digest(path) != expected:
+            raise ValueError("Active reference availability checksum is invalid")
+        availability = json.loads(path.read_bytes())
+        rows = availability.get("items")
+        if (
+            availability.get("catalog_id") != catalog_id
+            or not isinstance(rows, dict)
+            or not set(rows).issubset(assets)
+            or any(
+                not isinstance(row, dict)
+                or row.get("sha256") != assets[asset_id].sha256
+                or row.get("reviewed_revision") != assets[asset_id].asset_revision
+                for asset_id, row in rows.items()
+            )
+        ):
+            raise ValueError("Active reference availability does not match its catalog")
+        return availability, catalog_id, assets
+
+    def _withdraw_changed_reference(self, asset_id: str) -> None:
+        try:
+            from .references import withdraw_availability
+
+            result = withdraw_availability(self.settings.data_root, [asset_id])
+            if result is None:
+                logger.warning("Could not withdraw changed prototype reference %s", asset_id)
+        except (OSError, ValueError, RuntimeError):
+            logger.exception("Could not withdraw changed prototype reference %s", asset_id)
+
+    def preview(self, asset_id: str, build_id: str, *, thumbnail: bool = False) -> tuple[Path, str]:
+        if (
+            not self.ready
+            or not isinstance(build_id, str)
+            or len(build_id) != 34
+            or not build_id.startswith("prototype-")
+            or any(char not in "0123456789abcdef" for char in build_id[10:])
+        ):
             raise LookupError("Reference is absent from the active reviewed batch")
-        item = self.assets[asset_id]
-        path = private_file(self.settings.data_root, item.relative_path)
-        if path.stat().st_size != item.byte_length or digest(path) != item.sha256:
+        try:
+            assets, catalog_id = self._assets_for_build(build_id)
+        except (OSError, ValueError, TypeError, KeyError):
+            raise LookupError("Pinned reference build is unavailable") from None
+        item = assets.get(asset_id)
+        if item is None:
+            raise LookupError("Reference is absent from the pinned build")
+        try:
+            if build_id == self.status.get("build_id"):
+                availability = self._availability()
+            else:
+                current_availability, current_catalog_id, current_assets = (
+                    self._active_catalog_availability()
+                )
+                if current_catalog_id is None:
+                    current_item = current_assets.get(asset_id)
+                    availability = (
+                        {
+                            "items": {
+                                asset_id: {
+                                    "sha256": current_item.sha256,
+                                    "reviewed_revision": current_item.asset_revision,
+                                }
+                            }
+                        }
+                        if current_item is not None
+                        else {"items": {}}
+                    )
+                else:
+                    availability = current_availability
+        except (OSError, ValueError, TypeError, KeyError):
+            availability = None
+        if catalog_id is not None and availability is None:
+            raise LookupError("Reference availability could not be verified for this gallery")
+        if availability is not None:
+            row = availability.get("items", {}).get(asset_id)
+            if not isinstance(row, dict) or row.get("sha256") != item.sha256 or row.get("reviewed_revision") != item.asset_revision:
+                raise LookupError("Reference is no longer available in this reviewed build")
+        relative = item.relative_path
+        expected_hash = item.sha256
+        media_type = item.media_type
+        if thumbnail and getattr(item, "thumbnail_path", None):
+            relative = item.thumbnail_path
+            expected_hash = item.thumbnail_sha256
+            media_type = "image/webp"
+        try:
+            path = private_file(self.settings.data_root, relative)
+            changed = (
+                (not thumbnail and path.stat().st_size != item.byte_length)
+                or digest(path) != expected_hash
+            )
+        except (OSError, ValueError):
+            self._withdraw_changed_reference(asset_id)
+            raise ValueError("Reference bytes changed; prepare local search again") from None
+        if changed:
+            self._withdraw_changed_reference(asset_id)
             raise ValueError("Reference bytes changed; prepare local search again")
-        return path, item.media_type
+        return path, media_type

@@ -21,8 +21,13 @@ __all__ = [
     "GateAttestationV1",
     "GateReportV1",
     "GateReportV2",
+    "PrototypeGalleryCatalogV2",
+    "PrototypeGalleryItemV2",
     "ReadinessLedgerV1",
+    "ReviewProvenanceV1",
     "SnapshotAssetV1",
+    "SnapshotLabelsV1",
+    "SnapshotPermissionsV1",
     "SourceSelectionProfileV1",
     "ViewMatchReviewV1",
     "ViewpointReviewV1",
@@ -32,4 +37,13 @@ __all__ = [
     "validate_view_match_rubric",
     "validate_viewpoint_rubric",
 ]
-from .curation_snapshot import CurationSnapshotV1, SnapshotAssetV1, validate_curation_snapshot_files
+from .curation_snapshot import (
+    CurationSnapshotV1,
+    PrototypeGalleryCatalogV2,
+    PrototypeGalleryItemV2,
+    ReviewProvenanceV1,
+    SnapshotAssetV1,
+    SnapshotLabelsV1,
+    SnapshotPermissionsV1,
+    validate_curation_snapshot_files,
+)

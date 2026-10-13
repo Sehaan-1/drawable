@@ -25,8 +25,20 @@ from .emoreccom_map import (
     create_book_mapping_template,
     fetch_official_book_index,
 )
+from .local_reviewer import ReviewerError, preflight_reviewer, reviewer_config, setup_reviewer
 from .museum import fetch_museum_candidates, refresh_museum_manifest
 from .readiness import build_training_readiness
+from .references import (
+    expand_run,
+    extend_benchmark_heldout,
+    finalize_collection,
+    import_assistant_reviewed,
+    latest_run_id,
+    prepare_benchmark,
+    qualify_reviewer,
+    rollback_build,
+    status_run,
+)
 from .sampling import build_pilot_yield_sample
 from .settings import REPOSITORY_ROOT, Settings
 
@@ -318,6 +330,63 @@ def build_parser() -> argparse.ArgumentParser:
         "migrate", help="Apply versioned SQLite metadata migrations"
     )
     _root_arg(migrate_cmd)
+    migrate_cmd.add_argument(
+        "--database",
+        type=Path,
+        help="Metadata database relative to --root (defaults to <root>/metadata.sqlite3)",
+    )
+
+    references = commands.add_parser(
+        "references", help="Qualify and curate a larger local prototype reference gallery"
+    )
+    reference_commands = references.add_subparsers(dest="references_command", required=True)
+    reviewer_setup = reference_commands.add_parser(
+        "setup", help="Install checksum-pinned llama.cpp and local vision-review weights"
+    )
+    _root_arg(reviewer_setup)
+    reviewer_setup.add_argument("--q8-model", help="Optionally download only this pinned Q8 model")
+    reviewer_qualify = reference_commands.add_parser(
+        "qualify", help="Prepare an assistant-reviewed benchmark or qualify the pinned local reviewer"
+    )
+    _root_arg(reviewer_qualify)
+    reviewer_qualify.add_argument("--prepare-benchmark", action="store_true")
+    reviewer_qualify.add_argument("--benchmark", help="Private qualification benchmark JSON path")
+    reviewer_qualify.add_argument("--run", help="Existing inventory run to sample")
+    reviewer_qualify.add_argument(
+        "--extend-heldout",
+        action="append",
+        metavar="SOURCE=COUNT",
+        help="Add a deterministic held-out source sample, such as emoreccom-panels=100",
+    )
+    assistant_import = reference_commands.add_parser(
+        "import-assistant",
+        help="Import existing assistant-approved benchmark references into a small V2 release",
+    )
+    _root_arg(assistant_import)
+    assistant_import.add_argument("--benchmark", required=True, help="Private assistant-reviewed qualification benchmark JSON")
+    assistant_import.add_argument("--pair-review", help="Completed pair-review JSON emitted by the first import pass")
+    expansion = reference_commands.add_parser(
+        "expand", help="Screen and review candidates toward a target gallery size"
+    )
+    _root_arg(expansion)
+    expansion.add_argument("--target", type=int, required=True, choices=range(1, 10_001))
+    expansion.add_argument("--run")
+    expansion.add_argument("--review-budget", type=int, choices=range(1, 20_001))
+    reference_status = reference_commands.add_parser("status", help="Report run, coverage, and errors")
+    _root_arg(reference_status)
+    reference_status.add_argument("--run")
+    resume = reference_commands.add_parser("resume", help="Resume a resumable local review run")
+    _root_arg(resume)
+    resume.add_argument("--run", required=True)
+    resume.add_argument("--target", type=int, choices=range(1, 10_001))
+    resume.add_argument("--review-budget", type=int, choices=range(1, 20_001))
+    finalize = reference_commands.add_parser("finalize", help="Build, audit, and activate a V2 gallery")
+    _root_arg(finalize)
+    finalize.add_argument("--run", required=True)
+    finalize.add_argument("--audit", help="Assistant-completed 50-item release audit")
+    rollback = reference_commands.add_parser("rollback", help="Validate and reactivate the previous gallery build")
+    _root_arg(rollback)
+    rollback.add_argument("--build-id", help="Optional retired build ID; defaults to the most recently retired build")
 
     readiness = commands.add_parser(
         "readiness", help="Report evidence without promoting incomplete gates"
@@ -617,6 +686,88 @@ def _data_manifest(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "references":
+            root = args.root.resolve(strict=True)
+            if args.references_command == "setup":
+                setup_result = setup_reviewer(root, q8_model_id=args.q8_model)
+                if args.q8_model:
+                    emit({**setup_result, "preflight": "q8 artifact staged; run qualification to measure offloaded inference"})
+                    return 0
+                probes = []
+                for model in reviewer_config()["models"]:
+                    try:
+                        probes.append(preflight_reviewer(root, model["id"]))
+                    except (ReviewerError, OSError, ValueError) as error:
+                        probes.append({"status": "failed", "model_id": model["id"], "error": str(error)})
+                report = {
+                    "status": "ready" if all(item.get("status") == "complete" for item in probes) else "runtime_preflight_incomplete",
+                    "setup": setup_result,
+                    "preflight": probes,
+                    "training_started": False,
+                    "data_uploaded": False,
+                }
+                output = root / "prototype/reviewer/setup-preflight.json"
+                output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                os.chmod(output, 0o600)
+                report["report_path"] = output.relative_to(root).as_posix()
+                emit(report)
+                return 0 if report["status"] == "ready" else 2
+            if args.references_command == "qualify":
+                if args.extend_heldout:
+                    if not args.benchmark:
+                        raise ValueError("Pass --benchmark when extending the held-out sample")
+                    extensions: dict[str, int] = {}
+                    for value in args.extend_heldout:
+                        source_id, separator, count_text = value.rpartition("=")
+                        if not separator or not source_id or source_id in extensions:
+                            raise ValueError("Held-out extensions must use unique SOURCE=COUNT values")
+                        try:
+                            extensions[source_id] = int(count_text)
+                        except ValueError as error:
+                            raise ValueError("Held-out extension counts must be integers") from error
+                    result = extend_benchmark_heldout(root, args.benchmark, extensions)
+                    emit(result)
+                    return 0
+                if args.prepare_benchmark:
+                    result = prepare_benchmark(root, run_id=args.run)
+                    emit(result)
+                    return 0
+                if not args.benchmark:
+                    raise ValueError("Pass --prepare-benchmark or --benchmark <private-path>")
+                result = qualify_reviewer(root, args.benchmark)
+                emit(result)
+                return 0 if result.get("status") in {"qualified", "awaiting_assistant_review"} else 2
+            if args.references_command == "expand":
+                result = expand_run(root, target=args.target, run_id=args.run, review_budget=args.review_budget)
+                emit(result)
+                return 0
+            if args.references_command == "import-assistant":
+                result = import_assistant_reviewed(
+                    root,
+                    args.benchmark,
+                    pair_review_relative=args.pair_review,
+                )
+                emit(result)
+                return 0
+            if args.references_command == "status":
+                run_id = args.run or latest_run_id(root)
+                emit(status_run(root, run_id))
+                return 0
+            if args.references_command == "resume":
+                run_id = args.run
+                state = status_run(root, run_id)
+                target = args.target or int(state["target"])
+                result = expand_run(root, target=target, run_id=run_id, review_budget=args.review_budget)
+                emit(result)
+                return 0
+            if args.references_command == "finalize":
+                result = finalize_collection(root, args.run, audit_relative=args.audit)
+                emit(result)
+                return 0 if result.get("status") in {"awaiting_assistant_audit", "staged", "active"} else 2
+            if args.references_command == "rollback":
+                emit(rollback_build(root, build_id=args.build_id))
+                return 0
         if args.command == "preflight":
             return _preflight(args)
         if args.command == "sources" and args.sources_command == "audit":
@@ -843,7 +994,10 @@ def main(argv: list[str] | None = None) -> int:
             emit(refresh_museum_manifest(args.root.resolve(), args.source))
             return 0
         if args.command == "db" and args.db_command == "migrate":
-            version = migrate(args.root.resolve() / "metadata.sqlite3")
+            database_path = args.database or Path("metadata.sqlite3")
+            if not database_path.is_absolute():
+                database_path = args.root.resolve() / database_path
+            version = migrate(database_path)
             emit({"schema_version": version, "status": "ready"})
             return 0
         if args.command == "readiness" and args.readiness_command == "report":

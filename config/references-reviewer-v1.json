@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "runtime": {
+    "repository": "ggml-org/llama.cpp",
+    "release": "b11425",
+    "commit": "e117148a41d8e9bedb72e4c6c3f003ab0fe7f857",
+    "asset": "llama-b11425-bin-ubuntu-cuda-12.8-x64.tar.gz",
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11425/llama-b11425-bin-ubuntu-cuda-12.8-x64.tar.gz",
+    "bytes": 171642941,
+    "sha256": "ff7f7134ee3677bddf9ead356a1bc8b9cbc479d2b1e26b9e0d6753a5401e632b"
+  },
+  "cuda_runtime": [
+    {
+      "package": "nvidia-cuda-runtime-cu12",
+      "version": "12.8.90",
+      "asset": "nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "bytes": 954765,
+      "sha256": "adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90",
+      "library_prefix": "nvidia/cuda_runtime/lib/"
+    },
+    {
+      "package": "nvidia-cublas-cu12",
+      "version": "12.8.4.1",
+      "asset": "nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_x86_64.whl",
+      "url": "https://files.pythonhosted.org/packages/dc/61/e24b560ab2e2eaeb3c839129175fb330dfcfc29e5203196e5541a4c44682/nvidia_cublas_cu12-12.8.4.1-py3-none-manylinux_2_27_x86_64.whl",
+      "bytes": 594346921,
+      "sha256": "8ac4e771d5a348c551b2a426eda6193c19aa630236b418086020df5ba9667142",
+      "library_prefix": "nvidia/cublas/lib/"
+    }
+  ],
+  "review_defaults": {
+    "image_max_edge": 768,
+    "context_tokens": 4096,
+    "max_response_tokens": 512,
+    "parallel_slots": 1,
+    "temperature": 0,
+    "port": 8115,
+    "inference_timeout_seconds": 180
+  },
+  "models": [
+    {
+      "id": "qwen3-vl-8b-instruct-q4km",
+      "repository": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+      "revision": "f982a07559d4a2f6c8744d840bf6fccab30eea96",
+      "language_file": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+      "language_bytes": 5027784800,
+      "language_sha256": "67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2",
+      "q8": {
+        "file": "Qwen3VL-8B-Instruct-Q8_0.gguf",
+        "bytes": 8709519456,
+        "sha256": "0d264b3941185d00a74f75c4245521dae088ff1efc90ab8d1754e83f5844adb0"
+      },
+      "vision_file": "mmproj-Qwen3VL-8B-Instruct-F16.gguf",
+      "vision_bytes": 1159029824,
+      "vision_sha256": "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"
+    },
+    {
+      "id": "qwen3-5-9b-q4km",
+      "repository": "unsloth/Qwen3.5-9B-GGUF",
+      "revision": "10ea75b81354aa7262b19d7e274d3d5f4c535e45",
+      "language_file": "Qwen3.5-9B-Q4_K_M.gguf",
+      "language_bytes": 5680522464,
+      "language_sha256": "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+      "q8": {
+        "file": "Qwen3.5-9B-Q8_0.gguf",
+        "bytes": 9527502048,
+        "sha256": "809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4"
+      },
+      "vision_file": "mmproj-F16.gguf",
+      "vision_bytes": 918166080,
+      "vision_sha256": "f70dc3509053962b0d0d3ee8a7eacebf5d60aa560cad78254ae8698516ae029f"
+    }
+  ]
+}

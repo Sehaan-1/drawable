@@ -110,6 +110,9 @@ export interface SearchResponse {
   interpretation: string
   groups: ReferenceGroup[]
   buildId?: string
+  gallerySize?: number
+  scopeCoverage?: Record<string, number>
+  styleCoverage?: Record<string, number>
 }
 
 export interface HealthResult {

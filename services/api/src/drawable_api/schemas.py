@@ -55,7 +55,7 @@ class SearchReferenceAsset(StrictModel):
     id: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=1000)
     image_url: str = Field(
-        pattern=r"^/api/v1/assets/[^/]+/preview\?build_id=prototype-[0-9a-f]{24}$"
+        pattern=r"^/api/v1/assets/[^/]+/preview\?build_id=prototype-[0-9a-f]{24}(?:&thumbnail=1)?$"
     )
     style: Literal["Manga / anime", "Western ink", "Realistic", "Cartoon", "Gesture"]
     scope: str = Field(min_length=1, max_length=100)
@@ -82,6 +82,9 @@ class SearchResponse(StrictModel):
     query_generation: int = Field(ge=0)
     build_id: str | None = None
     model_version: str | None = None
+    gallery_size: int = Field(default=0, ge=0)
+    scope_coverage: dict[str, int] = Field(default_factory=dict)
+    style_coverage: dict[str, int] = Field(default_factory=dict)
     preprocessing_version: str
     mode: Literal["insufficient", "provisional"]
     reason: Literal[
@@ -90,7 +93,7 @@ class SearchResponse(StrictModel):
     interpretation: str
     warnings: list[str] = Field(default_factory=list)
     scope_scores: dict[str, float] = Field(default_factory=dict)
-    groups: list[SearchReferenceGroup] = Field(default_factory=list, max_length=3)
+    groups: list[SearchReferenceGroup] = Field(default_factory=list, max_length=6)
     features: dict[str, str] = Field(default_factory=dict)
     timings_ms: SearchTimings
     training_started: Literal[False] = False

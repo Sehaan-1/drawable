@@ -1276,6 +1276,11 @@ export interface components {
             features?: {
                 [key: string]: string;
             };
+            /**
+             * Gallery Size
+             * @default 0
+             */
+            gallery_size: number;
             /** Groups */
             groups?: components["schemas"]["SearchReferenceGroup"][];
             /** Interpretation */
@@ -1307,6 +1312,10 @@ export interface components {
              * @constant
              */
             schema_version: 1;
+            /** Scope Coverage */
+            scope_coverage?: {
+                [key: string]: number;
+            };
             /** Scope Scores */
             scope_scores?: {
                 [key: string]: number;
@@ -1316,6 +1325,10 @@ export interface components {
              * Format: uuid
              */
             session_id: string;
+            /** Style Coverage */
+            style_coverage?: {
+                [key: string]: number;
+            };
             timings_ms: components["schemas"]["SearchTimings"];
             /**
              * Training Started
@@ -1504,6 +1517,7 @@ export interface operations {
         parameters: {
             query: {
                 build_id: string;
+                thumbnail?: boolean;
             };
             header?: never;
             path: {

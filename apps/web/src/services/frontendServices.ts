@@ -38,6 +38,9 @@ async function realSearch(request: SearchRequest, signal: AbortSignal): Promise<
   return {
     revision: value.canvas_revision, generation: value.query_generation, mode: value.mode,
     interpretation: value.interpretation, buildId: value.build_id ?? undefined,
+    gallerySize: value.gallery_size,
+    scopeCoverage: value.scope_coverage,
+    styleCoverage: value.style_coverage,
     groups: (value.groups ?? []).map((group) => {
       return { id: group.id, title: group.title, tentative: group.tentative, results: group.results.map((asset) => ({ ...asset, imageUrl: asset.image_url, traceAllowed: asset.trace_allowed })) }
     }),

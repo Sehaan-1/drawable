@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from time import monotonic
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -104,3 +107,55 @@ def test_preview_paths_reject_symlinks_and_traversal(tmp_path) -> None:
     for relative in ("alias.png", "../image.png", "/image.png", "sub/../image.png"):
         with pytest.raises(ValueError):
             private_file(tmp_path, relative)
+
+
+def test_stale_v2_reference_preview_fails_closed_and_requests_withdrawal(tmp_path) -> None:
+    build_id = "prototype-" + "a" * 24
+    asset_id = "reference-stale-test"
+    original = png(ink=True)
+    image_path = tmp_path / "reference.png"
+    image_path.write_bytes(original + b"changed")
+    item = SimpleNamespace(
+        asset_id=asset_id,
+        asset_revision=1,
+        byte_length=len(original),
+        media_type="image/png",
+        relative_path="reference.png",
+        sha256=hashlib.sha256(original).hexdigest(),
+    )
+    gallery_id = "gallery-stale-test"
+    availability = {
+        "schema_version": 1,
+        "catalog_id": gallery_id,
+        "revision": 1,
+        "items": {
+            asset_id: {"sha256": item.sha256, "reviewed_revision": item.asset_revision}
+        },
+    }
+    availability_path = tmp_path / "prototype/search/availability.json"
+    availability_path.parent.mkdir(parents=True)
+    availability_path.write_text(json.dumps(availability))
+    pointer_path = tmp_path / "prototype/search/active.json"
+    pointer_path.write_text(
+        json.dumps(
+            {
+                "build_id": build_id,
+                "availability_path": "prototype/search/availability.json",
+                "availability_sha256": hashlib.sha256(availability_path.read_bytes()).hexdigest(),
+            }
+        )
+    )
+
+    runtime = PrototypeSearchRuntime(Settings(tmp_path, "real", tmp_path / "metadata.sqlite3"))
+    runtime.error = None
+    runtime.process = SimpleNamespace(returncode=None)
+    runtime.status = {"build_id": build_id}
+    runtime.catalog_id = gallery_id
+    runtime.assets = {asset_id: item}
+    runtime._build_assets[build_id] = (runtime.assets, gallery_id)
+    withdrawn: list[str] = []
+    runtime._withdraw_changed_reference = withdrawn.append
+
+    with pytest.raises(ValueError, match="Reference bytes changed"):
+        runtime.preview(asset_id, build_id)
+    assert withdrawn == [asset_id]

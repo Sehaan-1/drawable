@@ -1806,7 +1806,7 @@
             "type": "string"
           },
           "image_url": {
-            "pattern": "^/api/v1/assets/[^/]+/preview\\?build_id=prototype-[0-9a-f]{24}$",
+            "pattern": "^/api/v1/assets/[^/]+/preview\\?build_id=prototype-[0-9a-f]{24}(?:&thumbnail=1)?$",
             "title": "Image Url",
             "type": "string"
           },
@@ -1950,11 +1950,17 @@
             "title": "Features",
             "type": "object"
           },
+          "gallery_size": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Gallery Size",
+            "type": "integer"
+          },
           "groups": {
             "items": {
               "$ref": "#/components/schemas/SearchReferenceGroup"
             },
-            "maxItems": 3,
+            "maxItems": 6,
             "title": "Groups",
             "type": "array"
           },
@@ -2010,6 +2016,13 @@
             "title": "Schema Version",
             "type": "integer"
           },
+          "scope_coverage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Scope Coverage",
+            "type": "object"
+          },
           "scope_scores": {
             "additionalProperties": {
               "type": "number"
@@ -2021,6 +2034,13 @@
             "format": "uuid",
             "title": "Session Id",
             "type": "string"
+          },
+          "style_coverage": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Style Coverage",
+            "type": "object"
           },
           "timings_ms": {
             "$ref": "#/components/schemas/SearchTimings"
@@ -2478,6 +2498,16 @@
               "maxLength": 100,
               "title": "Build Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "thumbnail",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Thumbnail",
+              "type": "boolean"
             }
           }
         ],

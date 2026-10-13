@@ -180,7 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ready=fixture or (runtime is not None and runtime.ready),
             mode="fixture" if fixture else "cpu",
             models_loaded=runtime is not None and runtime.ready,
-            gallery_size=len(runtime.assets) if runtime is not None and runtime.ready else 0,
+            gallery_size=int(runtime.status.get("gallery_size", 0)) if runtime is not None and runtime.ready else 0,
             enabled_branches=runtime.status.get("enabled_branches", [])
             if runtime is not None and runtime.ready
             else [],
@@ -326,6 +326,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     query_generation=parsed.fields.query_generation,
                     build_id=result["build_id"],
                     model_version=result["model_version"],
+                    gallery_size=result["gallery_size"],
+                    scope_coverage=result.get("scope_coverage", {}),
+                    style_coverage=result.get("style_coverage", {}),
                     preprocessing_version=QUERY_PREPROCESSING_VERSION,
                     mode=result["mode"],
                     reason=result["reason"],
@@ -377,6 +380,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             document_id=parsed.fields.document_id,
             canvas_revision=parsed.fields.canvas_revision,
             query_generation=parsed.fields.query_generation,
+            gallery_size=int(runtime.status.get("gallery_size", 0)) if runtime is not None and runtime.ready else 0,
+            scope_coverage=runtime.status.get("scope_coverage", {}) if runtime is not None and runtime.ready else {},
+            style_coverage=runtime.status.get("style_coverage", {}) if runtime is not None and runtime.ready else {},
             preprocessing_version=QUERY_PREPROCESSING_VERSION,
             mode="insufficient",
             reason="insufficient_visible_ink",
@@ -397,7 +403,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/assets/{asset_id}/preview", tags=["assets"])
     async def prototype_preview(
-        asset_id: str, request: Request, build_id: str = Query(max_length=100)
+        asset_id: str,
+        request: Request,
+        build_id: str = Query(max_length=100),
+        thumbnail: bool = Query(default=False),
     ) -> FileResponse:
         allowed_hosts = {
             (urlsplit(origin).netloc or "").casefold() for origin in resolved.allowed_origins
@@ -409,7 +418,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if runtime is None:
             raise HTTPException(status_code=404, detail="Local prototype search is disabled.")
         try:
-            path, media_type = runtime.preview(asset_id, build_id)
+            path, media_type = runtime.preview(asset_id, build_id, thumbnail=thumbnail)
         except LookupError as error:
             raise HTTPException(
                 status_code=404, detail="Reference is absent from the active reviewed batch."

@@ -653,9 +653,9 @@ def build_small_approved_gallery_report(
     if not root.is_dir():
         raise IntakeError("Private data root must exist before validating a staging gallery")
     snapshot_file = _private_file(root, snapshot_path)
-    snapshot_body = _parse_json(snapshot_file, "M0 staging snapshot")
+    _parse_json(snapshot_file, "M0 staging snapshot")
     try:
-        snapshot = CurationSnapshotV1.model_validate(snapshot_body)
+        snapshot = CurationSnapshotV1.model_validate_json(snapshot_file.read_bytes())
         file_summary = validate_curation_snapshot_files(snapshot, root)
     except (OSError, TypeError, ValueError, ValidationError) as error:
         raise IntakeError(f"M0 staging snapshot or image bytes failed validation: {error}") from error

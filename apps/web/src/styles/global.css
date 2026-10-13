@@ -131,6 +131,7 @@ a { color: inherit; text-decoration: none; }
 .style-chips button.is-active { border-color: var(--selection); background: var(--selection); color: var(--selection-text); }
 .reference-status { min-height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
 .reference-status > span { display: flex; align-items: center; gap: 6px; }
+.reference-coverage { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fixture-badge { padding: 3px 6px; border: 1px solid var(--border); border-radius: 3px; color: var(--faint); font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
 .status-dot { width: 6px; height: 6px; display: inline-block; flex: 0 0 auto; border-radius: 50%; background: var(--faint); }
 .status-dot--success { background: var(--success); }

@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -205,6 +205,120 @@ def migrate(path: Path) -> int:
                     COMMIT;
                     """
                 )
+            except Exception:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+        if version == 3:
+            if initial_version == 3:
+                _backup_before_upgrade(db, path, version)
+            try:
+                db.executescript(
+                    """
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE reference_runs (
+                        run_id TEXT PRIMARY KEY,
+                        target_count INTEGER NOT NULL CHECK(target_count BETWEEN 1 AND 10000),
+                        recipe_json TEXT NOT NULL,
+                        recipe_sha256 TEXT NOT NULL CHECK(length(recipe_sha256) = 64),
+                        inventory_sha256 TEXT,
+                        status TEXT NOT NULL CHECK(status IN ('inventory', 'screening', 'reviewing', 'awaiting_qualification', 'qualified', 'building', 'complete', 'blocked')),
+                        cursor_json TEXT NOT NULL,
+                        error_count INTEGER NOT NULL DEFAULT 0 CHECK(error_count >= 0),
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE TABLE reference_candidates (
+                        candidate_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES reference_runs(run_id),
+                        source_id TEXT NOT NULL,
+                        relative_path TEXT NOT NULL,
+                        source_sha256 TEXT NOT NULL CHECK(length(source_sha256) = 64),
+                        pixel_sha256 TEXT CHECK(pixel_sha256 IS NULL OR length(pixel_sha256) = 64),
+                        perceptual_hash TEXT,
+                        byte_length INTEGER NOT NULL CHECK(byte_length > 0 AND byte_length <= 52428800),
+                        media_type TEXT NOT NULL,
+                        width INTEGER NOT NULL CHECK(width > 0),
+                        height INTEGER NOT NULL CHECK(height > 0),
+                        work_id TEXT,
+                        clip_id TEXT,
+                        parent_candidate_id TEXT REFERENCES reference_candidates(candidate_id),
+                        status TEXT NOT NULL CHECK(status IN ('discovered', 'screened', 'selected', 'reviewed', 'accepted', 'rejected', 'deferred', 'exact_duplicate', 'near_duplicate', 'error')),
+                        revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+                        metadata_json TEXT NOT NULL,
+                        UNIQUE(run_id, source_id, relative_path)
+                    );
+                    CREATE INDEX reference_candidate_stage ON reference_candidates(run_id, status, source_id, work_id);
+                    CREATE INDEX reference_candidate_hash ON reference_candidates(run_id, source_sha256, pixel_sha256);
+                    CREATE TABLE reference_reviews (
+                        review_id TEXT PRIMARY KEY,
+                        candidate_id TEXT NOT NULL REFERENCES reference_candidates(candidate_id),
+                        reviewed_revision INTEGER NOT NULL CHECK(reviewed_revision >= 0),
+                        origin TEXT NOT NULL CHECK(origin IN ('human', 'assistant', 'local_model')),
+                        reviewer_id TEXT NOT NULL,
+                        profile_id TEXT,
+                        model_sha256 TEXT,
+                        runtime_sha256 TEXT,
+                        prompt_version TEXT NOT NULL,
+                        rubric_version TEXT NOT NULL,
+                        run_id TEXT NOT NULL REFERENCES reference_runs(run_id),
+                        image_sha256 TEXT NOT NULL CHECK(length(image_sha256) = 64),
+                        evidence_json TEXT NOT NULL,
+                        decision_json TEXT NOT NULL,
+                        inference_ms REAL CHECK(inference_ms IS NULL OR inference_ms >= 0),
+                        created_at TEXT NOT NULL,
+                        UNIQUE(candidate_id, reviewed_revision, origin, profile_id, prompt_version, rubric_version)
+                    );
+                    CREATE INDEX reference_review_candidate ON reference_reviews(candidate_id, created_at);
+                    CREATE TABLE reference_pairs (
+                        pair_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES reference_runs(run_id),
+                        left_candidate_id TEXT NOT NULL REFERENCES reference_candidates(candidate_id),
+                        right_candidate_id TEXT NOT NULL REFERENCES reference_candidates(candidate_id),
+                        left_image_sha256 TEXT NOT NULL CHECK(length(left_image_sha256) = 64),
+                        right_image_sha256 TEXT NOT NULL CHECK(length(right_image_sha256) = 64),
+                        state TEXT NOT NULL CHECK(state IN ('proposed', 'same', 'distinct', 'uncertain')),
+                        evidence_json TEXT NOT NULL,
+                        reviewer_id TEXT,
+                        created_at TEXT NOT NULL,
+                        CHECK(left_candidate_id < right_candidate_id),
+                        UNIQUE(run_id, left_candidate_id, right_candidate_id)
+                    );
+                    CREATE TABLE reference_errors (
+                        error_id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES reference_runs(run_id),
+                        candidate_id TEXT REFERENCES reference_candidates(candidate_id),
+                        stage TEXT NOT NULL,
+                        error_code TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        retryable INTEGER NOT NULL CHECK(retryable IN (0, 1)),
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE TABLE reference_embedding_cache (
+                        cache_key TEXT PRIMARY KEY CHECK(length(cache_key) = 64),
+                        image_sha256 TEXT NOT NULL CHECK(length(image_sha256) = 64),
+                        encoder_sha256 TEXT NOT NULL CHECK(length(encoder_sha256) = 64),
+                        preprocessing_version TEXT NOT NULL,
+                        implementation_sha256 TEXT NOT NULL CHECK(length(implementation_sha256) = 64),
+                        vector_path TEXT NOT NULL,
+                        vector_sha256 TEXT NOT NULL CHECK(length(vector_sha256) = 64),
+                        dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE TABLE reference_build_history (
+                        build_id TEXT PRIMARY KEY,
+                        manifest_sha256 TEXT NOT NULL CHECK(length(manifest_sha256) = 64),
+                        state TEXT NOT NULL CHECK(state IN ('staging', 'validated', 'active', 'retired', 'failed')),
+                        previous_build_id TEXT,
+                        catalog_path TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        metadata_json TEXT NOT NULL
+                    );
+                    PRAGMA user_version = 4;
+                    COMMIT;
+                    """
+                )
+                version = 4
             except Exception:
                 if db.in_transaction:
                     db.execute("ROLLBACK")

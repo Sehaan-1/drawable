@@ -51,6 +51,45 @@ class SnapshotPermissionsV1(StrictModel):
     cloud_processing: bool = False
 
 
+class ReviewProvenanceV1(StrictModel):
+    """Who reviewed these bytes, and which immutable evidence supported the decision."""
+
+    schema_version: Literal[1] = 1
+    origin: Literal["human", "assistant", "local_model", "unspecified"]
+    reviewer_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{3,120}$")
+    evidence: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=24)
+    profile_id: str | None = Field(default=None, max_length=120)
+    model_id: str | None = Field(default=None, max_length=160)
+    model_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN.pattern)
+    runtime_id: str | None = Field(default=None, max_length=120)
+    runtime_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN.pattern)
+    prompt_version: str = Field(min_length=1, max_length=120)
+    rubric_version: str = Field(min_length=1, max_length=120)
+    run_id: str = Field(min_length=1, max_length=120)
+    image_sha256: str = Field(pattern=SHA256_PATTERN.pattern)
+    reviewed_revision: int = Field(ge=0)
+    inference_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def local_model_is_fully_bound(self) -> ReviewProvenanceV1:
+        if self.origin == "local_model" and any(
+            value is None
+            for value in (
+                self.profile_id,
+                self.model_id,
+                self.model_sha256,
+                self.runtime_id,
+                self.runtime_sha256,
+            )
+        ):
+            raise ValueError("Local-model reviews must bind the qualified profile and artifact hashes")
+        if self.origin == "assistant" and not self.evidence:
+            raise ValueError("Assistant reviews must record evidence for the visual decision")
+        if self.origin == "unspecified" and not self.evidence.get("legacy_record"):
+            raise ValueError("Unspecified review origin is reserved for preserved legacy records")
+        return self
+
+
 class SnapshotAssetV1(StrictModel):
     asset_id: str = Field(min_length=1, max_length=200)
     source_id: str = Field(min_length=1, max_length=120)
@@ -80,6 +119,7 @@ class SnapshotAssetV1(StrictModel):
     asset_revision: int = Field(ge=0)
     review_id: str = Field(min_length=1, max_length=100)
     reviewer_id: str = Field(pattern=r"^[A-Za-z0-9_-]{3,80}$")
+    review_provenance: ReviewProvenanceV1 | None = None
 
     @field_validator("relative_path")
     @classmethod
@@ -114,6 +154,80 @@ class SnapshotAssetV1(StrictModel):
         return self
 
 
+class PrototypeGalleryItemV2(StrictModel):
+    """A prototype-serving item, deliberately independent of research split assignment."""
+
+    asset_id: str = Field(min_length=1, max_length=200)
+    source_id: str = Field(min_length=1, max_length=120)
+    source_work_id: str | None = Field(default=None, max_length=200)
+    relative_path: str = Field(min_length=1, max_length=1000)
+    sha256: str = Field(pattern=SHA256_PATTERN.pattern)
+    thumbnail_path: str | None = Field(default=None, min_length=1, max_length=1000)
+    thumbnail_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN.pattern)
+    byte_length: int = Field(gt=0, le=50 * 1024 * 1024)
+    media_type: Literal["image/png", "image/jpeg", "image/webp"]
+    width: int = Field(ge=1, le=100_000)
+    height: int = Field(ge=1, le=100_000)
+    source_family: str | None = Field(default=None, max_length=200)
+    source_identity_verified: bool = False
+    upstream_partition: Literal["source_train", "not_applicable"] = "not_applicable"
+    research_family_id: str | None = Field(default=None, max_length=200)
+    authorization_basis: Literal["owner-local-educational-prototype"]
+    review_status: Literal["approved"]
+    gallery_eligible_candidate: Literal[True]
+    license_id: str = Field(min_length=1, max_length=200)
+    attribution: str = Field(min_length=1, max_length=2000)
+    permissions: SnapshotPermissionsV1
+    labels: SnapshotLabelsV1
+    parent_asset_id: str | None = Field(default=None, max_length=200)
+    root_asset_id: str = Field(min_length=1, max_length=200)
+    clip_id: str | None = Field(default=None, max_length=240)
+    crop_rectangle: dict[str, object] | None = None
+    asset_revision: int = Field(ge=0)
+    review_id: str = Field(min_length=1, max_length=100)
+    reviewer_id: str = Field(pattern=r"^[A-Za-z0-9_.-]{3,120}$")
+    review_provenance: ReviewProvenanceV1
+
+    @field_validator("relative_path", "thumbnail_path")
+    @classmethod
+    def relative_paths_only(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = PurePosixPath(value)
+        if parsed.is_absolute() or ".." in parsed.parts or "\\" in value or "\x00" in value:
+            raise ValueError("Catalog asset paths must be normalized and relative to the private data root")
+        return value
+
+    @model_validator(mode="after")
+    def local_catalog_only(self) -> PrototypeGalleryItemV2:
+        if not self.permissions.local_display or any(
+            getattr(self.permissions, key)
+            for key in (
+                "training",
+                "trace",
+                "export",
+                "public_demo",
+                "redistribute",
+                "cloud_storage",
+                "cloud_processing",
+            )
+        ):
+            raise ValueError("Prototype gallery permissions must remain local-display only")
+        if self.source_id == "emoreccom-panels" and self.upstream_partition != "source_train":
+            raise ValueError("Only allowlisted EmoRecCom training panels can enter a prototype gallery")
+        if self.research_family_id is not None:
+            raise ValueError("Prototype gallery construction does not assign research family splits")
+        if bool(self.thumbnail_path) != bool(self.thumbnail_sha256):
+            raise ValueError("Thumbnail path and checksum must be present together")
+        if self.review_provenance.image_sha256 != self.sha256:
+            raise ValueError("Review provenance is stale against cataloged image bytes")
+        if self.review_provenance.reviewed_revision != self.asset_revision:
+            raise ValueError("Review provenance is stale against the reviewed asset revision")
+        if self.labels.sfw != "safe" or self.labels.quality < 2 or not self.labels.character_useful:
+            raise ValueError("Prototype gallery items must meet the reviewed usefulness floor")
+        return self
+
+
 class CurationSnapshotV1(StrictModel):
     schema_version: Literal[1] = 1
     snapshot_kind: Literal["drawable-curation-snapshot"] = "drawable-curation-snapshot"
@@ -122,7 +236,7 @@ class CurationSnapshotV1(StrictModel):
     created_by: str = Field(pattern=r"^[A-Za-z0-9_-]{3,80}$")
     viewpoint_rubric_id: Literal["drawable-viewpoint-v1"] = "drawable-viewpoint-v1"
     viewpoint_rubric_sha256: str = Field(pattern=SHA256_PATTERN.pattern)
-    items: list[SnapshotAssetV1] = Field(min_length=1)
+    items: list[SnapshotAssetV1] = Field(min_length=1, max_length=10_000)
     view_matches: list[ViewMatchReviewV1] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -149,7 +263,31 @@ class CurationSnapshotV1(StrictModel):
         return self
 
 
-def validate_curation_snapshot_files(snapshot: CurationSnapshotV1, data_root: Path) -> dict[str, int | str]:
+class PrototypeGalleryCatalogV2(StrictModel):
+    """Scalable prototype catalog. V1 curation snapshots and search builds remain readable."""
+
+    schema_version: Literal[2] = 2
+    catalog_kind: Literal["drawable-prototype-gallery"] = "drawable-prototype-gallery"
+    catalog_id: str = Field(pattern=r"^gallery-[0-9a-f]{24}$")
+    purpose: Literal["local-educational-prototype"]
+    created_at: datetime
+    created_by: str = Field(pattern=r"^[A-Za-z0-9_-]{3,80}$")
+    availability_revision: int = Field(ge=0)
+    items: list[PrototypeGalleryItemV2] = Field(min_length=1, max_length=10_000)
+
+    @model_validator(mode="after")
+    def validate_catalog(self) -> PrototypeGalleryCatalogV2:
+        if self.created_at.utcoffset() is None or self.created_at > datetime.now(UTC):
+            raise ValueError("Gallery catalog time must be timezone-aware and not in the future")
+        ids = [item.asset_id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Gallery catalog contains duplicate asset IDs")
+        return self
+
+
+def validate_curation_snapshot_files(
+    snapshot: CurationSnapshotV1 | PrototypeGalleryCatalogV2, data_root: Path
+) -> dict[str, int | str]:
     root = data_root.resolve(strict=True)
     verified = 0
     for item in snapshot.items:
@@ -181,4 +319,18 @@ def validate_curation_snapshot_files(snapshot: CurationSnapshotV1, data_root: Pa
         if digest.hexdigest() != item.sha256:
             raise ValueError(f"Snapshot asset {item.asset_id} checksum changed")
         verified += 1
+        if isinstance(snapshot, PrototypeGalleryCatalogV2) and item.thumbnail_path:
+            thumbnail_relative = PurePosixPath(item.thumbnail_path)
+            thumbnail_path = root.joinpath(*thumbnail_relative.parts)
+            cursor = root
+            for part in thumbnail_relative.parts:
+                cursor = cursor / part
+                if cursor.is_symlink():
+                    raise ValueError(f"Thumbnail for {item.asset_id} traverses a symbolic link")
+            resolved_thumbnail = thumbnail_path.resolve(strict=True)
+            if root not in resolved_thumbnail.parents or not resolved_thumbnail.is_file():
+                raise ValueError(f"Thumbnail for {item.asset_id} is missing or outside private storage")
+            thumbnail_digest = hashlib.sha256(resolved_thumbnail.read_bytes()).hexdigest()
+            if thumbnail_digest != item.thumbnail_sha256:
+                raise ValueError(f"Thumbnail for {item.asset_id} checksum changed")
     return {"status": "verified", "items": verified, "training_started": False, "data_uploaded": False}

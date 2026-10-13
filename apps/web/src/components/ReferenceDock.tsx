@@ -22,6 +22,11 @@ import type { ReferenceAsset, ReferenceGroup } from '../lib/types'
 import { isRealSearchMode } from '../services/frontendServices'
 
 const styleOptions = ['Manga / anime', 'Western ink', 'Realistic', 'Cartoon', 'Gesture']
+const scopeLabels: Record<string, string> = {
+  eye: 'Eyes', eyebrow: 'Eyebrows', mouth: 'Mouths', face_head: 'Heads', hair: 'Hair',
+  hand: 'Hands', foot: 'Feet', upper_body_clothing: 'Upper bodies', full_body: 'Full bodies',
+  multi_character: 'Multiple characters',
+}
 
 function ReferenceCard({ asset }: { asset: ReferenceAsset }) {
   const selected = useSearchStore((state) => state.selectedAsset?.id === asset.id)
@@ -33,7 +38,7 @@ function ReferenceCard({ asset }: { asset: ReferenceAsset }) {
   return (
     <article className={`reference-card ${selected ? 'is-selected' : ''}`}>
       <button className="reference-card__media" onClick={() => setSelectedAsset(asset)} aria-label={`View ${asset.title}`}>
-        <img src={asset.imageUrl} alt={asset.title} draggable={false} />
+        <img src={asset.imageUrl} alt={asset.title} draggable={false} loading="lazy" decoding="async" />
         <span className="match-badge">{asset.match}</span>
       </button>
       <div className="reference-card__meta">
@@ -82,7 +87,7 @@ function ReferenceDetail({ asset }: { asset: ReferenceAsset }) {
         <div><span className="dock-eyebrow">Selected reference</span><h2>{asset.title}</h2></div>
         <IconButton label="Close selected reference" onClick={() => setSelectedAsset(null)}><X size={17} /></IconButton>
       </header>
-      <div className="reference-detail__media"><img src={asset.imageUrl} alt={asset.title} /></div>
+      <div className="reference-detail__media"><img src={asset.imageUrl} alt={asset.title} decoding="async" /></div>
       <dl>
         <div><dt>Style</dt><dd>{asset.style}</dd></div>
         <div><dt>Scope</dt><dd>{asset.scope}</dd></div>
@@ -118,7 +123,7 @@ export function ReferenceDock() {
 
   const groups = useMemo(() => {
     if (!response) return []
-    if (!selectedStyle || response.mode !== 'confident') return response.groups
+    if (!selectedStyle) return response.groups
     const best = response.groups.find((group) => group.id === 'best')
     const rest = response.groups.filter((group) => group.id !== 'best')
     rest.sort((left, right) => Number(right.title === selectedStyle) - Number(left.title === selectedStyle))
@@ -136,6 +141,10 @@ export function ReferenceDock() {
   }
 
   const empty = !response || response.mode === 'empty'
+  const scopeCoverage = Object.entries(response?.scopeCoverage ?? {})
+    .map(([scope, count]) => `${scopeLabels[scope] ?? scope.replaceAll('_', ' ')}: ${count}`)
+  const styleCoverage = Object.entries(response?.styleCoverage ?? {})
+    .map(([style, count]) => `${style.replaceAll('_', ' ')}: ${count}`)
   return (
     <aside className={`reference-dock ${selectedAsset ? 'has-selection' : ''}`}>
       <div className="reference-dock__toolbar">
@@ -158,6 +167,7 @@ export function ReferenceDock() {
       </div>
       <div className="reference-status" role="status">
         <span><StatusDot tone={error ? 'error' : loading ? 'warning' : response?.mode === 'confident' ? 'success' : 'neutral'} />{error ? 'Search interrupted' : loading ? 'Looking at your drawing…' : response?.interpretation ?? 'Waiting for marks'}</span>
+        {realMode && response?.gallerySize !== undefined ? <span className="reference-coverage" title={`Scope coverage — ${scopeCoverage.join(' · ')}. Style coverage — ${styleCoverage.join(' · ')}.`}>{response.gallerySize} references · {scopeCoverage.length} scopes · {styleCoverage.length} styles</span> : null}
         <span className="fixture-badge">{realMode ? 'Local · experimental' : 'Fixture'}</span>
       </div>
       {selectedAsset ? <ReferenceDetail asset={selectedAsset} /> : null}

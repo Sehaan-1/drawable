@@ -1,8 +1,9 @@
 # drawable
 
-A line-art reference copilot for character artists.
-
+A line-art reference engine for character artists.
+<!--
 The authoritative implementation and research roadmap is [docs/deep-draw.md](docs/deep-draw.md). It distinguishes verified frontend progress from remaining pilot, backend, data, ML, and validation work, and records which local systems are still review-gated.
+-->
 
 ## Run the frontend
 
@@ -86,15 +87,17 @@ uv run --package drawable-api drawable db migrate
 uv run --package drawable-api pytest services/api/tests
 npm run api:contracts:check
 ```
-
+<!--
 The source audit is read-only. On 2026-10-03 it found all downloaded content only as extracted trees: the three official archives and receipts are absent, so provenance remains unverified. Dataset paths, terms snapshots, manifests, receipts, recordings, and future model artifacts stay outside Git. Explicit acquisition commands download only from declared official URLs; manifest cataloging keeps assets quarantined, and the local curation API is disabled unless `CURATION_MODE=1` is set. Real search remains unavailable until approved artifacts, gallery and API integration exist.
+-->
 
 `drawable data sample --recipe pilot-v1` writes an immutable candidate-only source-yield sample under the private data root. It will currently report a blocked, empty sample because the official archives/receipts, reviewed rights, and authoritative book mapping are not yet verified. It never approves assets or activates a gallery.
 
 `drawable readiness report` accepts a cumulative `--stage` of `m0`, `m1`, `m2`, or `m3` and does not probe hardware. API and ML tools share one hash-bound evidence ledger. For a prepared gate report, `drawable-ml readiness attest --gate <gate-id> --report <private-report.json> --reviewer-id owner-local --review-note "<review note>" --output reports/readiness-ledger-v1.json` records the explicit owner review; mere file presence never satisfies a gate. `--stage training_preparation` (also accepted as `training`) includes M0–M3 plus model, manifest, cloud-bundle and recipe review, but cannot authorize training. The M0 effort gate requires a measured five-hour checkpoint and enforces a ten-hour annotation stop.
-
+<!-- 
 Your local GPU is currently disabled. The default preflight does not probe it or infer a driver failure. The optional [Colab runtime preflight](notebooks/colab-runtime-preflight.ipynb) checks only the manually selected Colab VM and a tiny tensor operation; it does not load a retrieval model, upload data, or train. No training has been run, and there is no training-execution command. If cloud training is separately authorized in a future phase, model artifacts are intended to return to the local application for local inference; Colab is not the live application server. Local CPU inference must be measured until the local GPU is enabled and certified.
-
+-->
+<!--
 ## Training preparation (no training)
 
 ML preparation lives in an independent Python 3.11 project and lockfile, separate from the API's dependencies. These commands validate local evidence and data, or create a manual-transfer bundle only after each rights and cloud-consent gate passes. They never upload anything or start training:
@@ -120,3 +123,4 @@ After a future, separately approved manual transfer, `drawable-ml data inspect-b
 At the current repository state these checks are expected to report blockers: the official dataset archives and rights approvals are not verified, model artifacts/terms are pending, and M0/M1/pilot/full-data evidence is incomplete. The report is hash-bound and explicitly states that authorization is still false. A person must separately review any data transfer; no automatic Google Drive or Colab upload is provided. The free Colab runtime is optional and manually selected; it may disconnect or expire, so it is not a background training service. Do not leave a run unattended or assume the VM or its local files persist after disconnection.
 
 The package has loss/model/checkpoint building blocks, but no optimizer, backward-pass, training, resume, calibration, or weight-update entry point. `drawable-ml train prepare` is a non-executing readiness report, not a training command. The separate educational prototype search path has loaded the exact frozen CPU weights and measured forward passes; no backward pass, training, or formal research qualification is claimed.
+-->
