@@ -36,7 +36,7 @@ test('support routes render their fixture shells', async ({ page }) => {
   await page.goto('/benchmark')
   await expect(page.getByText('Anonymized pool')).toBeVisible()
   await page.goto('/setup')
-  await expect(page.getByText('drawable can run without a backend')).toBeVisible()
+  await expect(page.getByText(/Source and model review|Prepare a real reference review/i)).toBeVisible()
 })
 
 test('records only an explicitly consented local sequence', async ({ page }) => {

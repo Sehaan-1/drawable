@@ -17,3 +17,5 @@ test-results/
 *.tsbuildinfo
 *.log
 .DS_Store
+.claude/
+.opencode/
