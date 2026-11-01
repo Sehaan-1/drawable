@@ -1,10 +1,30 @@
-import type { DrawingDocument } from '../lib/types'
+import type { DrawingDocument, DrawingOperation } from '../lib/types'
 import { loadRasterAsset } from './persistence'
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>()
 
-function referencedAssetIds(document: DrawingDocument) {
-  return [...new Set(document.layers.flatMap((layer) => layer.operations.flatMap((operation) => operation.kind === 'raster' ? [operation.assetId] : [])))]
+/**
+ * Per-operations-array cache: committing a stroke replaces the operations array of
+ * one layer only, so the untouched layers reuse their cached ID lists instead of
+ * rescanning every operation in the document. WeakMap keys let released arrays be
+ * collected once the document and history no longer reference them.
+ */
+const layerAssetCache = new WeakMap<DrawingOperation[], string[]>()
+
+function assetsForOperations(operations: DrawingOperation[]): string[] {
+  const cached = layerAssetCache.get(operations)
+  if (cached) return cached
+  const ids = [...new Set(operations.flatMap((operation) => operation.kind === 'raster' ? [operation.assetId] : []))]
+  layerAssetCache.set(operations, ids)
+  return ids
+}
+
+export function referencedAssetIds(document: DrawingDocument) {
+  const ids = new Set<string>()
+  for (const layer of document.layers) {
+    for (const assetId of assetsForOperations(layer.operations)) ids.add(assetId)
+  }
+  return [...ids]
 }
 
 function decodeBlob(blob: Blob) {

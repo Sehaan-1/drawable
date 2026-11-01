@@ -27,14 +27,17 @@ interface PinchGesture {
 // Canvas identity is checked (not just layer ID) so a new DOM element forces a full rebuild.
 interface RenderedLayerState {
   canvas: HTMLCanvasElement
-  operationIds: string[]
+  operations: DrawingOperation[]
 }
 
 /**
  * Returns true when the previous render is a prefix of the new operation list
  * AND the canvas element is the same DOM node.
- * Deliberately uses stable IDs instead of object identity because structuredClone()
- * recreates every operation object on each store update.
+ *
+ * Compares operation object references: the store uses structural sharing, so an
+ * untouched operation keeps its identity across store updates (see documentHistory).
+ * That makes this check allocation-free, unlike building per-layer ID arrays.
+ * Relies on operations being immutable after commit.
  */
 function isAppendOnly(
   previous: RenderedLayerState | undefined,
@@ -42,8 +45,8 @@ function isAppendOnly(
   operations: DrawingOperation[],
 ): previous is RenderedLayerState {
   if (!previous || previous.canvas !== canvas) return false
-  if (previous.operationIds.length > operations.length) return false
-  return previous.operationIds.every((id, index) => operations[index]?.id === id)
+  if (previous.operations.length > operations.length) return false
+  return previous.operations.every((operation, index) => operations[index] === operation)
 }
 
 export function CanvasStage({ searchIntegration = 'fixture', readOnly = false }: { searchIntegration?: 'fixture' | 'disabled'; readOnly?: boolean }) {
@@ -144,7 +147,7 @@ export function CanvasStage({ searchIntegration = 'fixture', readOnly = false }:
 
         if (isAppendOnly(previous, canvas, layer.operations)) {
           // Pure append path — draw only the new suffix, in document order.
-          const newOperations = layer.operations.slice(previous.operationIds.length)
+          const newOperations = layer.operations.slice(previous.operations.length)
           for (const operation of newOperations) {
             renderDrawingOperation(context, operation, rasterAssets)
           }
@@ -156,7 +159,7 @@ export function CanvasStage({ searchIntegration = 'fixture', readOnly = false }:
         // Update baseline AFTER the draw so it describes pixels actually painted.
         renderedLayers.current.set(layer.id, {
           canvas,
-          operationIds: layer.operations.map((operation) => operation.id),
+          operations: layer.operations,
         })
       }
     })

@@ -330,6 +330,9 @@ describe('committed-layer rendering', () => {
     // Invariant 5: Metadata-only updates do not paint operations or rebuild layers.
     expect(vi.mocked(renderLayer)).toHaveBeenCalledTimes(0)
     expect(vi.mocked(renderDrawingOperation)).toHaveBeenCalledTimes(0)
+    // Structural sharing keeps document.layers identity, so the render effect
+    // (which starts by resolving raster images) does not run again at all.
+    expect(vi.mocked(resolveRasterImages)).toHaveBeenCalledTimes(1)
   })
 
   it('A6: undo triggers a full rebuild of the affected layer, not an append', async () => {
@@ -486,6 +489,41 @@ describe('committed-layer rendering', () => {
     // Nothing should have been painted by the stale completion.
     expect(vi.mocked(renderLayer)).toHaveBeenCalledTimes(0)
     expect(vi.mocked(renderDrawingOperation)).toHaveBeenCalledTimes(0)
+  })
+
+  it('A11: committing to layer-1 leaves the sibling layers untouched', async () => {
+    const store = createDocumentStore()
+    const d1 = makeDeferred()
+    vi.mocked(resolveRasterImages).mockReturnValueOnce(d1.promise)
+    renderWithStore(store)
+    await act(async () => { d1.resolve(new Map()) })
+
+    vi.mocked(renderLayer).mockClear()
+    vi.mocked(renderDrawingOperation).mockClear()
+
+    const op = {
+      id: 'stroke-sibling', kind: 'stroke' as const, tool: 'pressure' as const,
+      points: [{ x: 5, y: 5, pressure: 0.5, time: 0 }], size: 12,
+      smoothing: 0.1, streamline: 0, simulatePressure: false, createdAt: 1,
+    }
+    const d2 = makeDeferred()
+    vi.mocked(resolveRasterImages).mockReturnValueOnce(d2.promise)
+    act(() => { store.getState().commitOperation(op) })
+    await act(async () => { d2.resolve(new Map()) })
+
+    const layers = store.getState().document.layers
+    const layer1Canvas = document.querySelector('canvas[data-layer-id="layer-1"]') as HTMLCanvasElement
+    const expectedContext = contextMocks.get(layer1Canvas)
+
+    expect(vi.mocked(renderDrawingOperation)).toHaveBeenCalledTimes(1)
+    for (const call of vi.mocked(renderDrawingOperation).mock.calls) {
+      expect(call[0]).toBe(expectedContext)
+    }
+    // Sibling layers kept their reference, so nothing was redrawn on them.
+    expect(vi.mocked(renderLayer)).toHaveBeenCalledTimes(0)
+    expect(layers[1]?.operations).toHaveLength(0)
+    expect(layers[2]?.operations).toHaveLength(0)
+    expect(layers[3]?.operations).toHaveLength(0)
   })
 })
 
